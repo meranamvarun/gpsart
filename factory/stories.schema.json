@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["version", "stories"],
+  "properties": {
+    "version": { "const": 1 },
+    "stories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "stage", "priority", "roles", "dependsOn", "status", "acceptanceEvidence", "qa"],
+        "properties": {
+          "id": { "pattern": "^TS-[0-9]{3}$" },
+          "status": { "enum": ["todo", "claimed", "in_review", "done", "blocked"] },
+          "roles": { "type": "array", "items": { "enum": ["coordinator", "dev", "qa", "maintainer"] } },
+          "dependsOn": { "type": "array", "items": { "pattern": "^TS-[0-9]{3}$" } }
+        }
+      }
+    }
+  }
+}

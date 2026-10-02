@@ -27,4 +27,8 @@ This is a frontend design prototype. The map, geometry, distances, route generat
 
 The product epic is in `docs/problem-statement.md`. The implementation architecture and prioritized engineering backlog are in `docs/technical-stories.md`. Google login screens are an additional design requirement; guest planning remains available.
 
+## Multi-agent delivery
+
+The project is prepared for parallel, test-driven delivery through the file-based code factory in [`factory/`](factory/README.md). Every agent must follow [`AGENTS.md`](AGENTS.md). Start work with `npm run factory:next -- --role dev`; inspect the delivery graph with `npm run factory:status`; run `npm run factory:verify` before review. The harness coordinates the documented technical stories, blocks work whose prerequisites are incomplete, requires independent QA evidence for completion, and turns confirmed defects into tracked preventive checks.
+
 Validation: production build and hosting-worker checks pass. Visual QA against the selected concept has not been completed.

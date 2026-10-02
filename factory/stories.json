@@ -1,0 +1,32 @@
+{
+  "$schema": "./stories.schema.json",
+  "version": 1,
+  "stories": [
+    { "id": "TS-001", "title": "Bootstrap the Rust application workspace", "stage": 0, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": [], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-002", "title": "Establish PostgreSQL/PostGIS persistence and migrations", "stage": 0, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-001"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-003", "title": "Convert prototype shell to native TypeScript modules", "stage": 0, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": [], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-101", "title": "Define and validate versioned design templates", "stage": 1, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-001"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-102", "title": "Model activity profiles and conservative access policy", "stage": 1, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-001"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-103", "title": "Implement coverage and routable-start resolution", "stage": 1, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-002", "TS-102"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-104", "title": "Prove routing-adapter capability", "stage": 1, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-102"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-105", "title": "Generate a legal heart-route candidate", "stage": 1, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-101", "TS-102", "TS-103", "TS-104"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-106", "title": "Generate a continuous curated-text candidate", "stage": 1, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-105"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-107", "title": "Score, deduplicate, and benchmark candidates", "stage": 1, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-105", "TS-106"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-201", "title": "Create private guest sessions and request authorization", "stage": 2, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-001", "TS-002"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-202", "title": "Implement idempotent route-job creation and durable worker leases", "stage": 2, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-002", "TS-103", "TS-201"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-203", "title": "Expose truthful job state and classified outcomes", "stage": 2, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-202"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-204", "title": "Connect native planner to start resolution and jobs", "stage": 2, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-003", "TS-103", "TS-201", "TS-202", "TS-203"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-205", "title": "Store and serve immutable route-candidate snapshots", "stage": 2, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-107", "TS-202"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-206", "title": "Render real comparison and route details", "stage": 2, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-003", "TS-205"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-207", "title": "Export exact candidate as GPX 1.1", "stage": 2, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-205"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-301", "title": "Publish curated first-release catalogue", "stage": 3, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-101", "TS-107"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-302", "title": "Complete no-match, error, and refinement flows", "stage": 3, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-203", "TS-204"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-303", "title": "Save complete route snapshots on device", "stage": 3, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-003", "TS-205", "TS-207"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-304", "title": "Meet responsive and accessible journey requirements", "stage": 3, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-204", "TS-206", "TS-303"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-305", "title": "Remove prototype-only success paths", "stage": 3, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-301", "TS-302", "TS-303", "TS-304"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-401", "title": "Enforce workload, retention, and privacy limits", "stage": 4, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-202", "TS-205"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-402", "title": "Add privacy-preserving observability", "stage": 4, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-202", "TS-401"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-403", "title": "Verify recovery and pilot performance", "stage": 4, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-107", "TS-202", "TS-402"], "status": "todo", "acceptanceEvidence": [], "qa": null },
+    { "id": "TS-404", "title": "Assemble first-release verification evidence", "stage": 4, "priority": "P0", "roles": ["dev", "qa"], "dependsOn": ["TS-301", "TS-302", "TS-303", "TS-304", "TS-305", "TS-401", "TS-402", "TS-403"], "status": "todo", "acceptanceEvidence": [], "qa": null }
+  ]
+}
