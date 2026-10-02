@@ -77,9 +77,10 @@ async function main() {
   errors.push(...await openIncidents());
   if (errors.length) throw new Error(`Factory validation failed:\n${errors.map((e) => `- ${e}`).join("\n")}`);
   const factoryTestCode = await run("npm", ["run", "test:factory"]);
+  const unitTestCode = await run("npm", ["run", "test:unit"]);
   const testCode = await run("npm", ["run", "test:sites"]);
   const buildCode = await run("npm", ["run", "build"]);
-  if (factoryTestCode || testCode || buildCode) process.exitCode = 1;
+  if (factoryTestCode || unitTestCode || testCode || buildCode) process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
