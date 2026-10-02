@@ -6,6 +6,7 @@ import '@phosphor-icons/web/regular';
 import 'leaflet/dist/leaflet.css';
 import './styles.css';
 import L from 'leaflet';
+import { shapePreviews, textPreviews } from './app/catalogue.ts';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -13,8 +14,8 @@ const icon=n=>`<i class="ph ph-${n}" aria-hidden="true"></i>`;
 const state={start:'Koramangala, Bengaluru',activity:'Cycling',design:'Heart',category:'Shapes',distance:15,tolerance:10,loop:true,selected:0,request:null,candidates:[],stage:0,user:false,saved:[],activeSaved:null};
 try{state.saved=JSON.parse(localStorage.getItem('gpsart-design-routes')||'[]');if(!Array.isArray(state.saved))state.saved=[]}catch{}
 let map,layer,timers=[],page,zoomed=false;
-const shapes=[['Heart','heart','Easy'],['Circle','circle','Easy'],['Triangle','triangle','Easy'],['Star','star','Complex'],['Square','square','Easy']];
-const texts=[['HI',null,'Moderate'],['GO',null,'Moderate'],['RUN',null,'Complex']];
+const shapes=shapePreviews.map(({name,icon,complexity})=>[name,icon,complexity]);
+const texts=textPreviews.map(({name,icon,complexity})=>[name,icon,complexity]);
 const baseHeart=[[160,510],[205,470],[265,405],[335,330],[400,270],[480,215],[565,185],[650,195],[740,250],[795,330],[795,390],[745,455],[690,490],[735,520],[790,580],[805,680],[780,760],[705,825],[620,840],[535,815],[445,760],[350,680],[265,610],[160,510]];
 const shapeGeometry={Heart:baseHeart,Circle:[[180,500],[220,340],[340,225],[500,185],[660,235],[780,350],[810,515],[750,690],[610,790],[440,805],[285,710],[195,565],[180,500]],Triangle:[[190,500],[780,190],[780,800],[190,500]],Square:[[230,230],[770,230],[770,770],[230,770],[230,230]],Star:[[150,500],[400,590],[400,845],[555,640],[800,710],[645,500],[800,290],[555,355],[400,150],[400,410],[150,500]],HI:[[250,250],[750,250],[500,250],[500,450],[750,450],[250,450],[250,600],[750,600],[750,720],[750,660],[250,660],[250,720]],GO:[[650,430],[720,360],[720,230],[630,170],[370,170],[270,250],[270,420],[450,420],[450,320],[450,420],[300,520],[250,600],[250,720],[350,800],[650,800],[750,710],[750,600],[650,520],[350,520],[300,520]],RUN:[[250,150],[750,150],[750,280],[650,350],[540,280],[540,150],[250,350],[250,440],[750,440],[250,440],[250,540],[750,540],[250,650],[750,650],[250,800],[750,800]]};
 const routeScreens=['results','details','no-match','error','coverage','generating'];
