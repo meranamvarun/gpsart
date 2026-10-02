@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "heart",
+  "version": 1,
+  "status": "published",
+  "category": "shape",
+  "name": "Heart",
+  "strokes": [{
+    "id": "outline",
+    "direction": "either",
+    "points": [{"x":0.50,"y":0.92},{"x":0.12,"y":0.55},{"x":0.12,"y":0.28},{"x":0.28,"y":0.12},{"x":0.50,"y":0.30},{"x":0.72,"y":0.12},{"x":0.88,"y":0.28},{"x":0.88,"y":0.55},{"x":0.50,"y":0.92}]
+  }],
+  "transitions": [],
+  "orientation": {"rule":"free_rotation","min_degrees":-180.0,"max_degrees":180.0,"mirror":true,"stroke_reordering":false},
+  "bounds": {"min_scale":0.25,"max_scale":4.0,"min_aspect_ratio":0.75,"max_aspect_ratio":1.25},
+  "identifying_features": ["central indentation", "two upper lobes", "lower point"],
+  "complexity": {"max_strokes":1,"max_points":16,"hint":"simple"}
+}

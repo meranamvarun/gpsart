@@ -320,6 +320,7 @@ dependencies = [
  "async-trait",
  "axum",
  "gpsart-config",
+ "gpsart-domain",
  "gpsart-persistence",
  "http",
  "http-body-util",

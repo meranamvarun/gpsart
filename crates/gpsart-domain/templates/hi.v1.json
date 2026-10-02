@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "HI",
+  "version": 1,
+  "status": "published",
+  "category": "text",
+  "name": "HI",
+  "strokes": [
+    {"id":"h-left","direction":"forward_only","points":[{"x":0.12,"y":0.85},{"x":0.12,"y":0.15}]},
+    {"id":"h-bar","direction":"forward_only","points":[{"x":0.12,"y":0.50},{"x":0.48,"y":0.50}]},
+    {"id":"h-right","direction":"forward_only","points":[{"x":0.48,"y":0.15},{"x":0.48,"y":0.85}]},
+    {"id":"i-stem","direction":"forward_only","points":[{"x":0.78,"y":0.15},{"x":0.78,"y":0.85}]}
+  ],
+  "transitions": [
+    {"from_stroke":0,"to_stroke":1,"classification":"retrace","points":[{"x":0.12,"y":0.15},{"x":0.12,"y":0.50}]},
+    {"from_stroke":1,"to_stroke":2,"classification":"connector","points":[{"x":0.48,"y":0.50},{"x":0.48,"y":0.15}]},
+    {"from_stroke":2,"to_stroke":3,"classification":"connector","points":[{"x":0.48,"y":0.85},{"x":0.78,"y":0.15}]}
+  ],
+  "orientation": {"rule":"north_up_bounded","min_degrees":-15.0,"max_degrees":15.0,"mirror":false,"stroke_reordering":false},
+  "bounds": {"min_scale":0.25,"max_scale":4.0,"min_aspect_ratio":0.70,"max_aspect_ratio":1.30},
+  "identifying_features": ["H crossbar", "parallel H uprights", "separate I stem"],
+  "complexity": {"max_strokes":4,"max_points":16,"hint":"moderate"}
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <polyline class="stroke" data-id="h-left" points="12.00,85.00 12.00,15.00"/>
+  <polyline class="stroke" data-id="h-bar" points="12.00,50.00 48.00,50.00"/>
+  <polyline class="stroke" data-id="h-right" points="48.00,15.00 48.00,85.00"/>
+  <polyline class="stroke" data-id="i-stem" points="78.00,15.00 78.00,85.00"/>
+  <polyline class="retrace" data-from="0" data-to="1" points="12.00,15.00 12.00,50.00"/>
+  <polyline class="connector" data-from="1" data-to="2" points="48.00,50.00 48.00,15.00"/>
+  <polyline class="connector" data-from="2" data-to="3" points="48.00,85.00 78.00,15.00"/>
+</svg>

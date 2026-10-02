@@ -1,0 +1,53 @@
+openapi: 3.1.0
+info:
+  title: GPSART API
+  version: 0.1.0
+paths:
+  /api/v1/designs:
+    get:
+      summary: List published versioned design templates
+      description: Catalogue membership indicates reviewed design support, not local routing feasibility.
+      parameters:
+        - in: query
+          name: category
+          schema: { type: string, enum: [shape, text] }
+      responses:
+        '200':
+          description: Published designs only
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [designs]
+                properties:
+                  designs:
+                    type: array
+                    items: { $ref: '#/components/schemas/DesignSummary' }
+              examples:
+                text:
+                  value:
+                    designs:
+                      - id: HI
+                        version: 1
+                        status: published
+                        category: text
+                        name: HI
+                        complexity_hint: moderate
+                        preview_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">...</svg>'
+                        definition_hash: 64-lowercase-hex-characters
+        '400': { description: Unsupported category }
+components:
+  schemas:
+    DesignSummary:
+      type: object
+      additionalProperties: false
+      required: [id, version, status, category, name, complexity_hint, preview_svg, definition_hash]
+      properties:
+        id: { type: string }
+        version: { type: integer, minimum: 1 }
+        status: { const: published }
+        category: { type: string, enum: [shape, text] }
+        name: { type: string }
+        complexity_hint: { type: string }
+        preview_svg: { type: string }
+        definition_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
