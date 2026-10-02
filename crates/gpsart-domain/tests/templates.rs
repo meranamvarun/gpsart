@@ -21,8 +21,7 @@ fn rejects_invalid_template_geometry_and_rules() {
 
     let mut disconnected_join =
         serde_json::from_str::<serde_json::Value>(include_str!("../templates/hi.v1.json")).unwrap();
-    disconnected_join["transitions"][0]["points"][0] =
-        serde_json::json!({"x": 0.13, "y": 0.15});
+    disconnected_join["transitions"][0]["points"][0] = serde_json::json!({"x": 0.13, "y": 0.15});
     cases.push((
         disconnected_join,
         TemplateError::InvalidTransition { index: 0 },

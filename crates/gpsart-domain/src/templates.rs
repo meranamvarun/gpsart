@@ -296,6 +296,11 @@ fn validate(definition: &TemplateDefinition) -> Result<(), TemplateError> {
             return Err(TemplateError::InvalidTransition { index });
         }
         validate_points(&transition.points, transition.from_stroke)?;
+        if transition.points.first() != definition.strokes[index].points.last()
+            || transition.points.last() != definition.strokes[index + 1].points.first()
+        {
+            return Err(TemplateError::InvalidTransition { index });
+        }
     }
     let orientation = &definition.orientation;
     if !orientation.min_degrees.is_finite()
