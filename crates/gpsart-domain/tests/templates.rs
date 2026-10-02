@@ -154,6 +154,9 @@ fn published_hashes_and_svg_renders_are_golden() {
             _ => unreachable!(),
         };
         assert_eq!(template.definition_hash, expected_hash);
-        assert_eq!(render_svg(&template.definition), expected_svg);
+        assert_eq!(
+            render_svg(&template.definition),
+            expected_svg.replace("\r\n", "\n")
+        );
     }
 }
