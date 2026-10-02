@@ -8,5 +8,5 @@ version.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-postgres.workspace = true
+sqlx.workspace = true
 
