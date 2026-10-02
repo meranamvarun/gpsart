@@ -3,6 +3,8 @@ use std::fmt;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod templates;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivityProfile {

@@ -8,6 +8,7 @@ version.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 gpsart-config = { path = "../gpsart-config" }
+gpsart-domain = { path = "../gpsart-domain" }
 gpsart-persistence = { path = "../gpsart-persistence" }
 http.workspace = true
 serde.workspace = true

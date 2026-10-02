@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpsart.local/schemas/design-template.v1.json",
+  "title": "GPSART normalized design template v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "version", "status", "category", "name", "strokes", "transitions", "orientation", "bounds", "identifying_features", "complexity"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "version": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["draft", "published"] },
+    "category": { "enum": ["shape", "text"] },
+    "name": { "type": "string", "minLength": 1 },
+    "strokes": {
+      "type": "array", "minItems": 1, "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "direction", "points"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "direction": { "enum": ["forward_only", "either"] },
+          "points": { "$ref": "#/$defs/points" }
+        }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["from_stroke", "to_stroke", "classification", "points"],
+        "properties": {
+          "from_stroke": { "type": "integer", "minimum": 0 },
+          "to_stroke": { "type": "integer", "minimum": 1 },
+          "classification": { "enum": ["connector", "retrace"] },
+          "points": { "$ref": "#/$defs/points" }
+        }
+      }
+    },
+    "orientation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rule", "min_degrees", "max_degrees", "mirror", "stroke_reordering"],
+      "properties": {
+        "rule": { "enum": ["free_rotation", "north_up_bounded"] },
+        "min_degrees": { "type": "number" },
+        "max_degrees": { "type": "number" },
+        "mirror": { "type": "boolean" },
+        "stroke_reordering": { "type": "boolean" }
+      }
+    },
+    "bounds": {
+      "type": "object", "additionalProperties": false,
+      "required": ["min_scale", "max_scale", "min_aspect_ratio", "max_aspect_ratio"],
+      "properties": {
+        "min_scale": { "type": "number", "exclusiveMinimum": 0 },
+        "max_scale": { "type": "number", "exclusiveMinimum": 0 },
+        "min_aspect_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "max_aspect_ratio": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "identifying_features": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "complexity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["max_strokes", "max_points", "hint"],
+      "properties": {
+        "max_strokes": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "max_points": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "hint": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "allOf": [{
+    "if": { "properties": { "category": { "const": "text" } }, "required": ["category"] },
+    "then": { "properties": { "orientation": { "properties": {
+      "rule": { "const": "north_up_bounded" },
+      "min_degrees": { "minimum": -15 },
+      "max_degrees": { "maximum": 15 },
+      "mirror": { "const": false },
+      "stroke_reordering": { "const": false }
+    } } } }
+  }],
+  "$defs": {
+    "point": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y"],
+      "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } }
+    },
+    "points": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/point" } }
+  }
+}
