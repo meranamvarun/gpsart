@@ -404,7 +404,7 @@ For normal results, the route must pass the approved visual-quality threshold as
 
 ## 10 Suggested architecture
 
-Use a responsive TypeScript client with an interactive map, a Go API, a background generation worker, a small persistent job store, and an adapter around the selected routing and geocoding services. This is a proposed fit for a Go-oriented implementation; the product contract does not depend on a particular frontend framework or provider.
+Use a responsive native TypeScript client with an interactive map, a Rust API, a Rust background generation worker, PostgreSQL with PostGIS, and an adapter around the selected routing and geocoding services. This is the implementation direction selected for this repository; the product contract does not depend on a particular frontend framework or provider.
 
 For the pilot, an API process and a worker process can share one codebase and database. A database-backed job queue is sufficient if it supports claiming, leases, cancellation, retries, and terminal-state consistency. Introduce additional services only when measured load or provider integration requires them.
 
