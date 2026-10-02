@@ -1,0 +1,11 @@
+[package]
+name = "gpsart-routing"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+gpsart-domain = { path = "../gpsart-domain" }
+thiserror.workspace = true
+

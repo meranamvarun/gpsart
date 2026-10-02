@@ -76,12 +76,16 @@ async function main() {
   if (command !== "verify") throw new Error(`unknown factory command: ${command}`);
   errors.push(...await openIncidents());
   if (errors.length) throw new Error(`Factory validation failed:\n${errors.map((e) => `- ${e}`).join("\n")}`);
+  const rustFormatCode = await run("npm", ["run", "rust:fmt"]);
+  const rustClippyCode = await run("npm", ["run", "rust:clippy"]);
+  const rustTestCode = await run("npm", ["run", "rust:test"]);
+  const rustBuildCode = await run("npm", ["run", "rust:build"]);
   const factoryTestCode = await run("npm", ["run", "test:factory"]);
   const unitTestCode = await run("npm", ["run", "test:unit"]);
   const visualShellTestCode = await run("npm", ["run", "test:visual-shell"]);
   const testCode = await run("npm", ["run", "test:sites"]);
   const buildCode = await run("npm", ["run", "build"]);
-  if (factoryTestCode || unitTestCode || visualShellTestCode || testCode || buildCode) process.exitCode = 1;
+  if (rustFormatCode || rustClippyCode || rustTestCode || rustBuildCode || factoryTestCode || unitTestCode || visualShellTestCode || testCode || buildCode) process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

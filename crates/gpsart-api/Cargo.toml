@@ -1,0 +1,21 @@
+[package]
+name = "gpsart-api"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+axum.workspace = true
+gpsart-config = { path = "../gpsart-config" }
+gpsart-persistence = { path = "../gpsart-persistence" }
+http.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+serde_json.workspace = true
+tower.workspace = true
+

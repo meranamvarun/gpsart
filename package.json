@@ -10,8 +10,12 @@
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:visual-shell": "node --test tests/visual-shell-regression.test.mjs",
     "test:unit": "tsx --test tests/**/*.test.ts",
+    "rust:build": "node scripts/cargo.mjs build --workspace",
+    "rust:test": "node scripts/cargo.mjs test --workspace -- --test-threads=1",
+    "rust:fmt": "node scripts/cargo.mjs fmt --all -- --check",
+    "rust:clippy": "node scripts/cargo.mjs clippy --workspace --all-targets -- -D warnings",
     "typecheck": "tsc --noEmit",
-    "test:factory": "node --test tests/factory.test.mjs",
+    "test:factory": "node --test tests/factory.test.mjs tests/rust-workspace.test.mjs",
     "factory:status": "node scripts/factory.mjs status",
     "factory:next": "node scripts/factory.mjs next",
     "factory:verify": "node scripts/factory.mjs verify"
