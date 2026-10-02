@@ -3,6 +3,46 @@ info:
   title: GPSART API
   version: 0.1.0
 paths:
+  /api/v1/guest-sessions:
+    post:
+      summary: Issue an opaque private guest session
+      parameters:
+        - in: header
+          name: Origin
+          required: true
+          schema: { type: string, format: uri }
+      responses:
+        '201':
+          description: Session issued. The credential is returned only as a Secure, HttpOnly, SameSite=Lax cookie.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GuestSessionPolicy' }
+              example: { expires_at: 1790995200, rotate_after: 43200 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+  /api/v1/guest-sessions/current:
+    delete:
+      summary: Revoke the current guest session
+      description: Requires the session cookie, exact Origin, CSRF cookie, and matching X-CSRF-Token.
+      responses:
+        '204': { description: Revoked }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/guest-sessions/current/rotate:
+    post:
+      summary: Atomically rotate the current guest credential
+      description: Clients rotate after the policy interval. Requires exact Origin and double-submit CSRF protection.
+      responses:
+        '200':
+          description: Previous digest revoked and replacement session issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GuestSessionPolicy' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
   /api/v1/designs:
     get:
       summary: List published versioned design templates
@@ -37,7 +77,24 @@ paths:
                         definition_hash: 64-lowercase-hex-characters
         '400': { description: Unsupported category }
 components:
+  responses:
+    Unauthenticated:
+      description: Missing, expired, or revoked session
+      content: { application/json: { example: { code: authentication_required } } }
+    Forbidden:
+      description: Origin or CSRF validation failed
+      content: { application/json: { example: { code: request_forbidden } } }
+    AuthUnavailable:
+      description: Authentication storage unavailable
+      content: { application/json: { example: { code: authentication_unavailable } } }
   schemas:
+    GuestSessionPolicy:
+      type: object
+      additionalProperties: false
+      required: [expires_at, rotate_after]
+      properties:
+        expires_at: { type: integer, minimum: 1, description: Unix timestamp in seconds }
+        rotate_after: { type: integer, minimum: 1, description: Credential rotation interval in seconds }
     DesignSummary:
       type: object
       additionalProperties: false
