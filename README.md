@@ -25,6 +25,6 @@ Shared UI code is in `src/app.js` and `src/styles.css`; image assets are in `pub
 
 This is a frontend design prototype. The map, geometry, distances, route generation and Google authentication are simulated and labelled in the UI. Sample GPX files are for testing, not navigation. Connect the real routing, geocoding and Google authentication services before production use. Signing in does not enable cloud sync; saves use browser local storage.
 
-The product epic is in `docs/problem-statement.md`. Google login screens are an additional design requirement; guest planning remains available.
+The product epic is in `docs/problem-statement.md`. The implementation architecture and prioritized engineering backlog are in `docs/technical-stories.md`. Google login screens are an additional design requirement; guest planning remains available.
 
 Validation: production build and hosting-worker checks pass. Visual QA against the selected concept has not been completed.
