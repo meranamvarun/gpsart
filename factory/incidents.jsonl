@@ -1,1 +1,2 @@
 # One JSON object per confirmed defect. Keep this header; it is ignored.
+{"id":"INC-001","story":"TS-003","rootCause":"A controller replacement introduced placeholder screens instead of retaining the existing visual shell.","prevention":"The TypeScript bootstrap remains pinned to the established shell until an equivalent screen migration has visual evidence.","preventionCheck":"npm run test:visual-shell","status":"closed"}

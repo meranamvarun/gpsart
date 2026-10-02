@@ -8,6 +8,7 @@
     "build": "npm run typecheck && vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
     "test:sites": "node --test tests/sites-worker.test.mjs",
+    "test:visual-shell": "node --test tests/visual-shell-regression.test.mjs",
     "test:unit": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:factory": "node --test tests/factory.test.mjs",
