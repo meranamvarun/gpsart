@@ -33,9 +33,11 @@ it. Conversion is representation-only: it must never simplify, snap, infer, or f
 
 ## Immutable snapshots and outcomes
 
-`planning_requests` captures the requested distance and tolerance in metres plus the complete
-route-affecting profile JSON, profile version, template ID/version, map-data version, algorithm
-version, requested pin, revision, and SHA-256 input hash. Updates are rejected. Route candidates are
+`planning_requests` captures the requested distance and tolerance in metres, the return-to-start
+preference, and the complete route-affecting profile JSON, profile version, template ID/version,
+map-data version, algorithm version, requested pin, revision, and SHA-256 input hash. Requests
+created before migration 0006 retain a null return-to-start value as explicit unknown data; new API
+submissions always persist a boolean. Updates are rejected. Route candidates are
 append-only versions per job; updates are rejected. Retention cleanup may delete the owning guest
 session and relies on cascading deletion.
 
