@@ -203,7 +203,7 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     assert_eq!(
         migration_status(&pool).await.unwrap(),
         MigrationStatus::Pending {
-            versions: vec![2, 3, 4, 5]
+            versions: vec![2, 3, 4, 5, 6]
         }
     );
     MIGRATOR
@@ -324,7 +324,17 @@ async fn job_status_migration_upgrades_populated_v4_rows_without_inventing_outco
     MIGRATOR
         .run(&pool)
         .await
-        .expect("v4 to v5 upgrade succeeds");
+        .expect("v4 to current upgrade succeeds");
+    let historical_finish: Option<bool> = sqlx::query_scalar(
+        "SELECT return_to_start FROM planning_requests WHERE id='20000000-0000-0000-0000-000000000001'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        historical_finish, None,
+        "the migration must not invent a finish preference for historical requests"
+    );
     let coordinator = PostgresJobCoordinator::new(pool.clone());
     let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
     let succeeded = coordinator
