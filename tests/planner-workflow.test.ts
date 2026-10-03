@@ -124,6 +124,27 @@ test("invalid fields and unsupported coverage never create a job", async () => {
   assert.equal(calls.filter((url) => url.endsWith("/route-jobs")).length, 0);
 });
 
+test("a route edit invalidates an older pending start confirmation", async () => {
+  const calls: string[] = [];
+  let currentRevision = 1;
+  const workflow = new PlannerWorkflow({
+    fetcher: async (url) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/starts/resolve")) return json(resolution);
+      throw new Error("stale confirmation must not reach the server");
+    },
+    storage: new MemoryStorage(), csrfToken: () => "csrf",
+    currentRevision: () => currentRevision, newIdempotencyKey: () => "key",
+    schedule: () => 1, cancelSchedule: () => undefined,
+    now: () => 1_800_000_000_000,
+  });
+  await workflow.submit(request, proposed);
+  currentRevision = 2;
+  await workflow.confirmAndStart();
+  assert.equal(workflow.snapshot.phase, "stale");
+  assert.deepEqual(calls, ["/api/v1/starts/resolve"]);
+});
+
 test("refresh resumes an owned unexpired job with ETag polling and bounded backoff", async () => {
   const storage = new MemoryStorage();
   storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
