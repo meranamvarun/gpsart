@@ -168,7 +168,7 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     assert_eq!(
         migration_status(&pool).await.unwrap(),
         MigrationStatus::Pending {
-            versions: vec![2, 3]
+            versions: vec![2, 3, 4]
         }
     );
     MIGRATOR
