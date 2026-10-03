@@ -326,18 +326,18 @@ fn guest_session(headers: &HeaderMap) -> Result<&str, (StatusCode, Json<ErrorBod
 async fn start_session_identity(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<String, axum::response::Response> {
+) -> Result<String, Box<axum::response::Response>> {
     if state.authenticate_starts {
         let session = authenticate(state.sessions.as_ref(), headers, SystemTime::now())
             .await
-            .map_err(auth_error)?;
+            .map_err(|error| Box::new(auth_error(error)))?;
         enforce_request_protection(&state.session_policy, &Method::POST, headers)
-            .map_err(auth_error)?;
+            .map_err(|error| Box::new(auth_error(error)))?;
         Ok(session.id.to_string())
     } else {
         guest_session(headers)
             .map(str::to_owned)
-            .map_err(|error| error.into_response())
+            .map_err(|error| Box::new(error.into_response()))
     }
 }
 
@@ -388,7 +388,7 @@ async fn resolve_start(
     };
     let guest = match start_session_identity(&state, &headers).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let requested = match Point::new(
         body.requested_point.longitude,
@@ -425,7 +425,7 @@ async fn confirm_start(
     };
     let guest = match start_session_identity(&state, &headers).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     match state.starts.confirm(&guest, id, body.profile).await {
         Ok(confirmed_start) => (
