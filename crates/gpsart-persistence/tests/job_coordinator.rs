@@ -1,5 +1,6 @@
 use gpsart_persistence::jobs::{
-    Completion, InMemoryJobCoordinator, JobError, JobInput, JobState, StartOwnership,
+    Completion, InMemoryJobCoordinator, JobError, JobInput, JobOutcomeCode, JobState,
+    StartOwnership,
 };
 use std::{
     sync::Arc,
@@ -208,4 +209,71 @@ fn exhausted_attempts_become_terminal_instead_of_staying_stuck() {
         .is_none()
     );
     assert_eq!(jobs.state(job), Some(JobState::Failed));
+}
+
+#[test]
+fn classified_worker_outcomes_must_match_their_terminal_state() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(6_000);
+    let owner = Uuid::new_v4();
+    let jobs = InMemoryJobCoordinator::default();
+
+    let no_match_request = input("classified-no-match", 8);
+    jobs.register_start(StartOwnership {
+        id: no_match_request.resolved_start_id,
+        owner,
+        expires_at: now + Duration::from_secs(60),
+    });
+    let no_match_job = jobs.submit(owner, no_match_request, now).unwrap();
+    let no_match_lease = jobs
+        .claim(Uuid::new_v4(), now, Duration::from_secs(10))
+        .unwrap();
+    jobs.complete(
+        no_match_lease,
+        Completion::NoMatch {
+            code: JobOutcomeCode::InsufficientVisualMatch,
+        },
+        now,
+    )
+    .unwrap();
+    assert_eq!(jobs.state(no_match_job), Some(JobState::NoMatch));
+
+    let failed_request = input("classified-failure", 9);
+    jobs.register_start(StartOwnership {
+        id: failed_request.resolved_start_id,
+        owner,
+        expires_at: now + Duration::from_secs(60),
+    });
+    let failed_job = jobs.submit(owner, failed_request, now).unwrap();
+    let failed_lease = jobs
+        .claim(Uuid::new_v4(), now, Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(
+        jobs.complete(
+            failed_lease.clone(),
+            Completion::Failed {
+                code: JobOutcomeCode::LegacyUnknown,
+            },
+            now,
+        ),
+        Err(JobError::InvalidInput)
+    );
+    assert_eq!(
+        jobs.complete(
+            failed_lease.clone(),
+            Completion::Failed {
+                code: JobOutcomeCode::OutsideDistance,
+            },
+            now,
+        ),
+        Err(JobError::InvalidInput)
+    );
+    jobs.complete(
+        failed_lease,
+        Completion::Failed {
+            code: JobOutcomeCode::ProviderUnavailable,
+        },
+        now,
+    )
+    .unwrap();
+    assert_eq!(jobs.state(failed_job), Some(JobState::Failed));
 }

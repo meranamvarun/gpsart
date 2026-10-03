@@ -28,6 +28,55 @@ paths:
         '409': { $ref: '#/components/responses/JobConflict' }
         '503': { $ref: '#/components/responses/JobUnavailable' }
   /api/v1/route-jobs/{job_id}:
+    get:
+      summary: Read the current truthful status of an owned route-generation job
+      description: Returns observed coarse stages only. The ETag changes monotonically with durable status_version; no percentage is estimated.
+      security: [{ guestSession: [] }]
+      parameters:
+        - { in: path, name: job_id, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: If-None-Match, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: Current durable job status
+          headers:
+            ETag: { description: Durable status version validator, schema: { type: string, example: '"5"' } }
+            Cache-Control: { description: Private revalidation policy, schema: { type: string, const: 'private, no-cache' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteJobStatus' }
+              examples:
+                active:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: running, stage: fitting_design, status_version: 3, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: null, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: null, result_ids: [], poll_after_seconds: 1 }
+                succeeded:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: succeeded, stage: comparing_routes, status_version: 5, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995040, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: succeeded, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [8bf80ccf-68e8-49ec-a3e8-cad667bb95a0], poll_after_seconds: null }
+                unsupportedCoverage:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: no_match, stage: checking_roads, status_version: 3, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995002, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: unsupported_coverage, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                noRoutableAccess:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: no_match, stage: checking_roads, status_version: 3, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995002, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: no_routable_access, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                disconnectedNetwork:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: no_match, stage: fitting_design, status_version: 4, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995020, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: disconnected_network, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                insufficientVisualMatch:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: no_match, stage: comparing_routes, status_version: 5, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995040, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: insufficient_visual_match, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                outsideDistance:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: no_match, stage: comparing_routes, status_version: 5, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995040, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: outside_distance, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                exhaustedBudget:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: no_match, stage: comparing_routes, status_version: 5, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995060, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: exhausted_budget, budget_exhausted: true, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                providerUnavailable:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: failed, stage: checking_roads, status_version: 3, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995002, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: provider_unavailable, budget_exhausted: false, retryable: true, retry_after_seconds: 30 }, result_ids: [], poll_after_seconds: null }
+                attemptsExhausted:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: failed, stage: checking_roads, status_version: 5, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995030, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: attempts_exhausted, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                cancelled:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: cancelled, stage: fitting_design, status_version: 4, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995020, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: cancelled, budget_exhausted: false, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+                timedOut:
+                  value: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1, state: timed_out, stage: comparing_routes, status_version: 5, queued_at_epoch_seconds: 1790995000, started_at_epoch_seconds: 1790995001, completed_at_epoch_seconds: 1790995060, deadline_at_epoch_seconds: 1790995060, expires_at_epoch_seconds: 1791081400, outcome: { code: timed_out, budget_exhausted: true, retryable: false, retry_after_seconds: null }, result_ids: [], poll_after_seconds: null }
+        '304':
+          description: Status version is unchanged; response has no body
+          headers:
+            ETag: { description: Durable status version validator, schema: { type: string } }
+            Cache-Control: { description: Private revalidation policy, schema: { type: string, const: 'private, no-cache' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/PrivateNotFound' }
+        '503': { $ref: '#/components/responses/JobUnavailable' }
     delete:
       summary: Idempotently cancel an owned active job
       security: [{ guestSession: [] }]
@@ -378,6 +427,40 @@ components:
       properties:
         job_id: { type: string, format: uuid }
         request_revision: { type: integer, minimum: 1 }
+    RouteJobStatus:
+      type: object
+      additionalProperties: false
+      required: [job_id, request_revision, state, stage, status_version, queued_at_epoch_seconds, started_at_epoch_seconds, completed_at_epoch_seconds, deadline_at_epoch_seconds, expires_at_epoch_seconds, outcome, result_ids, poll_after_seconds]
+      properties:
+        job_id: { type: string, format: uuid }
+        request_revision: { type: integer, minimum: 1 }
+        state: { type: string, enum: [queued, running, succeeded, no_match, failed, cancelled, timed_out] }
+        stage: { type: string, enum: [queued, checking_roads, fitting_design, comparing_routes], description: Last observed durable stage; it is not a percentage estimate. }
+        status_version: { type: integer, minimum: 1 }
+        queued_at_epoch_seconds: { type: integer, minimum: 0, description: Unix timestamp in seconds }
+        started_at_epoch_seconds: { type: [integer, 'null'], minimum: 0, description: Unix timestamp in seconds }
+        completed_at_epoch_seconds: { type: [integer, 'null'], minimum: 0, description: Unix timestamp in seconds }
+        deadline_at_epoch_seconds: { type: integer, minimum: 0, description: Unix timestamp in seconds }
+        expires_at_epoch_seconds: { type: integer, minimum: 0, description: Unix timestamp in seconds }
+        outcome:
+          oneOf:
+            - { type: 'null' }
+            - { $ref: '#/components/schemas/RouteJobOutcome' }
+        result_ids:
+          type: array
+          items: { type: string, format: uuid }
+        poll_after_seconds: { type: [integer, 'null'], minimum: 1 }
+    RouteJobOutcome:
+      type: object
+      additionalProperties: false
+      required: [code, budget_exhausted, retryable, retry_after_seconds]
+      properties:
+        code:
+          type: string
+          enum: [succeeded, unsupported_coverage, no_routable_access, disconnected_network, insufficient_visual_match, outside_distance, exhausted_budget, provider_unavailable, attempts_exhausted, cancelled, timed_out, legacy_unknown]
+        budget_exhausted: { type: boolean }
+        retryable: { type: boolean }
+        retry_after_seconds: { type: [integer, 'null'], minimum: 1 }
     JobError:
       type: object
       additionalProperties: false

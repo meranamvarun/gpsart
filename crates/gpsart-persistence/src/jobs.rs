@@ -38,6 +38,105 @@ pub enum JobState {
     TimedOut,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JobStage {
+    Queued,
+    CheckingRoads,
+    FittingDesign,
+    ComparingRoutes,
+}
+
+impl JobStage {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::CheckingRoads => "checking_roads",
+            Self::FittingDesign => "fitting_design",
+            Self::ComparingRoutes => "comparing_routes",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JobOutcomeCode {
+    Succeeded,
+    UnsupportedCoverage,
+    NoRoutableAccess,
+    DisconnectedNetwork,
+    InsufficientVisualMatch,
+    OutsideDistance,
+    ExhaustedBudget,
+    ProviderUnavailable,
+    AttemptsExhausted,
+    Cancelled,
+    TimedOut,
+    LegacyUnknown,
+}
+
+impl JobOutcomeCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::UnsupportedCoverage => "unsupported_coverage",
+            Self::NoRoutableAccess => "no_routable_access",
+            Self::DisconnectedNetwork => "disconnected_network",
+            Self::InsufficientVisualMatch => "insufficient_visual_match",
+            Self::OutsideDistance => "outside_distance",
+            Self::ExhaustedBudget => "exhausted_budget",
+            Self::ProviderUnavailable => "provider_unavailable",
+            Self::AttemptsExhausted => "attempts_exhausted",
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed_out",
+            Self::LegacyUnknown => "legacy_unknown",
+        }
+    }
+
+    pub const fn matches_state(self, state: JobState) -> bool {
+        match state {
+            JobState::Succeeded => matches!(self, Self::Succeeded),
+            JobState::NoMatch => matches!(
+                self,
+                Self::UnsupportedCoverage
+                    | Self::NoRoutableAccess
+                    | Self::DisconnectedNetwork
+                    | Self::InsufficientVisualMatch
+                    | Self::OutsideDistance
+                    | Self::ExhaustedBudget
+                    | Self::LegacyUnknown
+            ),
+            JobState::Failed => matches!(
+                self,
+                Self::ProviderUnavailable | Self::AttemptsExhausted | Self::LegacyUnknown
+            ),
+            JobState::Cancelled => matches!(self, Self::Cancelled),
+            JobState::TimedOut => matches!(self, Self::TimedOut),
+            JobState::Queued | JobState::Running => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobOutcomeSnapshot {
+    pub code: JobOutcomeCode,
+    pub budget_exhausted: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JobStatusSnapshot {
+    pub job_id: Uuid,
+    pub request_revision: i32,
+    pub state: JobState,
+    pub stage: JobStage,
+    pub status_version: i64,
+    pub queued_at: SystemTime,
+    pub started_at: Option<SystemTime>,
+    pub completed_at: Option<SystemTime>,
+    pub deadline_at: SystemTime,
+    pub expires_at: SystemTime,
+    pub outcome: Option<JobOutcomeSnapshot>,
+    pub result_ids: Vec<Uuid>,
+}
+
 impl JobState {
     pub const fn is_terminal(self) -> bool {
         matches!(
@@ -60,6 +159,12 @@ pub enum Completion {
     Succeeded {
         candidate_ids: Vec<Uuid>,
         budget_exhausted: bool,
+    },
+    NoMatch {
+        code: JobOutcomeCode,
+    },
+    Failed {
+        code: JobOutcomeCode,
     },
     TimedOut,
 }
@@ -266,7 +371,22 @@ impl InMemoryJobCoordinator {
             Completion::Succeeded { .. } | Completion::TimedOut if now >= job.deadline_at => {
                 job.state = JobState::TimedOut
             }
-            Completion::Succeeded { .. } | Completion::TimedOut => {
+            Completion::NoMatch { code }
+                if code.matches_state(JobState::NoMatch)
+                    && code != JobOutcomeCode::LegacyUnknown =>
+            {
+                job.state = JobState::NoMatch
+            }
+            Completion::Failed { code }
+                if code.matches_state(JobState::Failed)
+                    && code != JobOutcomeCode::LegacyUnknown =>
+            {
+                job.state = JobState::Failed
+            }
+            Completion::Succeeded { .. }
+            | Completion::NoMatch { .. }
+            | Completion::Failed { .. }
+            | Completion::TimedOut => {
                 return Err(JobError::InvalidInput);
             }
         }
@@ -426,9 +546,9 @@ impl PostgresJobCoordinator {
         lease_for: Duration,
     ) -> Result<Option<JobLease>, JobError> {
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
-        sqlx::query("WITH terminal AS (UPDATE generation_jobs SET state=(CASE WHEN deadline_at <= $1 THEN 'timed_out' ELSE 'failed' END)::generation_job_state, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL WHERE state IN ('queued','running') AND (lease_expires_at IS NULL OR lease_expires_at <= $1) AND (deadline_at <= $1 OR attempt_count >= max_attempts) RETURNING id,state) INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) SELECT id,state::text::generation_terminal_outcome,CASE WHEN state='timed_out' THEN 'timed_out' ELSE 'attempts_exhausted' END,state='timed_out' FROM terminal")
+        sqlx::query("WITH terminal AS (UPDATE generation_jobs SET state=(CASE WHEN deadline_at <= $1 THEN 'timed_out' ELSE 'failed' END)::generation_job_state, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL, status_version=status_version+1 WHERE state IN ('queued','running') AND (lease_expires_at IS NULL OR lease_expires_at <= $1) AND (deadline_at <= $1 OR attempt_count >= max_attempts) RETURNING id,state) INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) SELECT id,state::text::generation_terminal_outcome,CASE WHEN state='timed_out' THEN 'timed_out' ELSE 'attempts_exhausted' END,state='timed_out' FROM terminal")
             .bind(OffsetDateTime::from(now)).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
-        let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at")
+        let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', stage=CASE WHEN j.state='queued' THEN 'checking_roads' ELSE j.stage END, status_version=status_version+1, started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at")
             .bind(OffsetDateTime::from(now)).bind(worker).bind(OffsetDateTime::from(now + lease_for))
             .fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         let Some(row) = row else {
@@ -471,6 +591,109 @@ impl PostgresJobCoordinator {
         } else {
             Err(JobError::LeaseLost)
         }
+    }
+
+    pub async fn advance_stage(
+        &self,
+        lease: &JobLease,
+        now: SystemTime,
+        stage: JobStage,
+    ) -> Result<i64, JobError> {
+        let allowed_current = match stage {
+            JobStage::CheckingRoads => vec![JobStage::CheckingRoads.as_str()],
+            JobStage::FittingDesign => vec![
+                JobStage::CheckingRoads.as_str(),
+                JobStage::FittingDesign.as_str(),
+            ],
+            JobStage::ComparingRoutes => vec![
+                JobStage::FittingDesign.as_str(),
+                JobStage::ComparingRoutes.as_str(),
+            ],
+            JobStage::Queued => return Err(JobError::InvalidInput),
+        };
+        sqlx::query_scalar("UPDATE generation_jobs SET status_version=status_version+CASE WHEN stage=$1 THEN 0 ELSE 1 END, stage=$1 WHERE id=$2 AND state='running' AND lease_owner=$3 AND attempt_count=$4 AND lease_expires_at>$5 AND deadline_at>$5 AND stage=ANY($6) RETURNING status_version")
+            .bind(stage.as_str())
+            .bind(lease.job_id)
+            .bind(lease.worker_id)
+            .bind(lease.attempt as i32)
+            .bind(OffsetDateTime::from(now))
+            .bind(allowed_current)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|_| JobError::Unavailable)?
+            .ok_or(JobError::LeaseLost)
+    }
+
+    pub async fn status(&self, owner: Uuid, job_id: Uuid) -> Result<JobStatusSnapshot, JobError> {
+        let row = sqlx::query("SELECT gj.id, pr.revision, gj.state::text AS state, gj.stage, gj.status_version, gj.queued_at, gj.started_at, gj.completed_at, gj.deadline_at, pr.expires_at, outcome.public_code, outcome.budget_exhausted, COALESCE(outcome.result_ids, '{}'::uuid[]) AS result_ids FROM generation_jobs gj JOIN planning_requests pr ON pr.id=gj.planning_request_id LEFT JOIN generation_job_outcomes outcome ON outcome.generation_job_id=gj.id WHERE gj.id=$1 AND gj.guest_session_id=$2")
+            .bind(job_id)
+            .bind(owner)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|_| JobError::Unavailable)?
+            .ok_or(JobError::NotFound)?;
+        let state_name: String = row.try_get("state").map_err(|_| JobError::Unavailable)?;
+        let state = parse_state(&state_name)?;
+        let stage_name: String = row.try_get("stage").map_err(|_| JobError::Unavailable)?;
+        let stage = parse_stage(&stage_name)?;
+        let public_code: Option<String> = row
+            .try_get("public_code")
+            .map_err(|_| JobError::Unavailable)?;
+        let outcome = public_code
+            .map(|code| {
+                Ok(JobOutcomeSnapshot {
+                    code: parse_outcome_code(&code)?,
+                    budget_exhausted: row
+                        .try_get::<Option<bool>, _>("budget_exhausted")
+                        .map_err(|_| JobError::Unavailable)?
+                        .unwrap_or(false),
+                })
+            })
+            .transpose()?;
+        if state.is_terminal() != outcome.is_some()
+            || outcome
+                .as_ref()
+                .is_some_and(|value| !value.code.matches_state(state))
+        {
+            return Err(JobError::Unavailable);
+        }
+        let result_ids: Vec<Uuid> = row
+            .try_get("result_ids")
+            .map_err(|_| JobError::Unavailable)?;
+        if (state == JobState::Succeeded) != !result_ids.is_empty() {
+            return Err(JobError::Unavailable);
+        }
+        Ok(JobStatusSnapshot {
+            job_id: row.try_get("id").map_err(|_| JobError::Unavailable)?,
+            request_revision: row.try_get("revision").map_err(|_| JobError::Unavailable)?,
+            state,
+            stage,
+            status_version: row
+                .try_get("status_version")
+                .map_err(|_| JobError::Unavailable)?,
+            queued_at: SystemTime::from(
+                row.try_get::<OffsetDateTime, _>("queued_at")
+                    .map_err(|_| JobError::Unavailable)?,
+            ),
+            started_at: row
+                .try_get::<Option<OffsetDateTime>, _>("started_at")
+                .map_err(|_| JobError::Unavailable)?
+                .map(SystemTime::from),
+            completed_at: row
+                .try_get::<Option<OffsetDateTime>, _>("completed_at")
+                .map_err(|_| JobError::Unavailable)?
+                .map(SystemTime::from),
+            deadline_at: SystemTime::from(
+                row.try_get::<OffsetDateTime, _>("deadline_at")
+                    .map_err(|_| JobError::Unavailable)?,
+            ),
+            expires_at: SystemTime::from(
+                row.try_get::<OffsetDateTime, _>("expires_at")
+                    .map_err(|_| JobError::Unavailable)?,
+            ),
+            outcome,
+            result_ids,
+        })
     }
 
     pub async fn begin_provider_call(
@@ -534,9 +757,9 @@ impl PostgresJobCoordinator {
             "succeeded" | "no_match" | "failed" | "cancelled" | "timed_out"
         ) {
             tx.commit().await.map_err(|_| JobError::Unavailable)?;
-            return Ok(parse_state(&state));
+            return parse_state(&state);
         }
-        sqlx::query("UPDATE generation_jobs SET state='cancelled', cancellation_requested_at=$1, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL WHERE id=$2")
+        sqlx::query("UPDATE generation_jobs SET state='cancelled', status_version=status_version+1, cancellation_requested_at=$1, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL WHERE id=$2")
             .bind(OffsetDateTime::from(now)).bind(job_id).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code) VALUES ($1,'cancelled','cancelled')")
             .bind(job_id).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
@@ -576,7 +799,7 @@ impl PostgresJobCoordinator {
             row.try_get::<OffsetDateTime, _>("deadline_at")
                 .map_err(|_| JobError::Unavailable)?,
         );
-        let (next, budget_exhausted) = match completion {
+        let (next, public_code, budget_exhausted, result_ids) = match completion {
             Completion::Succeeded {
                 candidate_ids,
                 budget_exhausted,
@@ -584,44 +807,111 @@ impl PostgresJobCoordinator {
                 let count: i64 = sqlx::query_scalar("SELECT count(*) FROM route_candidates rc JOIN generation_jobs gj ON gj.id=rc.generation_job_id JOIN planning_requests pr ON pr.id=gj.planning_request_id WHERE rc.generation_job_id=$1 AND rc.id=ANY($2) AND rc.map_data_version=pr.map_data_version AND rc.algorithm_version=pr.algorithm_version")
                     .bind(lease.job_id).bind(candidate_ids).fetch_one(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
                 if count == candidate_ids.len() as i64 {
-                    (JobState::Succeeded, *budget_exhausted)
+                    (
+                        JobState::Succeeded,
+                        JobOutcomeCode::Succeeded,
+                        *budget_exhausted,
+                        candidate_ids.clone(),
+                    )
                 } else if now >= deadline_at {
-                    (JobState::TimedOut, true)
+                    (
+                        JobState::TimedOut,
+                        JobOutcomeCode::TimedOut,
+                        true,
+                        Vec::new(),
+                    )
                 } else {
                     return Err(JobError::InvalidInput);
                 }
             }
-            Completion::Succeeded { .. } | Completion::TimedOut if now >= deadline_at => {
-                (JobState::TimedOut, true)
+            Completion::Succeeded { .. } | Completion::TimedOut if now >= deadline_at => (
+                JobState::TimedOut,
+                JobOutcomeCode::TimedOut,
+                true,
+                Vec::new(),
+            ),
+            Completion::NoMatch { code }
+                if code.matches_state(JobState::NoMatch)
+                    && *code != JobOutcomeCode::LegacyUnknown =>
+            {
+                (
+                    JobState::NoMatch,
+                    *code,
+                    matches!(code, JobOutcomeCode::ExhaustedBudget),
+                    Vec::new(),
+                )
             }
-            Completion::Succeeded { .. } | Completion::TimedOut => {
+            Completion::Failed { code }
+                if code.matches_state(JobState::Failed)
+                    && *code != JobOutcomeCode::LegacyUnknown =>
+            {
+                (JobState::Failed, *code, false, Vec::new())
+            }
+            Completion::Succeeded { .. }
+            | Completion::NoMatch { .. }
+            | Completion::Failed { .. }
+            | Completion::TimedOut => {
                 return Err(JobError::InvalidInput);
             }
         };
         let state_name = match next {
             JobState::Succeeded => "succeeded",
-            _ => "timed_out",
+            JobState::NoMatch => "no_match",
+            JobState::Failed => "failed",
+            JobState::TimedOut => "timed_out",
+            JobState::Queued | JobState::Running | JobState::Cancelled => {
+                return Err(JobError::InvalidInput);
+            }
         };
-        sqlx::query("UPDATE generation_jobs SET state=$1::generation_job_state, completed_at=$2, lease_owner=NULL, lease_expires_at=NULL WHERE id=$3")
+        sqlx::query("UPDATE generation_jobs SET state=$1::generation_job_state, status_version=status_version+1, completed_at=$2, lease_owner=NULL, lease_expires_at=NULL WHERE id=$3")
             .bind(state_name).bind(OffsetDateTime::from(now)).bind(lease.job_id).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         sqlx::query("UPDATE job_attempts SET finished_at=$1,result_code=$2 WHERE generation_job_id=$3 AND attempt_number=$4")
             .bind(OffsetDateTime::from(now)).bind(state_name).bind(lease.job_id).bind(lease.attempt as i32).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
-        sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) VALUES ($1,$2::generation_terminal_outcome,$3,$4)")
-            .bind(lease.job_id).bind(state_name).bind(state_name).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at)
+        sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted,result_ids) VALUES ($1,$2::generation_terminal_outcome,$3,$4,$5)")
+            .bind(lease.job_id).bind(state_name).bind(public_code.as_str()).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at).bind(result_ids)
             .execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
         Ok(next)
     }
 }
 
-fn parse_state(state: &str) -> JobState {
+fn parse_state(state: &str) -> Result<JobState, JobError> {
     match state {
-        "running" => JobState::Running,
-        "succeeded" => JobState::Succeeded,
-        "no_match" => JobState::NoMatch,
-        "failed" => JobState::Failed,
-        "cancelled" => JobState::Cancelled,
-        "timed_out" => JobState::TimedOut,
-        _ => JobState::Queued,
+        "queued" => Ok(JobState::Queued),
+        "running" => Ok(JobState::Running),
+        "succeeded" => Ok(JobState::Succeeded),
+        "no_match" => Ok(JobState::NoMatch),
+        "failed" => Ok(JobState::Failed),
+        "cancelled" => Ok(JobState::Cancelled),
+        "timed_out" => Ok(JobState::TimedOut),
+        _ => Err(JobError::Unavailable),
+    }
+}
+
+fn parse_stage(stage: &str) -> Result<JobStage, JobError> {
+    match stage {
+        "queued" => Ok(JobStage::Queued),
+        "checking_roads" => Ok(JobStage::CheckingRoads),
+        "fitting_design" => Ok(JobStage::FittingDesign),
+        "comparing_routes" => Ok(JobStage::ComparingRoutes),
+        _ => Err(JobError::Unavailable),
+    }
+}
+
+fn parse_outcome_code(code: &str) -> Result<JobOutcomeCode, JobError> {
+    match code {
+        "succeeded" => Ok(JobOutcomeCode::Succeeded),
+        "unsupported_coverage" => Ok(JobOutcomeCode::UnsupportedCoverage),
+        "no_routable_access" => Ok(JobOutcomeCode::NoRoutableAccess),
+        "disconnected_network" => Ok(JobOutcomeCode::DisconnectedNetwork),
+        "insufficient_visual_match" => Ok(JobOutcomeCode::InsufficientVisualMatch),
+        "outside_distance" => Ok(JobOutcomeCode::OutsideDistance),
+        "exhausted_budget" => Ok(JobOutcomeCode::ExhaustedBudget),
+        "provider_unavailable" => Ok(JobOutcomeCode::ProviderUnavailable),
+        "attempts_exhausted" => Ok(JobOutcomeCode::AttemptsExhausted),
+        "cancelled" => Ok(JobOutcomeCode::Cancelled),
+        "timed_out" => Ok(JobOutcomeCode::TimedOut),
+        "legacy_unknown" => Ok(JobOutcomeCode::LegacyUnknown),
+        _ => Err(JobError::Unavailable),
     }
 }

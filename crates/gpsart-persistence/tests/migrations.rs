@@ -1,4 +1,6 @@
-use gpsart_persistence::jobs::{Completion, JobError, PostgresJobCoordinator, RouteJobSubmission};
+use gpsart_persistence::jobs::{
+    Completion, JobError, JobOutcomeCode, JobStage, PostgresJobCoordinator, RouteJobSubmission,
+};
 use gpsart_persistence::{
     MIGRATOR, MigrationStatus, PostgresResolvedStartStore, ResolvedStartRecord, ResolvedStartStore,
     migration_status,
@@ -50,6 +52,33 @@ async fn drop_database(mut admin: PgConnection, pool: PgPool, database_name: &st
         .execute(format!("DROP DATABASE {database_name} WITH (FORCE)").as_str())
         .await
         .expect("isolated test database must be removable");
+}
+
+async fn apply_embedded_migrations_through(pool: &PgPool, maximum_version: i64) {
+    sqlx::raw_sql(
+        "CREATE TABLE _sqlx_migrations (version bigint PRIMARY KEY, description text NOT NULL, installed_on timestamptz NOT NULL DEFAULT now(), success boolean NOT NULL, checksum bytea NOT NULL, execution_time bigint NOT NULL)",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    for migration in MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= maximum_version)
+    {
+        sqlx::raw_sql(migration.sql.as_ref())
+            .execute(pool)
+            .await
+            .expect("embedded historical migration applies");
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations(version, description, success, checksum, execution_time) VALUES ($1, $2, true, $3, 0)",
+        )
+        .bind(migration.version)
+        .bind(migration.description.as_ref())
+        .bind(migration.checksum.as_ref())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
 }
 
 async fn seed_owned_request(pool: &PgPool) {
@@ -174,7 +203,7 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     assert_eq!(
         migration_status(&pool).await.unwrap(),
         MigrationStatus::Pending {
-            versions: vec![2, 3, 4]
+            versions: vec![2, 3, 4, 5]
         }
     );
     MIGRATOR
@@ -217,6 +246,115 @@ async fn upgrades_from_the_previous_checked_in_migration() {
         ]
     );
 
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn job_status_migration_upgrades_populated_v4_rows_without_inventing_outcomes() {
+    let Some((admin, pool, database_name)) = isolated_database("status_upgrade").await else {
+        return;
+    };
+    apply_embedded_migrations_through(&pool, 4).await;
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO guest_sessions (id, token_hash, expires_at, cleanup_after) VALUES
+          ('00000000-0000-0000-0000-000000000001', decode(repeat('01', 32), 'hex'), now() + interval '1 day', now() + interval '2 days');
+        INSERT INTO resolved_starts (
+          id, guest_session_id, requested_pin, confirmed_start, profile_version,
+          coverage_policy_version, map_data_version, expires_at
+        ) VALUES (
+          '10000000-0000-0000-0000-000000000001',
+          '00000000-0000-0000-0000-000000000001',
+          ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326),
+          ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326),
+          'walking-v1', 'coverage-v1', 'map-v1', now() + interval '1 day'
+        );
+        INSERT INTO planning_requests (
+          id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash,
+          requested_pin, requested_distance_metres, distance_tolerance_metres,
+          activity_profile, activity_profile_version, coverage_policy_version, template_id,
+          template_version, map_data_version, algorithm_version, expires_at
+        ) VALUES (
+          '20000000-0000-0000-0000-000000000001',
+          '00000000-0000-0000-0000-000000000001',
+          '10000000-0000-0000-0000-000000000001', 7, 'legacy-request',
+          decode(repeat('01', 32), 'hex'),
+          ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326), 5000, 250,
+          '{"activity":"walking"}'::jsonb, 'walking-v1', 'coverage-v1', 'heart', '1',
+          'map-v1', 'algorithm-v1', now() + interval '1 day'
+        );
+        INSERT INTO generation_jobs (
+          id, guest_session_id, planning_request_id, state, stage, queued_at, started_at,
+          deadline_at, completed_at
+        ) VALUES
+          ('30000000-0000-0000-0000-000000000001',
+           '00000000-0000-0000-0000-000000000001',
+           '20000000-0000-0000-0000-000000000001', 'succeeded', 'comparing_routes',
+           now() - interval '2 minutes', now() - interval '119 seconds',
+           now() + interval '1 minute', now() - interval '1 minute'),
+          ('30000000-0000-0000-0000-000000000002',
+           '00000000-0000-0000-0000-000000000001',
+           '20000000-0000-0000-0000-000000000001', 'failed', 'checking_roads',
+           now() - interval '2 minutes', now() - interval '119 seconds',
+           now() + interval '1 minute', now() - interval '1 minute');
+        INSERT INTO route_candidates (
+          id, guest_session_id, generation_job_id, candidate_version, start_point,
+          end_point, canonical_route, distance_metres, map_data_version,
+          algorithm_version, expires_at
+        ) VALUES (
+          '40000000-0000-0000-0000-000000000001',
+          '00000000-0000-0000-0000-000000000001',
+          '30000000-0000-0000-0000-000000000001', 1,
+          ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326),
+          ST_SetSRID(ST_MakePoint(77.2, 28.7), 4326),
+          ST_SetSRID(ST_MakeLine(ST_MakePoint(77.1, 28.6), ST_MakePoint(77.2, 28.7)), 4326),
+          5000, 'map-v1', 'algorithm-v1', now() + interval '1 day'
+        );
+        INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES
+          ('30000000-0000-0000-0000-000000000001', 'succeeded', 'succeeded'),
+          ('30000000-0000-0000-0000-000000000002', 'failed', NULL);
+        "#,
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    MIGRATOR
+        .run(&pool)
+        .await
+        .expect("v4 to v5 upgrade succeeds");
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let succeeded = coordinator
+        .status(
+            owner,
+            Uuid::parse_str("30000000-0000-0000-0000-000000000001").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(succeeded.request_revision, 7);
+    assert_eq!(succeeded.stage, JobStage::ComparingRoutes);
+    assert_eq!(
+        succeeded.result_ids,
+        vec![Uuid::parse_str("40000000-0000-0000-0000-000000000001").unwrap()]
+    );
+    let failed = coordinator
+        .status(
+            owner,
+            Uuid::parse_str("30000000-0000-0000-0000-000000000002").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(failed.outcome.unwrap().code, JobOutcomeCode::LegacyUnknown);
+    assert!(
+        sqlx::query("UPDATE generation_job_outcomes SET result_ids='{}' WHERE generation_job_id='30000000-0000-0000-0000-000000000001'")
+            .execute(&pool)
+            .await
+            .is_err(),
+        "published result IDs must become immutable during upgrade"
+    );
     drop_database(admin, pool, &database_name).await;
 }
 
@@ -481,6 +619,166 @@ async fn candidate_publication_requires_request_versions_and_the_deadline() {
 }
 
 #[tokio::test]
+async fn job_status_is_owner_scoped_monotonic_and_atomically_classified() {
+    let Some((admin, pool, database_name)) = isolated_database("job_status").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let foreign = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+    let job_id = Uuid::parse_str("30000000-0000-0000-0000-000000000001").unwrap();
+    let queued = coordinator.status(owner, job_id).await.unwrap();
+    assert_eq!(queued.state, gpsart_persistence::jobs::JobState::Queued);
+    assert_eq!(queued.stage, JobStage::Queued);
+    assert_eq!(queued.status_version, 1);
+    assert!(queued.outcome.is_none());
+    assert_eq!(
+        coordinator.status(foreign, job_id).await,
+        Err(JobError::NotFound)
+    );
+
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(60))
+        .await
+        .unwrap()
+        .unwrap();
+    let checking = coordinator.status(owner, job_id).await.unwrap();
+    assert_eq!(checking.stage, JobStage::CheckingRoads);
+    assert_eq!(checking.status_version, 2);
+    assert!(checking.started_at.is_some());
+    assert_eq!(
+        coordinator
+            .advance_stage(&lease, now, JobStage::FittingDesign)
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        coordinator
+            .advance_stage(&lease, now, JobStage::FittingDesign)
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        coordinator
+            .advance_stage(&lease, now, JobStage::ComparingRoutes)
+            .await
+            .unwrap(),
+        4
+    );
+    let recovered = coordinator
+        .claim(
+            Uuid::new_v4(),
+            now + Duration::from_secs(61),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap()
+        .expect("expired running lease is recovered");
+    let after_recovery = coordinator.status(owner, job_id).await.unwrap();
+    assert_eq!(after_recovery.stage, JobStage::ComparingRoutes);
+    assert_eq!(after_recovery.status_version, 5);
+    assert_eq!(
+        coordinator
+            .complete(
+                &recovered,
+                &Completion::NoMatch {
+                    code: JobOutcomeCode::InsufficientVisualMatch,
+                },
+                now + Duration::from_secs(61),
+            )
+            .await
+            .unwrap(),
+        gpsart_persistence::jobs::JobState::NoMatch
+    );
+    let terminal = coordinator.status(owner, job_id).await.unwrap();
+    assert_eq!(terminal.status_version, 6);
+    assert_eq!(terminal.stage, JobStage::ComparingRoutes);
+    assert_eq!(
+        terminal.outcome.unwrap().code,
+        JobOutcomeCode::InsufficientVisualMatch
+    );
+    assert!(terminal.completed_at.is_some());
+    assert!(terminal.result_ids.is_empty());
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn succeeded_status_freezes_the_exact_atomic_result_set() {
+    let Some((admin, pool, database_name)) = isolated_database("frozen_results").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(60))
+        .await
+        .unwrap()
+        .unwrap();
+    let published = Uuid::parse_str("40000000-0000-4000-8000-000000000001").unwrap();
+    sqlx::query(
+        r#"INSERT INTO route_candidates (
+          id, guest_session_id, generation_job_id, candidate_version, start_point,
+          end_point, canonical_route, distance_metres, map_data_version,
+          algorithm_version, expires_at
+        ) VALUES (
+          $1, '00000000-0000-0000-0000-000000000001', $2, 1,
+          ST_SetSRID(ST_MakePoint(10.0, 10.0), 4326),
+          ST_SetSRID(ST_MakePoint(10.1, 10.1), 4326),
+          ST_SetSRID(ST_MakeLine(ST_MakePoint(10.0, 10.0), ST_MakePoint(10.1, 10.1)), 4326),
+          5000, 'map-v1', 'algorithm-v1', now() + interval '1 day'
+        )"#,
+    )
+    .bind(published)
+    .bind(lease.job_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    coordinator
+        .complete(
+            &lease,
+            &Completion::Succeeded {
+                candidate_ids: vec![published],
+                budget_exhausted: false,
+            },
+            now,
+        )
+        .await
+        .unwrap();
+    let completed = coordinator.status(owner, lease.job_id).await.unwrap();
+    assert_eq!(completed.result_ids, vec![published]);
+
+    let unpublished = Uuid::parse_str("40000000-0000-4000-8000-000000000002").unwrap();
+    sqlx::query(
+        r#"INSERT INTO route_candidates (
+          id, guest_session_id, generation_job_id, candidate_version, start_point,
+          end_point, canonical_route, distance_metres, map_data_version,
+          algorithm_version, expires_at
+        ) VALUES (
+          $1, '00000000-0000-0000-0000-000000000001', $2, 2,
+          ST_SetSRID(ST_MakePoint(10.0, 10.0), 4326),
+          ST_SetSRID(ST_MakePoint(10.2, 10.2), 4326),
+          ST_SetSRID(ST_MakeLine(ST_MakePoint(10.0, 10.0), ST_MakePoint(10.2, 10.2)), 4326),
+          5100, 'map-v1', 'algorithm-v1', now() + interval '1 day'
+        )"#,
+    )
+    .bind(unpublished)
+    .bind(lease.job_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let reread = coordinator.status(owner, lease.job_id).await.unwrap();
+    assert_eq!(reread.status_version, completed.status_version);
+    assert_eq!(reread.result_ids, vec![published]);
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
 async fn terminal_jobs_require_exactly_one_matching_outcome() {
     let Some((admin, pool, database_name)) = isolated_database("outcomes").await else {
         return;
@@ -489,7 +787,7 @@ async fn terminal_jobs_require_exactly_one_matching_outcome() {
 
     let mut active_with_outcome = pool.begin().await.unwrap();
     sqlx::query(
-        "INSERT INTO generation_job_outcomes (generation_job_id, outcome) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded')",
+        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'failed', 'attempts_exhausted')",
     )
     .execute(&mut *active_with_outcome)
     .await
@@ -507,13 +805,13 @@ async fn terminal_jobs_require_exactly_one_matching_outcome() {
 
     let mut matching = pool.begin().await.unwrap();
     sqlx::query(
-        "UPDATE generation_jobs SET state = 'succeeded', completed_at = now() WHERE id = '30000000-0000-0000-0000-000000000001'",
+        "UPDATE generation_jobs SET state = 'failed', completed_at = now() WHERE id = '30000000-0000-0000-0000-000000000001'",
     )
     .execute(&mut *matching)
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO generation_job_outcomes (generation_job_id, outcome) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded')",
+        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'failed', 'attempts_exhausted')",
     )
     .execute(&mut *matching)
     .await
