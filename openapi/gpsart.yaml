@@ -36,6 +36,67 @@ paths:
                         preview_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">...</svg>'
                         definition_hash: 64-lowercase-hex-characters
         '400': { description: Unsupported category }
+  /api/v1/coverage:
+    get:
+      summary: Read the versioned pilot coverage boundary
+      description: Coverage membership does not claim that a route is feasible at a point.
+      responses:
+        '200':
+          description: Versioned GeoJSON coverage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Coverage' }
+  /api/v1/starts/resolve:
+    post:
+      summary: Propose a profile-aware routable start
+      description: Exact coordinates are accepted only in this private request body and are never URL parameters.
+      parameters:
+        - in: header
+          name: x-gpsart-guest-session
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveStartRequest' }
+      responses:
+        '200':
+          description: A proposal requiring explicit confirmation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartResolution' }
+        '400': { description: Invalid coordinates }
+        '401': { description: Missing guest-session authorization }
+        '422': { description: Unsupported coverage or no routable access }
+        '502': { description: Routing provider failure }
+  /api/v1/starts/{resolution_id}/confirm:
+    post:
+      summary: Explicitly confirm a proposed start displaced by at most 30 metres
+      parameters:
+        - in: path
+          name: resolution_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: x-gpsart-guest-session
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profile]
+              properties:
+                profile: { $ref: '#/components/schemas/RouteProfile' }
+      responses:
+        '200': { description: Confirmed candidate network point }
+        '404': { description: Resolution is private to another session }
+        '409': { description: Profile, policy, or data version changed }
+        '410': { description: Resolution expired }
+        '422': { description: Snap exceeds 30 metres }
 components:
   schemas:
     DesignSummary:
@@ -51,3 +112,46 @@ components:
         complexity_hint: { type: string }
         preview_svg: { type: string }
         definition_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+    GeoPoint:
+      type: object
+      additionalProperties: false
+      required: [longitude, latitude]
+      properties:
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+    RouteProfile:
+      type: object
+      additionalProperties: false
+      required: [activity, profile_version]
+      properties:
+        activity: { type: string, enum: [walking, running, cycling] }
+        profile_version: { type: string, enum: [walking-v1, running-v1, cycling-v1] }
+    Coverage:
+      type: object
+      additionalProperties: false
+      required: [version, geojson, local_route_feasibility]
+      properties:
+        version: { type: string }
+        geojson: { type: object }
+        local_route_feasibility: { const: not_evaluated }
+    ResolveStartRequest:
+      type: object
+      additionalProperties: false
+      required: [requested_point, profile]
+      properties:
+        requested_point: { $ref: '#/components/schemas/GeoPoint' }
+        profile: { $ref: '#/components/schemas/RouteProfile' }
+    StartResolution:
+      type: object
+      additionalProperties: false
+      required: [id, requested_point, candidate_network_point, snap_distance_metres, profile_version, coverage_policy_version, data_version, expires_at_epoch_seconds, confirmation_required]
+      properties:
+        id: { type: string, format: uuid }
+        requested_point: { $ref: '#/components/schemas/GeoPoint' }
+        candidate_network_point: { $ref: '#/components/schemas/GeoPoint' }
+        snap_distance_metres: { type: integer, minimum: 0 }
+        profile_version: { type: string, enum: [walking-v1, running-v1, cycling-v1] }
+        coverage_policy_version: { type: string }
+        data_version: { type: string }
+        expires_at_epoch_seconds: { type: integer, minimum: 1 }
+        confirmation_required: { const: true }

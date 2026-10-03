@@ -1,20 +1,20 @@
-use gpsart_domain::{ActivityProfile, RouteRequestProfile};
 use gpsart_domain::starts::{
-    Coverage, NetworkPoint, Point, ResolutionContext, ResolveError, StartResolver,
+    Coverage, NetworkPoint, Point, ProviderError, ResolutionContext, ResolveError, StartResolver,
     StartResolverProvider,
 };
+use gpsart_domain::{ActivityProfile, RouteRequestProfile};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-struct FixtureProvider(Mutex<Result<Option<NetworkPoint>, ()>>);
+struct FixtureProvider(Mutex<Result<Option<NetworkPoint>, ProviderError>>);
 
 impl StartResolverProvider for FixtureProvider {
     fn nearest_routable(
         &self,
         _requested: Point,
         _profile: RouteRequestProfile,
-    ) -> Result<Option<NetworkPoint>, ()> {
-        self.0.lock().unwrap().clone()
+    ) -> Result<Option<NetworkPoint>, ProviderError> {
+        *self.0.lock().unwrap()
     }
 }
 
@@ -27,7 +27,7 @@ fn context(session: &str) -> ResolutionContext {
     }
 }
 
-fn resolver(result: Result<Option<NetworkPoint>, ()>) -> StartResolver<FixtureProvider> {
+fn resolver(result: Result<Option<NetworkPoint>, ProviderError>) -> StartResolver<FixtureProvider> {
     StartResolver::new(
         Coverage::rectangle("coverage-v1", 77.0, 28.0, 78.0, 29.0).unwrap(),
         FixtureProvider(Mutex::new(result)),
@@ -44,7 +44,11 @@ fn distinguishes_invalid_outside_no_access_and_provider_failure() {
     );
     assert_eq!(
         resolver(Ok(None))
-            .resolve(Point::new(79.0, 28.6).unwrap(), context("guest-a"), SystemTime::now())
+            .resolve(
+                Point::new(79.0, 28.6).unwrap(),
+                context("guest-a"),
+                SystemTime::now()
+            )
             .unwrap_err(),
         ResolveError::UnsupportedCoverage
     );
@@ -55,7 +59,7 @@ fn distinguishes_invalid_outside_no_access_and_provider_failure() {
         ResolveError::NoRoutableAccess
     );
     assert_eq!(
-        resolver(Err(()))
+        resolver(Err(ProviderError))
             .resolve(inside, context("guest-a"), SystemTime::now())
             .unwrap_err(),
         ResolveError::ProviderFailure
@@ -70,13 +74,15 @@ fn confirmation_requires_short_snap_same_private_context_and_unexpired_record() 
         point: Point::new(77.2001, 28.6001).unwrap(),
         snap_distance_metres: 30,
     })));
-    let resolution = short
-        .resolve(requested, context("guest-a"), now)
-        .unwrap();
+    let resolution = short.resolve(requested, context("guest-a"), now).unwrap();
     assert_eq!(resolution.requested_point, requested);
     assert_eq!(resolution.snap_distance_metres, 30);
     assert!(resolution.confirmation_required);
-    assert!(short.confirm(resolution.id, &context("guest-a"), now).is_ok());
+    assert!(
+        short
+            .confirm(resolution.id, &context("guest-a"), now)
+            .is_ok()
+    );
     assert_eq!(
         short.confirm(resolution.id, &context("guest-b"), now),
         Err(ResolveError::WrongSession)
