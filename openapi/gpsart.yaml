@@ -31,6 +31,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Origin'
         - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/CsrfCookie'
       responses:
         '204':
           description: Revoked; both browser cookies are expired.
@@ -48,6 +49,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Origin'
         - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/CsrfCookie'
       responses:
         '200':
           description: Previous digest revoked and replacement session issued
@@ -60,7 +62,10 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
           description: Rotation was requested before the server-provided rotate_at time.
-          content: { application/json: { example: { code: rotation_not_due } } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+              example: { code: rotation_not_due }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
   /api/v1/designs:
     get:
@@ -114,6 +119,12 @@ components:
       required: true
       description: Must exactly match the non-HttpOnly gpsart_csrf cookie.
       schema: { type: string, minLength: 1 }
+    CsrfCookie:
+      in: cookie
+      name: gpsart_csrf
+      required: true
+      description: Readable double-submit cookie; its value must match X-CSRF-Token.
+      schema: { type: string, minLength: 1 }
   headers:
     SetCookie:
       description: Session and CSRF cookie mutations. Multiple Set-Cookie fields may be returned.
@@ -121,14 +132,31 @@ components:
   responses:
     Unauthenticated:
       description: Missing, expired, or revoked session
-      content: { application/json: { example: { code: authentication_required } } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example: { code: authentication_required }
     Forbidden:
       description: Origin or CSRF validation failed
-      content: { application/json: { example: { code: request_forbidden } } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example: { code: request_forbidden }
     AuthUnavailable:
       description: Authentication storage unavailable
-      content: { application/json: { example: { code: authentication_unavailable } } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example: { code: authentication_unavailable }
   schemas:
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [authentication_required, request_forbidden, authentication_unavailable, rotation_not_due, not_found]
     GuestSessionPolicy:
       type: object
       additionalProperties: false

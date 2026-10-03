@@ -6,8 +6,9 @@ returns them only in the `gpsart_guest` cookie. Production cookies are `Secure`,
 bytes; authentication performs a constant-time digest comparison after lookup. Cookies and API
 bodies contain no coordinates, route identifiers, or route geometry.
 
-Sessions last 24 hours. The API supplies an absolute `rotate_at` timestamp and the browser scheduler
-calls `POST /api/v1/guest-sessions/current/rotate` at 12 hours. The server rejects earlier rotation
+Sessions last 24 hours. Application startup issues a guest session, and the API supplies an absolute
+`rotate_at` timestamp. The browser scheduler calls `POST /api/v1/guest-sessions/current/rotate` with
+the readable CSRF cookie at 12 hours, then schedules the replacement policy. The server rejects earlier rotation
 with `409 rotation_not_due`; due rotation atomically revokes the old digest and inserts the
 replacement. Logout revokes the digest immediately. Expired or revoked sessions cannot
 authorize new work. Rows remain only through the cleanup grace period, after which cleanup deletes
