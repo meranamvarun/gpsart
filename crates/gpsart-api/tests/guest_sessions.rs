@@ -135,6 +135,11 @@ async fn foreign_and_unknown_resources_receive_the_same_denial() {
     let (other_cookie, other_csrf) = issue(store.clone()).await;
     let job = Uuid::new_v4();
     let route = Uuid::new_v4();
+    let resolved_start = Uuid::new_v4();
+    store
+        .assign(PrivateResourceKind::ResolvedStart, resolved_start, &owner_cookie)
+        .await
+        .unwrap();
     store
         .assign(PrivateResourceKind::Job, job, &owner_cookie)
         .await
@@ -145,6 +150,13 @@ async fn foreign_and_unknown_resources_receive_the_same_denial() {
         .unwrap();
 
     for (kind, id, method, cookie, csrf) in [
+        (
+            PrivateResourceKind::ResolvedStart,
+            resolved_start,
+            Method::GET,
+            &other_cookie,
+            &other_csrf,
+        ),
         (
             PrivateResourceKind::Job,
             job,
@@ -272,6 +284,22 @@ async fn session_response_never_contains_cookie_token() {
 async fn rotation_replaces_and_revokes_the_previous_credential() {
     let store = Arc::new(InMemorySessionStore::default());
     let (cookie, csrf) = issue(store.clone()).await;
+    let early = app_with_auth(Healthy, store.clone(), policy())
+        .oneshot(
+            Request::post("/api/v1/guest-sessions/current/rotate")
+                .header(header::COOKIE, format!("{cookie}; gpsart_csrf={csrf}"))
+                .header(header::ORIGIN, "https://app.gpsart.test")
+                .header("x-csrf-token", csrf.as_str())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(early.status(), StatusCode::CONFLICT);
+    store
+        .age_session_for_test(&cookie, Duration::from_secs(43_200))
+        .await
+        .unwrap();
     let response = app_with_auth(Healthy, store.clone(), policy())
         .oneshot(
             Request::post("/api/v1/guest-sessions/current/rotate")
