@@ -147,8 +147,11 @@ impl GuestSessionStore for PostgresGuestSessionStore {
             .begin()
             .await
             .map_err(|_| SessionStoreError::Unavailable)?;
-        sqlx::query("UPDATE guest_sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND revoked_at IS NULL")
+        let revoked = sqlx::query("UPDATE guest_sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()")
             .bind(previous_id).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?;
+        if revoked.rows_affected() != 1 {
+            return Err(SessionStoreError::Unavailable);
+        }
         sqlx::query("INSERT INTO guest_sessions (id, token_hash, created_at, expires_at, cleanup_after) VALUES ($1, $2, $3, $4, $5)")
             .bind(replacement.id).bind(replacement.token_digest.as_slice()).bind(OffsetDateTime::from(replacement.created_at)).bind(OffsetDateTime::from(replacement.expires_at)).bind(OffsetDateTime::from(replacement.cleanup_after))
             .execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?;

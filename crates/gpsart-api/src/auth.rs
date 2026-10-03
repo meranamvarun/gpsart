@@ -346,10 +346,15 @@ impl GuestSessionStore for InMemorySessionStore {
         replacement: GuestSessionRecord,
     ) -> Result<(), SessionStoreError> {
         let mut sessions = self.sessions.write().expect("session lock");
+        let mut rotated = false;
         for session in sessions.values_mut() {
-            if session.id == previous_id {
+            if session.id == previous_id && !session.revoked {
                 session.revoked = true;
+                rotated = true;
             }
+        }
+        if !rotated {
+            return Err(SessionStoreError::Unavailable);
         }
         sessions.insert(replacement.token_digest, replacement);
         Ok(())
