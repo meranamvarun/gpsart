@@ -3,6 +3,7 @@ use std::fmt;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod starts;
 pub mod templates;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
