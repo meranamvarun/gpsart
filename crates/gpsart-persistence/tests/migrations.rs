@@ -51,8 +51,8 @@ async fn seed_owned_request(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
         INSERT INTO guest_sessions (id, token_hash, expires_at, cleanup_after) VALUES
-          ('00000000-0000-0000-0000-000000000001', decode('01', 'hex'), now() + interval '1 day', now() + interval '2 days'),
-          ('00000000-0000-0000-0000-000000000002', decode('02', 'hex'), now() + interval '1 day', now() + interval '2 days');
+          ('00000000-0000-0000-0000-000000000001', decode(repeat('01', 32), 'hex'), now() + interval '1 day', now() + interval '2 days'),
+          ('00000000-0000-0000-0000-000000000002', decode(repeat('02', 32), 'hex'), now() + interval '1 day', now() + interval '2 days');
         INSERT INTO resolved_starts (
           id, guest_session_id, requested_pin, confirmed_start, profile_version,
           coverage_policy_version, map_data_version, expires_at
@@ -151,6 +151,10 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query("INSERT INTO guest_sessions (id, token_hash, expires_at, cleanup_after) VALUES ('00000000-0000-0000-0000-000000000099', decode('abcd', 'hex'), now() + interval '1 day', now() + interval '2 days')")
+        .execute(&pool)
+        .await
+        .expect("legacy database accepts a non-SHA-256 token hash");
     sqlx::query(
         "INSERT INTO _sqlx_migrations(version, description, success, checksum, execution_time) VALUES ($1, $2, true, $3, 0)",
     )
@@ -163,7 +167,9 @@ async fn upgrades_from_the_previous_checked_in_migration() {
 
     assert_eq!(
         migration_status(&pool).await.unwrap(),
-        MigrationStatus::Pending { versions: vec![2] }
+        MigrationStatus::Pending {
+            versions: vec![2, 3]
+        }
     );
     MIGRATOR
         .run(&pool)
@@ -172,6 +178,16 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     assert_eq!(
         migration_status(&pool).await.unwrap(),
         MigrationStatus::Current
+    );
+    let legacy_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM guest_sessions WHERE id = '00000000-0000-0000-0000-000000000099'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        legacy_rows, 0,
+        "invalid legacy credentials fail closed during upgrade"
     );
     let state_labels: Vec<String> = sqlx::query(
         "SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid = pg_enum.enumtypid WHERE typname = 'generation_job_state' ORDER BY enumsortorder",

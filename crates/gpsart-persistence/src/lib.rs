@@ -1,10 +1,195 @@
 use async_trait::async_trait;
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
-use std::{collections::BTreeMap, fmt, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    time::{Duration, SystemTime},
+};
 use thiserror::Error;
+use time::OffsetDateTime;
 use tokio::time::timeout;
+use uuid::Uuid;
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PrivateResourceKind {
+    ResolvedStart,
+    Job,
+    Route,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GuestSessionRecord {
+    pub id: Uuid,
+    pub token_digest: [u8; 32],
+    pub created_at: SystemTime,
+    pub expires_at: SystemTime,
+    pub cleanup_after: SystemTime,
+    pub revoked: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CleanupReport {
+    pub deleted_sessions: u64,
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum SessionStoreError {
+    #[error("session storage is unavailable")]
+    Unavailable,
+}
+
+#[async_trait]
+pub trait GuestSessionStore: Send + Sync + 'static {
+    async fn insert_session(&self, record: GuestSessionRecord) -> Result<(), SessionStoreError>;
+    async fn find_session(
+        &self,
+        digest: [u8; 32],
+    ) -> Result<Option<GuestSessionRecord>, SessionStoreError>;
+    async fn revoke_session(&self, id: Uuid) -> Result<(), SessionStoreError>;
+    async fn rotate_session(
+        &self,
+        previous_id: Uuid,
+        replacement: GuestSessionRecord,
+    ) -> Result<(), SessionStoreError>;
+    async fn owns_resource(
+        &self,
+        session_id: Uuid,
+        kind: PrivateResourceKind,
+        resource_id: Uuid,
+    ) -> Result<bool, SessionStoreError>;
+    async fn cleanup_expired_sessions(
+        &self,
+        cutoff: SystemTime,
+    ) -> Result<CleanupReport, SessionStoreError>;
+}
+
+#[derive(Clone)]
+pub struct PostgresGuestSessionStore {
+    pool: PgPool,
+}
+
+impl PostgresGuestSessionStore {
+    pub async fn connect(database_url: &str) -> Result<Self, SessionStoreError> {
+        PgPoolOptions::new()
+            .max_connections(5)
+            .connect(database_url)
+            .await
+            .map(|pool| Self { pool })
+            .map_err(|_| SessionStoreError::Unavailable)
+    }
+}
+
+#[async_trait]
+impl GuestSessionStore for PostgresGuestSessionStore {
+    async fn insert_session(&self, record: GuestSessionRecord) -> Result<(), SessionStoreError> {
+        sqlx::query("INSERT INTO guest_sessions (id, token_hash, created_at, expires_at, cleanup_after) VALUES ($1, $2, $3, $4, $5)")
+            .bind(record.id).bind(record.token_digest.as_slice()).bind(OffsetDateTime::from(record.created_at)).bind(OffsetDateTime::from(record.expires_at)).bind(OffsetDateTime::from(record.cleanup_after))
+            .execute(&self.pool).await.map(|_| ()).map_err(|_| SessionStoreError::Unavailable)
+    }
+
+    async fn find_session(
+        &self,
+        digest: [u8; 32],
+    ) -> Result<Option<GuestSessionRecord>, SessionStoreError> {
+        let row = sqlx::query("SELECT id, token_hash, created_at, expires_at, cleanup_after, revoked_at IS NOT NULL AS revoked FROM guest_sessions WHERE token_hash = $1")
+            .bind(digest.as_slice()).fetch_optional(&self.pool).await.map_err(|_| SessionStoreError::Unavailable)?;
+        row.map(|row| {
+            let stored: Vec<u8> = row
+                .try_get("token_hash")
+                .map_err(|_| SessionStoreError::Unavailable)?;
+            let token_digest: [u8; 32] = stored
+                .try_into()
+                .map_err(|_| SessionStoreError::Unavailable)?;
+            Ok(GuestSessionRecord {
+                id: row
+                    .try_get("id")
+                    .map_err(|_| SessionStoreError::Unavailable)?,
+                token_digest,
+                created_at: SystemTime::from(
+                    row.try_get::<OffsetDateTime, _>("created_at")
+                        .map_err(|_| SessionStoreError::Unavailable)?,
+                ),
+                expires_at: SystemTime::from(
+                    row.try_get::<OffsetDateTime, _>("expires_at")
+                        .map_err(|_| SessionStoreError::Unavailable)?,
+                ),
+                cleanup_after: SystemTime::from(
+                    row.try_get::<OffsetDateTime, _>("cleanup_after")
+                        .map_err(|_| SessionStoreError::Unavailable)?,
+                ),
+                revoked: row
+                    .try_get("revoked")
+                    .map_err(|_| SessionStoreError::Unavailable)?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn revoke_session(&self, id: Uuid) -> Result<(), SessionStoreError> {
+        sqlx::query(
+            "UPDATE guest_sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|_| SessionStoreError::Unavailable)
+    }
+
+    async fn rotate_session(
+        &self,
+        previous_id: Uuid,
+        replacement: GuestSessionRecord,
+    ) -> Result<(), SessionStoreError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| SessionStoreError::Unavailable)?;
+        let revoked = sqlx::query("UPDATE guest_sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()")
+            .bind(previous_id).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?;
+        if revoked.rows_affected() != 1 {
+            return Err(SessionStoreError::Unavailable);
+        }
+        sqlx::query("INSERT INTO guest_sessions (id, token_hash, created_at, expires_at, cleanup_after) VALUES ($1, $2, $3, $4, $5)")
+            .bind(replacement.id).bind(replacement.token_digest.as_slice()).bind(OffsetDateTime::from(replacement.created_at)).bind(OffsetDateTime::from(replacement.expires_at)).bind(OffsetDateTime::from(replacement.cleanup_after))
+            .execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| SessionStoreError::Unavailable)
+    }
+
+    async fn owns_resource(
+        &self,
+        session_id: Uuid,
+        kind: PrivateResourceKind,
+        resource_id: Uuid,
+    ) -> Result<bool, SessionStoreError> {
+        let owned = match kind {
+            PrivateResourceKind::ResolvedStart => sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM resolved_starts WHERE id = $1 AND guest_session_id = $2)"),
+            PrivateResourceKind::Job => sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM generation_jobs WHERE id = $1 AND guest_session_id = $2)"),
+            PrivateResourceKind::Route => sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM route_candidates WHERE id = $1 AND guest_session_id = $2)"),
+        }.bind(resource_id).bind(session_id).fetch_one(&self.pool).await.map_err(|_| SessionStoreError::Unavailable)?;
+        Ok(owned)
+    }
+
+    async fn cleanup_expired_sessions(
+        &self,
+        cutoff: SystemTime,
+    ) -> Result<CleanupReport, SessionStoreError> {
+        // Deliberately return only a count: cleanup must never materialize or log route geometry.
+        let deleted_sessions = sqlx::query("DELETE FROM guest_sessions WHERE cleanup_after <= $1")
+            .bind(OffsetDateTime::from(cutoff))
+            .execute(&self.pool)
+            .await
+            .map_err(|_| SessionStoreError::Unavailable)?
+            .rows_affected();
+        Ok(CleanupReport { deleted_sessions })
+    }
+}
 
 #[async_trait]
 pub trait DependencyProbe: Send + Sync {

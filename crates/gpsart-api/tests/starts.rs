@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use axum::{body::Body, http::Request};
 use gpsart_api::{
-    ConfiguredStartService, CoveragePayload, Readiness, StartService, app_with_starts,
+    ConfiguredStartService, CoveragePayload, Readiness, StartService, app_with_services,
+    app_with_starts,
+    auth::{InMemorySessionStore, SessionPolicy},
 };
 use gpsart_domain::starts::{
     Coverage, NetworkPoint, Point, ProviderError, ResolutionId, ResolveError, StartResolution,
@@ -9,7 +11,7 @@ use gpsart_domain::starts::{
 };
 use gpsart_domain::{ActivityProfile, RouteRequestProfile};
 use http_body_util::BodyExt;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tower::ServiceExt;
 
 #[derive(Clone)]
@@ -306,4 +308,79 @@ async fn every_resolution_failure_has_a_stable_http_status_and_code() {
         assert_eq!(response.status(), status);
         assert_eq!(json(response).await["outcome"]["code"], code);
     }
+}
+
+#[tokio::test]
+async fn integrated_start_mutations_require_private_cookie_and_csrf() {
+    let policy = SessionPolicy::new(
+        "https://app.gpsart.test",
+        true,
+        Duration::from_secs(86_400),
+        Duration::from_secs(43_200),
+    )
+    .unwrap();
+    let app = app_with_services(
+        Healthy,
+        OutcomeService,
+        Arc::new(InMemorySessionStore::default()),
+        policy,
+    );
+    let issued = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/guest-sessions")
+                .header("origin", "https://app.gpsart.test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let cookies = issued
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| {
+            value
+                .to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    let csrf = cookies
+        .iter()
+        .find_map(|cookie| cookie.strip_prefix("gpsart_csrf="))
+        .unwrap();
+    let body = serde_json::json!({
+        "requested_point": {"longitude": 70.0, "latitude": 28.6},
+        "profile": {"activity": "walking", "profile_version": "walking-v1"}
+    });
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/starts/resolve")
+                .header("content-type", "application/json")
+                .header("cookie", cookies.join("; "))
+                .header("origin", "https://app.gpsart.test")
+                .header("x-csrf-token", csrf)
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 422);
+
+    let legacy_header_only = app
+        .oneshot(
+            Request::post("/api/v1/starts/resolve")
+                .header("content-type", "application/json")
+                .header("x-gpsart-guest-session", "bypass")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(legacy_header_only.status(), 401);
 }
