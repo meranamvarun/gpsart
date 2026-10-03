@@ -135,6 +135,70 @@ impl ValhallaTransport for MissingEdgesTransport {
     }
 }
 
+#[derive(Clone)]
+struct ResponseTransport {
+    route: Value,
+    trace: Value,
+}
+
+#[async_trait]
+impl ValhallaTransport for ResponseTransport {
+    async fn post_route(&self, _request: Value) -> Result<Value, RoutingError> {
+        Ok(self.route.clone())
+    }
+
+    async fn post_trace_attributes(&self, _request: Value) -> Result<Value, RoutingError> {
+        Ok(self.trace.clone())
+    }
+}
+
+fn valid_route_response() -> Value {
+    json!({
+        "trip": {
+            "summary": {"length": 0.024},
+            "legs": [{
+                "shape": "??A?A?A?",
+                "maneuvers": [
+                    {"type": 1, "begin_shape_index": 0},
+                    {"type": 10, "begin_shape_index": 1},
+                    {"type": 4, "begin_shape_index": 3}
+                ]
+            }]
+        }
+    })
+}
+
+fn valid_trace_response() -> Value {
+    json!({
+        "edges": [
+            {"id": 42, "length": 0.008, "begin_shape_index": 0, "end_shape_index": 1},
+            {"id": 43, "length": 0.008, "begin_shape_index": 1, "end_shape_index": 2},
+            {"id": 42, "length": 0.008, "begin_shape_index": 2, "end_shape_index": 3}
+        ]
+    })
+}
+
+async fn assert_provider_response_is_rejected(route: Value, trace: Value) {
+    let adapter = ValhallaAdapter::new(
+        ResponseTransport { route, trace },
+        None,
+        "OpenStreetMap contributors",
+    );
+    let query = RouteQuery::from_points(
+        RouteRequestProfile::new(ActivityProfile::Walking),
+        [point(0, 0), point(0, 30_000)],
+    );
+    assert_eq!(
+        adapter
+            .route(
+                &query,
+                &AttemptControl::with_timeout(Duration::from_secs(1), 1),
+            )
+            .await,
+        Err(RoutingError::InvalidProviderResponse),
+    );
+}
+
 #[tokio::test]
 async fn missing_provider_edges_is_an_error_not_fabricated_connectivity() {
     let adapter = ValhallaAdapter::new(MissingEdgesTransport, None, "OpenStreetMap contributors");
@@ -151,4 +215,60 @@ async fn missing_provider_edges_is_an_error_not_fabricated_connectivity() {
             .await,
         Err(RoutingError::InvalidProviderResponse),
     );
+}
+
+#[tokio::test]
+async fn inconsistent_edge_coverage_and_distance_are_rejected() {
+    let invalid_traces = [
+        json!({"edges": [
+            {"id": 42, "length": 0.008, "begin_shape_index": 1, "end_shape_index": 2},
+            {"id": 43, "length": 0.008, "begin_shape_index": 2, "end_shape_index": 3}
+        ]}),
+        json!({"edges": [
+            {"id": 42, "length": 0.008, "begin_shape_index": 0, "end_shape_index": 1},
+            {"id": 43, "length": 0.008, "begin_shape_index": 2, "end_shape_index": 3}
+        ]}),
+        json!({"edges": [
+            {"id": 42, "length": 0.008, "begin_shape_index": 0, "end_shape_index": 2},
+            {"id": 43, "length": 0.008, "begin_shape_index": 1, "end_shape_index": 3}
+        ]}),
+        json!({"edges": [
+            {"id": 42, "length": 0.100, "begin_shape_index": 0, "end_shape_index": 1},
+            {"id": 43, "length": 0.100, "begin_shape_index": 1, "end_shape_index": 2},
+            {"id": 44, "length": 0.100, "begin_shape_index": 2, "end_shape_index": 3}
+        ]}),
+    ];
+    for trace in invalid_traces {
+        assert_provider_response_is_rejected(valid_route_response(), trace).await;
+    }
+}
+
+#[tokio::test]
+async fn missing_out_of_bounds_or_reordered_manoeuvres_are_rejected() {
+    let invalid_manoeuvres = [
+        json!([]),
+        json!([
+            {"type": 1, "begin_shape_index": 0},
+            {"type": 4, "begin_shape_index": 4}
+        ]),
+        json!([
+            {"type": 1, "begin_shape_index": 0},
+            {"type": 10, "begin_shape_index": 2},
+            {"type": 10, "begin_shape_index": 1},
+            {"type": 4, "begin_shape_index": 3}
+        ]),
+        json!([
+            {"type": 1, "begin_shape_index": 1},
+            {"type": 4, "begin_shape_index": 3}
+        ]),
+        json!([
+            {"type": 1, "begin_shape_index": 0},
+            {"type": 4, "begin_shape_index": 2}
+        ]),
+    ];
+    for manoeuvres in invalid_manoeuvres {
+        let mut route = valid_route_response();
+        route["trip"]["legs"][0]["maneuvers"] = manoeuvres;
+        assert_provider_response_is_rejected(route, valid_trace_response()).await;
+    }
 }

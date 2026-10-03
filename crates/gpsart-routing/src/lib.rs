@@ -707,6 +707,8 @@ impl<T: ValhallaTransport> RouteProvider for ValhallaAdapter<T> {
                     .and_then(Value::as_array)
                     .ok_or(RoutingError::InvalidProviderResponse)?;
                 let mut edges = Vec::with_capacity(trace_edges.len());
+                let mut expected_begin = 0_usize;
+                let mut traced_kilometres = 0.0_f64;
                 for edge in trace_edges {
                     let id = edge
                         .get("id")
@@ -714,13 +716,18 @@ impl<T: ValhallaTransport> RouteProvider for ValhallaAdapter<T> {
                         .ok_or(RoutingError::InvalidProviderResponse)?;
                     let begin = json_usize(edge, "begin_shape_index")?;
                     let end = json_usize(edge, "end_shape_index")?;
-                    if begin >= end || end >= geometry.len() {
+                    if begin != expected_begin || begin >= end || end >= geometry.len() {
                         return Err(RoutingError::InvalidProviderResponse);
                     }
-                    let distance = edge
+                    expected_begin = end;
+                    let edge_kilometres = edge
                         .get("length")
                         .and_then(Value::as_f64)
-                        .and_then(kilometres_to_metres);
+                        .filter(|length| length.is_finite() && *length > 0.0)
+                        .ok_or(RoutingError::InvalidProviderResponse)?;
+                    traced_kilometres += edge_kilometres;
+                    let distance = kilometres_to_metres(edge_kilometres)
+                        .ok_or(RoutingError::InvalidProviderResponse)?;
                     edges.push(RouteEdge {
                         edge_id: id.to_string(),
                         from: None,
@@ -728,28 +735,49 @@ impl<T: ValhallaTransport> RouteProvider for ValhallaAdapter<T> {
                         begin_geometry_index: begin,
                         end_geometry_index: end,
                         direction: TraversalDirection::Forward,
-                        distance,
+                        distance: Some(distance),
                         qualifications: vec![Qualification::ProviderAccessUnverified],
                     });
                 }
-                if edges.is_empty() {
+                if edges.is_empty() || expected_begin != geometry.len() - 1 {
                     return Err(RoutingError::InvalidProviderResponse);
                 }
-                let distance = trip
+                let summary_kilometres = trip
                     .get("summary")
                     .and_then(|summary| summary.get("length"))
                     .and_then(Value::as_f64)
-                    .and_then(kilometres_to_metres)
                     .ok_or(RoutingError::InvalidProviderResponse)?;
+                let distance = kilometres_to_metres(summary_kilometres)
+                    .ok_or(RoutingError::InvalidProviderResponse)?;
+                // Each provider kilometre value is rounded to 0.001 km.
+                let rounding_tolerance = 0.0005 * (edges.len() + 1) as f64;
+                if (traced_kilometres - summary_kilometres).abs()
+                    > rounding_tolerance + f64::EPSILON
+                {
+                    return Err(RoutingError::InvalidProviderResponse);
+                }
                 let raw_manoeuvres = leg
                     .get("maneuvers")
                     .and_then(Value::as_array)
                     .ok_or(RoutingError::InvalidProviderResponse)?;
+                if raw_manoeuvres.is_empty() {
+                    return Err(RoutingError::InvalidProviderResponse);
+                }
+                let mut previous_geometry_index = 0_usize;
                 let manoeuvres = raw_manoeuvres
                     .iter()
                     .enumerate()
                     .map(|(index, item)| {
                         let geometry_index = json_usize(item, "begin_shape_index")?;
+                        if geometry_index >= geometry.len()
+                            || (index == 0 && geometry_index != 0)
+                            || (index > 0 && geometry_index < previous_geometry_index)
+                            || (index + 1 == raw_manoeuvres.len()
+                                && geometry_index != geometry.len() - 1)
+                        {
+                            return Err(RoutingError::InvalidProviderResponse);
+                        }
+                        previous_geometry_index = geometry_index;
                         let provider_type = item
                             .get("type")
                             .and_then(Value::as_u64)

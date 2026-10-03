@@ -11,7 +11,7 @@
 - `RoutePath` returns ordered edge occurrences, canonical distance, ordered geometry, manoeuvres, and provider/data/attribution provenance. Repeated edge IDs remain repeated occurrences.
 - `ControlledGraph` is deterministic test infrastructure. It enforces direction, forbidden turns, activity access, component separation, and graph topology at grade-separated crossings.
 - `AttemptControl` propagates cancellation and a per-call deadline and atomically limits attempts. `route_with_retries` cannot exceed that shared budget.
-- `ValhallaAdapter` accepts coordinate anchors, maps walking/running to pedestrian and cycling to bicycle, requests exact `edge_walk` attribution, decodes polyline6 geometry, and rejects absent/malformed edges. It marks access as unverified.
+- `ValhallaAdapter` accepts coordinate anchors, maps walking/running to pedestrian and cycling to bicycle, requests exact `edge_walk` attribution, decodes polyline6 geometry, and rejects absent/malformed edges. Edge intervals must cover the geometry contiguously and in order, trace distances must reconcile with the summary within documented provider-rounding tolerance, and manoeuvres must be present, ordered, and bounded. It marks access as unverified.
 
 ## Decision and blocker
 
