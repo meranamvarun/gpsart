@@ -131,6 +131,7 @@ test("refresh resumes an owned unexpired job with ETag polling and bounded backo
     proposedStart: proposed,
     expiresAtEpochSeconds: 1_900_000_000,
     etag: '"2"',
+    statusPayload: activeStatus(),
   }));
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const delays: number[] = [];
