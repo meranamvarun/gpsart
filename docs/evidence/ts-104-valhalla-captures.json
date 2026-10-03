@@ -1,0 +1,71 @@
+{
+  "captured_at": "2026-10-02",
+  "service": "https://valhalla1.openstreetmap.de",
+  "status": {
+    "http_status": 200,
+    "latency_ms": 1552,
+    "version": "3.9.0-685e3d8",
+    "tileset_last_modified": 1790924882,
+    "tileset_last_modified_utc": "2026-10-02T07:08:02Z"
+  },
+  "fixtures": [
+    {
+      "name": "heart-pedestrian",
+      "costing": "pedestrian",
+      "ordered_anchor_count": 8,
+      "route_http_status": 200,
+      "route_latency_ms": 1432,
+      "route_status_message": "Found route between points",
+      "distance_km": 5.914,
+      "duration_seconds": 4507.456,
+      "manoeuvre_count": 68,
+      "encoded_shape_characters": 1157,
+      "route_response_has_edge_ids": false,
+      "edge_walk_http_status": 400,
+      "map_snap_trace_latency_ms": 455,
+      "map_snap_edge_count": 186,
+      "map_snap_unique_edge_id_count": 185,
+      "map_snap_repeated_way_id_count": 43,
+      "trace_osm_changeset": null
+    },
+    {
+      "name": "heart-bicycle",
+      "costing": "bicycle",
+      "ordered_anchor_count": 8,
+      "route_http_status": 200,
+      "route_latency_ms": 414,
+      "route_status_message": "Found route between points",
+      "distance_km": 10.446,
+      "duration_seconds": 2506.491,
+      "manoeuvre_count": 51,
+      "encoded_shape_characters": 1798,
+      "route_response_has_edge_ids": false,
+      "edge_walk_http_status": 400,
+      "map_snap_trace_latency_ms": 567,
+      "map_snap_edge_count": 271,
+      "map_snap_unique_edge_id_count": 253,
+      "map_snap_repeated_way_id_count": 48,
+      "trace_osm_changeset": null
+    },
+    {
+      "name": "hi-pedestrian",
+      "costing": "pedestrian",
+      "ordered_anchor_count": 10,
+      "route_http_status": 200,
+      "route_latency_ms": 389,
+      "route_status_message": "Found route between points",
+      "distance_km": 9.387,
+      "duration_seconds": 7128.074,
+      "manoeuvre_count": 94,
+      "encoded_shape_characters": 1625,
+      "route_response_has_edge_ids": false,
+      "edge_walk_http_status": 400,
+      "map_snap_trace_latency_ms": 468,
+      "map_snap_edge_count": 262,
+      "map_snap_unique_edge_id_count": 259,
+      "map_snap_repeated_way_id_count": 61,
+      "trace_osm_changeset": null
+    }
+  ],
+  "interpretation": "Observed responses prove that the public demo can return multi-anchor shapes. They do not prove GPSART legality: route responses omitted edge IDs, exact edge-walk attribution failed, and map-snap attribution may select a different traversal. Counts from map-snap are diagnostic only and are not candidate data."
+}
