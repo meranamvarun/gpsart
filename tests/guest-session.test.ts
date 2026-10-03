@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeGuestSessionPolicy, scheduleGuestSessionRotation } from "../src/domain/guest-session.ts";
+import { startGuestSessionMaintenance } from "../src/client/guest-session.ts";
 
 test("guest session response exposes timing policy but no credential", () => {
   assert.deepEqual(decodeGuestSessionPolicy({ expires_at: 2_000_000_000, rotate_at: 1_999_956_800, rotate_after: 43_200 }), { expiresAt: 2_000_000_000, rotateAt: 1_999_956_800, rotateAfterSeconds: 43_200 });
@@ -24,4 +25,26 @@ test("guest session rotation is scheduled from the server deadline", async () =>
   await Promise.resolve();
   assert.equal(rotations, 1);
   cancel();
+});
+
+test("browser maintenance issues a session and posts due rotation with CSRF", async () => {
+  const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+  let due: (() => void) | undefined;
+  const fetcher: typeof fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify({ expires_at: 2_000, rotate_at: 1_000, rotate_after: 500 }), {
+      status: calls.length === 1 ? 201 : 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  await startGuestSessionMaintenance(fetcher, () => "csrf-value", (_policy, rotate) => {
+    due = () => { void rotate(); };
+    return () => undefined;
+  });
+  assert.equal(calls[0]?.url, "/api/v1/guest-sessions");
+  assert.equal(calls[0]?.init?.credentials, "include");
+  due?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls[1]?.url, "/api/v1/guest-sessions/current/rotate");
+  assert.equal(new Headers(calls[1]?.init?.headers).get("x-csrf-token"), "csrf-value");
 });
