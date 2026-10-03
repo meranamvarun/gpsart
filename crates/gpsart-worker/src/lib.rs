@@ -1,3 +1,6 @@
+use gpsart_persistence::jobs::{
+    JobError, JobLease, PostgresJobCoordinator, PostgresProviderCallPermit,
+};
 use gpsart_persistence::{DependencyProbe, PostgresProbe};
 use std::{
     future::Future,
@@ -76,4 +79,65 @@ pub async fn run_until_shutdown(
 pub enum WorkerError {
     #[error("worker dependency is unavailable")]
     DependencyUnavailable,
+    #[error("durable job state is unavailable")]
+    JobStateUnavailable,
+    #[error("provider task failed before producing a result")]
+    ProviderTaskFailed,
+}
+
+#[async_trait::async_trait]
+pub trait ProviderCallPermit: Send {
+    async fn commit(self: Box<Self>) -> Result<(), JobError>;
+}
+
+#[async_trait::async_trait]
+impl ProviderCallPermit for PostgresProviderCallPermit {
+    async fn commit(self: Box<Self>) -> Result<(), JobError> {
+        (*self).commit().await
+    }
+}
+
+#[async_trait::async_trait]
+pub trait ProviderGate: Send + Sync {
+    async fn reserve(
+        &self,
+        lease: &JobLease,
+        required_budget: Duration,
+    ) -> Result<Option<Box<dyn ProviderCallPermit>>, JobError>;
+}
+
+#[async_trait::async_trait]
+impl ProviderGate for PostgresJobCoordinator {
+    async fn reserve(
+        &self,
+        lease: &JobLease,
+        required_budget: Duration,
+    ) -> Result<Option<Box<dyn ProviderCallPermit>>, JobError> {
+        self.begin_provider_call(lease, std::time::SystemTime::now(), required_budget)
+            .await
+            .map(|permit| permit.map(|value| Box::new(value) as Box<dyn ProviderCallPermit>))
+    }
+}
+
+pub async fn run_provider_call<T>(
+    gate: &dyn ProviderGate,
+    lease: &JobLease,
+    required_budget: Duration,
+    operation: impl FnOnce() -> tokio::task::JoinHandle<T>,
+) -> Result<Option<T>, WorkerError> {
+    let Some(permit) = gate
+        .reserve(lease, required_budget)
+        .await
+        .map_err(|_| WorkerError::JobStateUnavailable)?
+    else {
+        return Ok(None);
+    };
+    let task = operation();
+    permit
+        .commit()
+        .await
+        .map_err(|_| WorkerError::JobStateUnavailable)?;
+    task.await
+        .map(Some)
+        .map_err(|_| WorkerError::ProviderTaskFailed)
 }

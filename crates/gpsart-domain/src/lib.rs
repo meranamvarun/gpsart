@@ -107,6 +107,7 @@ struct ProfileIdentity {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProfileIdentityWire {
     activity: ActivityProfile,
     profile_version: ProfileVersion,

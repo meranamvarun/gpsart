@@ -37,6 +37,7 @@ test("coverage, confirmation, and machine outcomes are decoded explicitly", () =
     { longitude: 77.2, latitude: 28.6 },
   );
   assert.equal(decodeStartOutcome({ outcome: { code: "no_routable_access" } }), "no_routable_access");
+  assert.equal(decodeStartOutcome({ outcome: { code: "storage_unavailable" } }), "storage_unavailable");
   assert.equal(decodeStartOutcome({ outcome: { code: "nearest-ish" } }), undefined);
   assert.equal(decodeCoverageResponse({ version: "v1", geojson: null }), undefined);
 });

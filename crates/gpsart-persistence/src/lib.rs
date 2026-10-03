@@ -10,6 +10,8 @@ use time::OffsetDateTime;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+pub mod jobs;
+
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -27,6 +29,106 @@ pub struct GuestSessionRecord {
     pub expires_at: SystemTime,
     pub cleanup_after: SystemTime,
     pub revoked: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedStartRecord {
+    pub id: Uuid,
+    pub guest_session_id: Uuid,
+    pub requested_longitude: f64,
+    pub requested_latitude: f64,
+    pub confirmed_longitude: f64,
+    pub confirmed_latitude: f64,
+    pub profile_version: String,
+    pub coverage_policy_version: String,
+    pub map_data_version: String,
+    pub created_at: SystemTime,
+    pub expires_at: SystemTime,
+}
+
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+pub enum ResolvedStartStoreError {
+    #[error("resolved-start storage is unavailable")]
+    Unavailable,
+}
+
+#[async_trait]
+pub trait ResolvedStartStore: Send + Sync + 'static {
+    async fn insert_resolved_start(
+        &self,
+        record: ResolvedStartRecord,
+    ) -> Result<(), ResolvedStartStoreError>;
+}
+
+#[derive(Clone)]
+pub struct PostgresResolvedStartStore {
+    pool: PgPool,
+}
+
+impl PostgresResolvedStartStore {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn connect(database_url: &str) -> Result<Self, ResolvedStartStoreError> {
+        PgPoolOptions::new()
+            .max_connections(5)
+            .connect(database_url)
+            .await
+            .map(Self::new)
+            .map_err(|_| ResolvedStartStoreError::Unavailable)
+    }
+}
+
+#[async_trait]
+impl ResolvedStartStore for PostgresResolvedStartStore {
+    async fn insert_resolved_start(
+        &self,
+        record: ResolvedStartRecord,
+    ) -> Result<(), ResolvedStartStoreError> {
+        let inserted = sqlx::query(
+            "INSERT INTO resolved_starts (id, guest_session_id, requested_pin, confirmed_start, profile_version, coverage_policy_version, map_data_version, created_at, expires_at) VALUES ($1,$2,ST_SetSRID(ST_MakePoint($3,$4),4326),ST_SetSRID(ST_MakePoint($5,$6),4326),$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(record.id)
+        .bind(record.guest_session_id)
+        .bind(record.requested_longitude)
+        .bind(record.requested_latitude)
+        .bind(record.confirmed_longitude)
+        .bind(record.confirmed_latitude)
+        .bind(&record.profile_version)
+        .bind(&record.coverage_policy_version)
+        .bind(&record.map_data_version)
+        .bind(OffsetDateTime::from(record.created_at))
+        .bind(OffsetDateTime::from(record.expires_at))
+        .execute(&self.pool)
+        .await
+        .map_err(|_| ResolvedStartStoreError::Unavailable)?
+        .rows_affected();
+        if inserted == 1 {
+            return Ok(());
+        }
+        let identical: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM resolved_starts WHERE id=$1 AND guest_session_id=$2 AND ST_X(requested_pin)=$3 AND ST_Y(requested_pin)=$4 AND ST_X(confirmed_start)=$5 AND ST_Y(confirmed_start)=$6 AND profile_version=$7 AND coverage_policy_version=$8 AND map_data_version=$9 AND expires_at=$10)",
+        )
+        .bind(record.id)
+        .bind(record.guest_session_id)
+        .bind(record.requested_longitude)
+        .bind(record.requested_latitude)
+        .bind(record.confirmed_longitude)
+        .bind(record.confirmed_latitude)
+        .bind(&record.profile_version)
+        .bind(&record.coverage_policy_version)
+        .bind(&record.map_data_version)
+        .bind(OffsetDateTime::from(record.expires_at))
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|_| ResolvedStartStoreError::Unavailable)?;
+        if identical {
+            Ok(())
+        } else {
+            Err(ResolvedStartStoreError::Unavailable)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

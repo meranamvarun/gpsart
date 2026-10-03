@@ -508,6 +508,7 @@ name = "gpsart-persistence"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "serde_json",
  "sqlx",
  "thiserror",
  "time",
@@ -537,6 +538,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

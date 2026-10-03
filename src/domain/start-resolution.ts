@@ -20,6 +20,7 @@ export type StartOutcomeCode =
   | "unsupported_coverage"
   | "no_routable_access"
   | "provider_failure"
+  | "storage_unavailable"
   | "expired_resolution"
   | "wrong_session"
   | "profile_changed"
@@ -48,7 +49,7 @@ export function decodeCoverageResponse(value: unknown): CoverageResponse | undef
 
 const outcomeCodes: readonly StartOutcomeCode[] = [
   "invalid_coordinates", "unsupported_coverage", "no_routable_access",
-  "provider_failure", "expired_resolution", "wrong_session", "profile_changed",
+  "provider_failure", "storage_unavailable", "expired_resolution", "wrong_session", "profile_changed",
   "coverage_policy_changed", "data_version_changed", "snap_too_far",
   "authorization_required",
   "invalid_request",

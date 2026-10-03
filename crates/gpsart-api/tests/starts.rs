@@ -10,9 +10,14 @@ use gpsart_domain::starts::{
     StartResolver, StartResolverProvider,
 };
 use gpsart_domain::{ActivityProfile, RouteRequestProfile};
+use gpsart_persistence::{ResolvedStartRecord, ResolvedStartStore, ResolvedStartStoreError};
 use http_body_util::BodyExt;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tower::ServiceExt;
+use uuid::Uuid;
 
 #[derive(Clone)]
 struct Healthy;
@@ -33,6 +38,32 @@ impl StartResolverProvider for FixedProvider {
         _: RouteRequestProfile,
     ) -> Result<Option<NetworkPoint>, ProviderError> {
         Ok(self.0)
+    }
+}
+
+#[derive(Default)]
+struct RecordingStartStore(Mutex<Vec<ResolvedStartRecord>>);
+
+#[async_trait]
+impl ResolvedStartStore for RecordingStartStore {
+    async fn insert_resolved_start(
+        &self,
+        record: ResolvedStartRecord,
+    ) -> Result<(), ResolvedStartStoreError> {
+        self.0.lock().unwrap().push(record);
+        Ok(())
+    }
+}
+
+struct FailingStartStore;
+
+#[async_trait]
+impl ResolvedStartStore for FailingStartStore {
+    async fn insert_resolved_start(
+        &self,
+        _: ResolvedStartRecord,
+    ) -> Result<(), ResolvedStartStoreError> {
+        Err(ResolvedStartStoreError::Unavailable)
     }
 }
 
@@ -157,6 +188,101 @@ async fn resolution_and_confirmation_keep_coordinates_in_private_post_bodies() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+}
+
+#[tokio::test]
+async fn confirmation_persists_the_exact_owned_versioned_start_for_job_submission() {
+    let coverage = Coverage::rectangle("coverage-v1", 77.0, 28.0, 78.0, 29.0).unwrap();
+    let resolver = StartResolver::new(
+        coverage,
+        FixedProvider(Some(NetworkPoint {
+            point: Point::new(77.2001, 28.6001).unwrap(),
+            snap_distance_metres: 15,
+        })),
+        Duration::from_secs(300),
+    );
+    let store = Arc::new(RecordingStartStore::default());
+    let service = ConfiguredStartService::with_store(resolver, "map-v1", store.clone());
+    let owner = Uuid::new_v4();
+    let profile = RouteRequestProfile::new(ActivityProfile::Walking);
+    let resolution = service
+        .resolve(&owner.to_string(), Point::new(77.2, 28.6).unwrap(), profile)
+        .await
+        .unwrap();
+
+    service
+        .confirm(&owner.to_string(), resolution.id, profile)
+        .await
+        .unwrap();
+
+    let records = store.0.lock().unwrap();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.id, resolution.id.as_uuid());
+    assert_eq!(record.guest_session_id, owner);
+    assert_eq!(record.requested_longitude, 77.2);
+    assert_eq!(record.requested_latitude, 28.6);
+    assert_eq!(record.confirmed_longitude, 77.2001);
+    assert_eq!(record.confirmed_latitude, 28.6001);
+    assert_eq!(record.profile_version, "walking-v1");
+    assert_eq!(record.coverage_policy_version, "coverage-v1");
+    assert_eq!(record.map_data_version, "map-v1");
+}
+
+#[tokio::test]
+async fn confirmation_reports_storage_unavailable_without_blaming_the_route_provider() {
+    let coverage = Coverage::rectangle("coverage-v1", 77.0, 28.0, 78.0, 29.0).unwrap();
+    let resolver = StartResolver::new(
+        coverage,
+        FixedProvider(Some(NetworkPoint {
+            point: Point::new(77.2001, 28.6001).unwrap(),
+            snap_distance_metres: 15,
+        })),
+        Duration::from_secs(300),
+    );
+    let app = app_with_starts(
+        Healthy,
+        ConfiguredStartService::with_store(resolver, "map-v1", Arc::new(FailingStartStore)),
+    );
+    let owner = Uuid::new_v4().to_string();
+    let resolved = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/starts/resolve")
+                .header("content-type", "application/json")
+                .header("x-gpsart-guest-session", &owner)
+                .body(Body::from(
+                    serde_json::json!({
+                        "requested_point": {"longitude": 77.2, "latitude": 28.6},
+                        "profile": {"activity": "walking", "profile_version": "walking-v1"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let id = json(resolved).await["id"].as_str().unwrap().to_owned();
+    let response = app
+        .oneshot(
+            Request::post(format!("/api/v1/starts/{id}/confirm"))
+                .header("content-type", "application/json")
+                .header("x-gpsart-guest-session", owner)
+                .body(Body::from(
+                    serde_json::json!({
+                        "profile": {"activity": "walking", "profile_version": "walking-v1"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 503);
+    assert_eq!(
+        json(response).await["outcome"]["code"],
+        "storage_unavailable"
+    );
 }
 
 #[tokio::test]

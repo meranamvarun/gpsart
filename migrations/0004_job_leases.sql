@@ -1,0 +1,16 @@
+ALTER TABLE generation_jobs
+    ADD COLUMN max_attempts integer NOT NULL DEFAULT 3 CHECK (max_attempts > 0);
+
+ALTER TABLE generation_job_outcomes
+    ADD COLUMN budget_exhausted boolean NOT NULL DEFAULT false;
+
+CREATE INDEX generation_jobs_claim_idx
+    ON generation_jobs (queued_at, deadline_at)
+    WHERE state IN ('queued', 'running');
+
+-- Older immutable request rows did not snapshot this field. Preserve that truth
+-- explicitly instead of copying a potentially newer start-policy value.
+ALTER TABLE planning_requests
+    ADD COLUMN coverage_policy_version text NOT NULL DEFAULT 'legacy-unknown';
+ALTER TABLE planning_requests
+    ALTER COLUMN coverage_policy_version DROP DEFAULT;
