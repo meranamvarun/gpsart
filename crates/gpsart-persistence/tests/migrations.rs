@@ -1,4 +1,6 @@
-use gpsart_persistence::jobs::{Completion, JobError, PostgresJobCoordinator, RouteJobSubmission};
+use gpsart_persistence::jobs::{
+    Completion, JobError, JobOutcomeCode, JobStage, PostgresJobCoordinator, RouteJobSubmission,
+};
 use gpsart_persistence::{
     MIGRATOR, MigrationStatus, PostgresResolvedStartStore, ResolvedStartRecord, ResolvedStartStore,
     migration_status,
@@ -174,7 +176,7 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     assert_eq!(
         migration_status(&pool).await.unwrap(),
         MigrationStatus::Pending {
-            versions: vec![2, 3, 4]
+            versions: vec![2, 3, 4, 5]
         }
     );
     MIGRATOR
@@ -481,6 +483,82 @@ async fn candidate_publication_requires_request_versions_and_the_deadline() {
 }
 
 #[tokio::test]
+async fn job_status_is_owner_scoped_monotonic_and_atomically_classified() {
+    let Some((admin, pool, database_name)) = isolated_database("job_status").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let foreign = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+    let job_id = Uuid::parse_str("30000000-0000-0000-0000-000000000001").unwrap();
+    let queued = coordinator.status(owner, job_id).await.unwrap();
+    assert_eq!(queued.state, gpsart_persistence::jobs::JobState::Queued);
+    assert_eq!(queued.stage, JobStage::Queued);
+    assert_eq!(queued.status_version, 1);
+    assert!(queued.outcome.is_none());
+    assert_eq!(
+        coordinator.status(foreign, job_id).await,
+        Err(JobError::NotFound)
+    );
+
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(60))
+        .await
+        .unwrap()
+        .unwrap();
+    let checking = coordinator.status(owner, job_id).await.unwrap();
+    assert_eq!(checking.stage, JobStage::CheckingRoads);
+    assert_eq!(checking.status_version, 2);
+    assert!(checking.started_at.is_some());
+    assert_eq!(
+        coordinator
+            .advance_stage(&lease, now, JobStage::FittingDesign)
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        coordinator
+            .advance_stage(&lease, now, JobStage::FittingDesign)
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        coordinator
+            .advance_stage(&lease, now, JobStage::ComparingRoutes)
+            .await
+            .unwrap(),
+        4
+    );
+    assert_eq!(
+        coordinator
+            .complete(
+                &lease,
+                &Completion::NoMatch {
+                    code: JobOutcomeCode::InsufficientVisualMatch,
+                },
+                now,
+            )
+            .await
+            .unwrap(),
+        gpsart_persistence::jobs::JobState::NoMatch
+    );
+    let terminal = coordinator.status(owner, job_id).await.unwrap();
+    assert_eq!(terminal.status_version, 5);
+    assert_eq!(terminal.stage, JobStage::ComparingRoutes);
+    assert_eq!(
+        terminal.outcome.unwrap().code,
+        JobOutcomeCode::InsufficientVisualMatch
+    );
+    assert!(terminal.completed_at.is_some());
+    assert!(terminal.result_ids.is_empty());
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
 async fn terminal_jobs_require_exactly_one_matching_outcome() {
     let Some((admin, pool, database_name)) = isolated_database("outcomes").await else {
         return;
@@ -489,7 +567,7 @@ async fn terminal_jobs_require_exactly_one_matching_outcome() {
 
     let mut active_with_outcome = pool.begin().await.unwrap();
     sqlx::query(
-        "INSERT INTO generation_job_outcomes (generation_job_id, outcome) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded')",
+        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded', 'succeeded')",
     )
     .execute(&mut *active_with_outcome)
     .await
@@ -513,7 +591,7 @@ async fn terminal_jobs_require_exactly_one_matching_outcome() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO generation_job_outcomes (generation_job_id, outcome) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded')",
+        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded', 'succeeded')",
     )
     .execute(&mut *matching)
     .await

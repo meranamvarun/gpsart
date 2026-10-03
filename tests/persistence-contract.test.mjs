@@ -12,6 +12,7 @@ test("forward-only SQLx migrations encode the TS-002 persistence contract", asyn
     "0002_route_jobs.sql",
     "0003_guest_session_digest.sql",
     "0004_job_leases.sql",
+    "0005_job_status.sql",
   ]);
   const sql = await Promise.all(files.map((file) => read(`migrations/${file}`)));
   const schema = sql.join("\n");

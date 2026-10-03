@@ -8,7 +8,7 @@ use gpsart_domain::{
     RouteRequestProfile,
     starts::{Point, ResolutionId, ResolveError, StartResolution},
 };
-use gpsart_persistence::jobs::{JobError, JobState, RouteJobSubmission};
+use gpsart_persistence::jobs::{JobError, JobState, JobStatusSnapshot, RouteJobSubmission};
 use http_body_util::BodyExt;
 use std::{
     collections::HashMap,
@@ -85,6 +85,9 @@ impl RouteJobService for Jobs {
             *state = JobState::Cancelled;
         }
         Ok(*state)
+    }
+    async fn status(&self, _: Uuid, _: Uuid) -> Result<JobStatusSnapshot, JobError> {
+        Err(JobError::Unavailable)
     }
 }
 

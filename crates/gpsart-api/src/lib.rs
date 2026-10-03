@@ -16,7 +16,8 @@ use gpsart_domain::{
     },
 };
 use gpsart_persistence::jobs::{
-    JobError, JobState, PostgresJobCoordinator, RouteJobSubmission, SUPPORTED_ALGORITHM_VERSION,
+    JobError, JobOutcomeCode, JobState, JobStatusSnapshot, PostgresJobCoordinator,
+    RouteJobSubmission, SUPPORTED_ALGORITHM_VERSION,
 };
 use gpsart_persistence::{
     DependencyProbe, GuestSessionStore, PostgresProbe, ResolvedStartRecord, ResolvedStartStore,
@@ -168,7 +169,7 @@ fn build_app(
         .route("/api/v1/route-jobs", post(create_route_job))
         .route(
             "/api/v1/route-jobs/{id}",
-            axum::routing::delete(cancel_route_job),
+            get(get_route_job).delete(cancel_route_job),
         )
         .route(
             "/api/v1/guest-sessions",
@@ -234,6 +235,11 @@ pub trait RouteJobService: Send + Sync + 'static {
         input: RouteJobSubmission,
     ) -> Result<uuid::Uuid, JobError>;
     async fn cancel(&self, owner: uuid::Uuid, job_id: uuid::Uuid) -> Result<JobState, JobError>;
+    async fn status(
+        &self,
+        owner: uuid::Uuid,
+        job_id: uuid::Uuid,
+    ) -> Result<JobStatusSnapshot, JobError>;
 }
 
 #[async_trait]
@@ -248,6 +254,13 @@ impl RouteJobService for PostgresJobCoordinator {
     async fn cancel(&self, owner: uuid::Uuid, job_id: uuid::Uuid) -> Result<JobState, JobError> {
         self.cancel(owner, job_id, SystemTime::now()).await
     }
+    async fn status(
+        &self,
+        owner: uuid::Uuid,
+        job_id: uuid::Uuid,
+    ) -> Result<JobStatusSnapshot, JobError> {
+        self.status(owner, job_id).await
+    }
 }
 
 struct UnavailableRouteJobService;
@@ -258,6 +271,9 @@ impl RouteJobService for UnavailableRouteJobService {
         Err(JobError::Unavailable)
     }
     async fn cancel(&self, _: uuid::Uuid, _: uuid::Uuid) -> Result<JobState, JobError> {
+        Err(JobError::Unavailable)
+    }
+    async fn status(&self, _: uuid::Uuid, _: uuid::Uuid) -> Result<JobStatusSnapshot, JobError> {
         Err(JobError::Unavailable)
     }
 }
@@ -656,6 +672,110 @@ async fn create_route_job(
             .into_response(),
         Err(error) => job_error_response(error),
     }
+}
+
+#[derive(Serialize)]
+struct RouteJobStatusBody {
+    job_id: uuid::Uuid,
+    request_revision: i32,
+    state: &'static str,
+    stage: &'static str,
+    status_version: i64,
+    queued_at_epoch_seconds: u64,
+    started_at_epoch_seconds: Option<u64>,
+    completed_at_epoch_seconds: Option<u64>,
+    deadline_at_epoch_seconds: u64,
+    expires_at_epoch_seconds: u64,
+    outcome: Option<RouteJobOutcomeBody>,
+    result_ids: Vec<uuid::Uuid>,
+    poll_after_seconds: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct RouteJobOutcomeBody {
+    code: &'static str,
+    budget_exhausted: bool,
+    retryable: bool,
+    retry_after_seconds: Option<u64>,
+}
+
+async fn get_route_job(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
+        Ok(value) => value,
+        Err(error) => return auth_error(error),
+    };
+    let snapshot = match state.jobs.status(session.id, id).await {
+        Ok(value) => value,
+        Err(error) => return job_error_response(error),
+    };
+    let etag = format!("\"{}\"", snapshot.status_version);
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|candidate| matches!(candidate.trim(), "*") || candidate.trim() == etag)
+        })
+    {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        set_job_poll_headers(response.headers_mut(), &etag);
+        return response;
+    }
+    let body = match status_body(snapshot) {
+        Ok(value) => value,
+        Err(error) => return job_error_response(error),
+    };
+    let mut response = (StatusCode::OK, Json(body)).into_response();
+    set_job_poll_headers(response.headers_mut(), &etag);
+    response
+}
+
+fn set_job_poll_headers(headers: &mut HeaderMap, etag: &str) {
+    if let Ok(value) = HeaderValue::from_str(etag) {
+        headers.insert(header::ETAG, value);
+    }
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-cache"),
+    );
+}
+
+fn status_body(snapshot: JobStatusSnapshot) -> Result<RouteJobStatusBody, JobError> {
+    let timestamp = |value: SystemTime| {
+        value
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .map_err(|_| JobError::Unavailable)
+    };
+    let outcome = snapshot.outcome.map(|value| {
+        let retryable = value.code == JobOutcomeCode::ProviderUnavailable;
+        RouteJobOutcomeBody {
+            code: value.code.as_str(),
+            budget_exhausted: value.budget_exhausted,
+            retryable,
+            retry_after_seconds: retryable.then_some(30),
+        }
+    });
+    Ok(RouteJobStatusBody {
+        job_id: snapshot.job_id,
+        request_revision: snapshot.request_revision,
+        state: job_state_name(snapshot.state),
+        stage: snapshot.stage.as_str(),
+        status_version: snapshot.status_version,
+        queued_at_epoch_seconds: timestamp(snapshot.queued_at)?,
+        started_at_epoch_seconds: snapshot.started_at.map(timestamp).transpose()?,
+        completed_at_epoch_seconds: snapshot.completed_at.map(timestamp).transpose()?,
+        deadline_at_epoch_seconds: timestamp(snapshot.deadline_at)?,
+        expires_at_epoch_seconds: timestamp(snapshot.expires_at)?,
+        outcome,
+        result_ids: snapshot.result_ids,
+        poll_after_seconds: (!snapshot.state.is_terminal()).then_some(1),
+    })
 }
 
 async fn cancel_route_job(
