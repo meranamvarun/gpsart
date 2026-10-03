@@ -75,9 +75,10 @@ test("a job cannot start before explicit confirmation and duplicate submission s
     if (String(url).endsWith("/route-jobs")) return json({ job_id: jobId, request_revision: 1 }, 202);
     throw new Error("unexpected request");
   };
+  const storage = new MemoryStorage();
   const workflow = new PlannerWorkflow({
     fetcher,
-    storage: new MemoryStorage(),
+    storage,
     csrfToken: () => "csrf",
     newIdempotencyKey: () => "logical-request-key",
     currentRevision: () => request.revision,
@@ -103,6 +104,8 @@ test("a job cannot start before explicit confirmation and duplicate submission s
   assert.equal(submitted.idempotency_key, "logical-request-key");
   assert.equal(submitted.return_to_start, true);
   assert.equal(workflow.snapshot.phase, "polling");
+  const stored = JSON.parse(storage.getItem(ACTIVE_JOB_STORAGE_KEY)!);
+  assert.equal(stored.expiresAtEpochSeconds, null, "start-resolution expiry is not the job expiry");
 });
 
 test("invalid fields and unsupported coverage never create a job", async () => {
@@ -145,6 +148,66 @@ test("a route edit invalidates an older pending start confirmation", async () =>
   assert.deepEqual(calls, ["/api/v1/starts/resolve"]);
 });
 
+test("a late start resolution cannot overwrite a newer logical request", async () => {
+  let releaseOlder: (response: Response) => void = () => undefined;
+  const olderResponse = new Promise<Response>((resolve) => { releaseOlder = resolve; });
+  const newerRequest = { ...request, start: "0.60000, -150.35000", revision: 2 };
+  const newerStart = parseManualCoordinates(newerRequest.start)!;
+  const newerResolution = {
+    ...resolution,
+    id: "8bf80ccf-68e8-49ec-a3e8-cad667bb95a0",
+    requested_point: newerStart.point,
+    candidate_network_point: { latitude: 0.6001, longitude: -150.3499 },
+  };
+  let currentRevision = 1;
+  let resolutions = 0;
+  const workflow = new PlannerWorkflow({
+    fetcher: async (url) => {
+      if (!String(url).endsWith("/starts/resolve")) throw new Error("unexpected request");
+      resolutions += 1;
+      return resolutions === 1 ? olderResponse : json(newerResolution);
+    },
+    storage: new MemoryStorage(), csrfToken: () => "csrf",
+    currentRevision: () => currentRevision, newIdempotencyKey: () => `key-${resolutions}`,
+    schedule: () => 1, cancelSchedule: () => undefined,
+    now: () => 1_800_000_000_000,
+  });
+  const older = workflow.submit(request, proposed);
+  currentRevision = 2;
+  await workflow.submit(newerRequest, newerStart);
+  releaseOlder(json(resolution));
+  await older;
+  assert.equal(workflow.snapshot.phase, "awaiting_confirmation");
+  assert.equal(workflow.snapshot.request?.revision, 2);
+  assert.equal(workflow.snapshot.resolution?.id, newerResolution.id);
+});
+
+test("an edit while confirmation is in flight cannot create or install the older job", async () => {
+  let releaseConfirmation: (response: Response) => void = () => undefined;
+  const pendingConfirmation = new Promise<Response>((resolve) => { releaseConfirmation = resolve; });
+  const calls: string[] = [];
+  let currentRevision = 1;
+  const workflow = new PlannerWorkflow({
+    fetcher: async (url) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/starts/resolve")) return json(resolution);
+      if (String(url).includes("/confirm")) return pendingConfirmation;
+      throw new Error("stale confirmation must not create a job");
+    },
+    storage: new MemoryStorage(), csrfToken: () => "csrf",
+    currentRevision: () => currentRevision, newIdempotencyKey: () => "key",
+    schedule: () => 1, cancelSchedule: () => undefined,
+    now: () => 1_800_000_000_000,
+  });
+  await workflow.submit(request, proposed);
+  const confirming = workflow.confirmAndStart();
+  currentRevision = 2;
+  releaseConfirmation(json({ confirmed_start: resolution.candidate_network_point }));
+  await confirming;
+  assert.equal(workflow.snapshot.phase, "stale");
+  assert.equal(calls.filter((url) => url.endsWith("/route-jobs")).length, 0);
+});
+
 test("refresh resumes an owned unexpired job with ETag polling and bounded backoff", async () => {
   const storage = new MemoryStorage();
   storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
@@ -178,6 +241,49 @@ test("refresh resumes an owned unexpired job with ETag polling and bounded backo
   assert.equal(workflow.snapshot.status?.stage, "fitting_design");
   assert.equal(new Headers(calls[0]?.init?.headers).get("if-none-match"), '"2"');
   assert.deepEqual(delays.slice(0, 2), [1_000, 2_000]);
+});
+
+test("refresh polls a newly accepted job before its authoritative job expiry is known", async () => {
+  const storage = new MemoryStorage();
+  storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
+    version: 1, jobId, request, proposedStart: proposed,
+    expiresAtEpochSeconds: null, etag: null, statusPayload: null,
+  }));
+  let polls = 0;
+  const workflow = new PlannerWorkflow({
+    fetcher: async () => { polls += 1; return json(activeStatus()); },
+    storage, csrfToken: () => "csrf", currentRevision: () => 1,
+    newIdempotencyKey: () => "key", schedule: () => 1,
+    cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  assert.equal(await workflow.resume(), true);
+  assert.equal(polls, 1);
+  const refreshed = JSON.parse(storage.getItem(ACTIVE_JOB_STORAGE_KEY)!);
+  assert.equal(refreshed.expiresAtEpochSeconds, activeStatus().expires_at_epoch_seconds);
+});
+
+test("refresh rejects tampered request and start discriminants before rendering or polling", async () => {
+  for (const corruption of [
+    { request: { ...request, activity: "<img src=x onerror=alert(1)>" } },
+    { proposedStart: { ...proposed, source: "unknown" } },
+  ]) {
+    const storage = new MemoryStorage();
+    storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
+      version: 1, jobId, request, proposedStart: proposed,
+      expiresAtEpochSeconds: 1_900_000_000, etag: null,
+      ...corruption,
+    }));
+    let fetched = false;
+    const workflow = new PlannerWorkflow({
+      fetcher: async () => { fetched = true; throw new Error("must not poll"); },
+      storage, csrfToken: () => "csrf", currentRevision: () => 1,
+      newIdempotencyKey: () => "key", schedule: () => 1,
+      cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+    });
+    assert.equal(await workflow.resume(), false);
+    assert.equal(fetched, false);
+    assert.equal(storage.getItem(ACTIVE_JOB_STORAGE_KEY), null);
+  }
 });
 
 test("cancellation and request revisions prevent late results from replacing current work", async () => {
