@@ -53,7 +53,7 @@ export function requestBrowserStart(
   return new Promise((resolve) => {
     geolocation.getCurrentPosition(
       ({ coords }) => {
-        if (!Number.isFinite(coords.accuracy) || coords.accuracy > GEOLOCATION_MAX_ACCURACY_METRES) {
+        if (!Number.isFinite(coords.accuracy) || coords.accuracy < 0 || coords.accuracy > GEOLOCATION_MAX_ACCURACY_METRES) {
           resolve({ kind: "low_accuracy", accuracyMetres: coords.accuracy });
           return;
         }

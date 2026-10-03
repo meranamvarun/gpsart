@@ -4,6 +4,9 @@ import type { AppState } from "./state.ts";
 const previewScreens: readonly Screen[] = ["planner", "catalogue"];
 
 export function renderMap(screen: Screen, state: AppState): string {
+  if (screen === "planner") {
+    return `<section class="map-wrap" aria-label="Starting-point map"><div id="planner-map" class="map" aria-label="Choose a starting point on the map"></div><div class="map-label"><strong>Choose your start</strong><br>Click the map to propose an exact point</div><div class="north" aria-label="North"><i class="ph ph-navigation-arrow" aria-hidden="true"></i></div><div class="map-note">Map clicks propose a start · the routing service checks access and coverage</div></section>`;
+  }
   const preview = previewScreens.includes(screen);
   const label = preview
     ? `<div class="map-label"><strong>${state.request.design} design preview</strong><br>Illustrative artwork only</div>`

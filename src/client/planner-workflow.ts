@@ -123,14 +123,20 @@ export class PlannerWorkflow {
   submit(request: RouteRequest, proposedStart: ProposedStart): Promise<void> {
     const fingerprint = JSON.stringify({ request, proposedStart });
     if (this.submitting && this.submitFingerprint === fingerprint) return this.submitting;
+    if (this.submitFingerprint === fingerprint
+      && ["awaiting_confirmation", "submitting", "polling"].includes(this.value.phase)) {
+      return Promise.resolve();
+    }
     if (!validRequest(request) || !validProposedStart(proposedStart)) {
       this.update({ ...emptySnapshot(), request, proposedStart, phase: "error", issue: "invalid_fields" });
       return Promise.resolve();
     }
     this.stopTimer();
     this.generation += 1;
+    if (this.submitFingerprint !== fingerprint || !this.submissionKey) {
+      this.submissionKey = this.newIdempotencyKey();
+    }
     this.submitFingerprint = fingerprint;
-    this.submissionKey = this.newIdempotencyKey();
     this.update({ ...emptySnapshot(), request, proposedStart, phase: "resolving" });
     const operation = this.resolveStart(request, proposedStart)
       .finally(() => {
@@ -146,6 +152,10 @@ export class PlannerWorkflow {
     const { request, proposedStart, resolution } = this.value;
     if (!request || !proposedStart || !resolution || !this.submissionKey) {
       this.update({ ...this.value, phase: "error", issue: "invalid_fields" });
+      return Promise.resolve();
+    }
+    if (request.revision !== this.currentRevision()) {
+      this.update({ ...this.value, phase: "stale", resolution: null, issue: null });
       return Promise.resolve();
     }
     this.update({ ...this.value, phase: "submitting", issue: null });
@@ -213,6 +223,7 @@ export class PlannerWorkflow {
       return;
     }
     this.removeActive();
+    this.resetLogicalSubmission();
     this.update({ ...this.value, phase: "cancelled", jobId: null, status: null, issue: null });
   }
 
@@ -390,6 +401,7 @@ export class PlannerWorkflow {
       return;
     }
     this.removeActive();
+    this.resetLogicalSubmission();
     if (status.requestRevision === this.currentRevision()) {
       this.update({ ...this.value, phase: "terminal", jobId: null, status, issue: null });
     } else {
@@ -416,6 +428,11 @@ export class PlannerWorkflow {
   private update(next: PlannerWorkflowSnapshot): void {
     this.value = Object.freeze(next);
     this.onChange(this.value);
+  }
+
+  private resetLogicalSubmission(): void {
+    this.submitFingerprint = null;
+    this.submissionKey = null;
   }
 }
 

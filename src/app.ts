@@ -3,19 +3,46 @@ import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
 import "@fontsource/inter/700.css";
 import "@phosphor-icons/web/regular";
+import "leaflet/dist/leaflet.css";
+import * as L from "leaflet";
 import "./styles.css";
+import { readCsrfCookie } from "./client/guest-session.ts";
+import {
+  PlannerWorkflow,
+  type PlannerWorkflowSnapshot,
+} from "./client/planner-workflow.ts";
 import { loadRouteSnapshots } from "./client/storage.ts";
 import { renderMap } from "./app/map.ts";
-import { currentScreen, navigate } from "./app/router.ts";
+import { currentScreen, navigate, type Screen } from "./app/router.ts";
 import { isStandaloneScreen, renderScreen } from "./app/screen-controller.ts";
-import { beginRequest, initialState, updateRequest, updateUi } from "./app/state.ts";
+import { initialState, updateRequest, updateUi } from "./app/state.ts";
 import type { DesignCategory } from "./app/catalogue.ts";
 import type { RouteRequest } from "./domain/planner.ts";
+import {
+  fromMapSelection,
+  fromSearchSelection,
+  parseManualCoordinates,
+  requestBrowserStart,
+  type ProposedStart,
+} from "./domain/start-selection.ts";
+import type { GeoPoint } from "./domain/start-resolution.ts";
 
 let state = initialState();
+let proposedStart: ProposedStart | null = null;
+let workflowSnapshot: PlannerWorkflowSnapshot | null = null;
+let locationMessage = "Location is requested only when you choose. You can always enter coordinates or click the map.";
+let leafletMap: L.Map | null = null;
+let resuming = false;
+
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("GPSART requires an #app element");
 const appRoot = app;
+
+const workflow = new PlannerWorkflow({
+  csrfToken: readCsrfCookie,
+  currentRevision: () => state.request.revision,
+  onChange: handleWorkflowChange,
+});
 
 function header(screen: string): string {
   const plannerActive = !["saved", "login", "account", "welcome", "screens"].includes(screen);
@@ -23,14 +50,19 @@ function header(screen: string): string {
 }
 
 function render(): void {
+  leafletMap?.remove();
+  leafletMap = null;
   const screen = currentScreen(window.location.hash, document.body.dataset.screen);
   const loaded = loadRouteSnapshots(window.localStorage);
   const body = isStandaloneScreen(screen)
-    ? renderScreen(screen, state, loaded)
-    : `<main id="content" class="workspace ${state.mapExpanded ? "expanded" : ""}"><section class="panel" aria-label="${screen}"><button class="mobile-expand" type="button" data-action="expand"><i class="ph ph-arrows-out-simple" aria-hidden="true"></i> ${state.mapExpanded ? "Reduce map" : "Expand map"}</button>${renderScreen(screen, state, loaded)}</section>${renderMap(screen, state)}</main>`;
+    ? renderScreen(screen, state, loaded, workflowSnapshot)
+    : `<main id="content" class="workspace ${state.mapExpanded ? "expanded" : ""}"><section class="panel" aria-label="${screen}"><button class="mobile-expand" type="button" data-action="expand"><i class="ph ph-arrows-out-simple" aria-hidden="true"></i> ${state.mapExpanded ? "Reduce map" : "Expand map"}</button>${renderScreen(screen, state, loaded, workflowSnapshot)}</section>${renderMap(screen, state)}</main>`;
   appRoot.innerHTML = `${header(screen)}${body}`;
   document.title = `${screen} · GPSART`;
   bind();
+  bindPlannerMap(screen);
+  const locationStatus = document.querySelector<HTMLElement>("#location-status");
+  if (locationStatus) locationStatus.textContent = locationMessage;
   window.scrollTo(0, 0);
 }
 
@@ -43,25 +75,105 @@ function patchRequest(changes: Omit<Partial<RouteRequest>, "revision">, rerender
   if (rerender) render();
 }
 
-function useBrowserLocation(): void {
+function selectStart(start: ProposedStart): void {
+  proposedStart = start;
+  locationMessage = start.source === "geolocation"
+    ? "Location selected. Coverage and road access still require server validation."
+    : "Start selected. Coverage and road access still require server validation.";
+  patchRequest({ start: start.label });
+}
+
+async function useBrowserLocation(): Promise<void> {
   const status = document.querySelector<HTMLElement>("#location-status");
-  if (!status) return;
-  if (!navigator.geolocation) {
-    status.textContent = "Location is unavailable. Enter a place or coordinates.";
+  if (status) status.textContent = "Waiting for location permission…";
+  const result = await requestBrowserStart();
+  if (result.kind === "selected") {
+    selectStart(result.start);
     return;
   }
-  status.textContent = "Waiting for location permission…";
-  navigator.geolocation.getCurrentPosition(
-    ({ coords }) => {
-      const start = `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
-      patchRequest({ start }, false);
-      const input = document.querySelector<HTMLInputElement>("#start");
-      if (input) input.value = start;
-      status.textContent = "Location selected. Coverage still requires server validation.";
-    },
-    () => { status.textContent = "Location unavailable or permission denied. Enter a place or coordinates."; },
-    { timeout: 10_000, maximumAge: 60_000 },
-  );
+  locationMessage = result.kind === "denied"
+    ? "Location permission was denied. Enter coordinates or click the map instead."
+    : result.kind === "timeout"
+      ? "Location timed out. Enter coordinates or click the map instead."
+      : result.kind === "unsupported"
+        ? "This browser cannot provide location. Enter coordinates or click the map instead."
+        : result.kind === "low_accuracy"
+          ? `Location accuracy (${Math.round(result.accuracyMetres)} m) is too low. Enter coordinates or click the map instead.`
+          : "Location is unavailable. Enter coordinates or click the map instead.";
+  if (status) status.textContent = locationMessage;
+}
+
+function bindPlannerMap(screen: Screen): void {
+  if (screen !== "planner") return;
+  const element = document.querySelector<HTMLElement>("#planner-map");
+  if (!element) return;
+  const center: readonly [number, number] = proposedStart
+    ? [proposedStart.point.latitude, proposedStart.point.longitude]
+    : [12.9716, 77.5946];
+  leafletMap = L.map(element, { center, zoom: proposedStart ? 15 : 12, zoomControl: true });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 19,
+  }).addTo(leafletMap);
+  if (proposedStart) {
+    L.circleMarker(center, { radius: 8, color: "#154c36", fillColor: "#faf8f1", fillOpacity: 1, weight: 3 }).addTo(leafletMap);
+  }
+  leafletMap.on("click", ({ latlng }) => {
+    const selected = fromMapSelection({ latitude: latlng.lat, longitude: latlng.lng });
+    if (selected) selectStart(selected);
+  });
+}
+
+function showScreen(screen: Screen): void {
+  if (currentScreen(window.location.hash, document.body.dataset.screen) === screen) render();
+  else navigate(screen);
+}
+
+function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
+  workflowSnapshot = snapshot;
+  if (resuming && snapshot.request) {
+    state = { ...state, request: snapshot.request, outcome: "pending", routeResult: null };
+    proposedStart = snapshot.proposedStart;
+  }
+  if (snapshot.phase === "polling") {
+    showScreen("generating");
+    return;
+  }
+  if (snapshot.phase === "cancelled") {
+    showScreen("planner");
+    return;
+  }
+  if (snapshot.phase === "terminal" && snapshot.status) {
+    const code = snapshot.status.outcome?.code;
+    if (snapshot.status.state === "succeeded") showScreen("results");
+    else if (code === "unsupported_coverage") showScreen("coverage");
+    else if (snapshot.status.state === "no_match") showScreen("no-match");
+    else if (snapshot.status.state === "cancelled") showScreen("planner");
+    else showScreen("error");
+    return;
+  }
+  showScreen("planner");
+}
+
+function submitPlan(): void {
+  const start = inputValue("start");
+  const distanceKm = Number(inputValue("distance"));
+  const selected = proposedStart?.label === start ? proposedStart : parseManualCoordinates(start);
+  if (!selected) {
+    locationMessage = "Enter exact latitude, longitude coordinates, click the map, use location, or choose a search result.";
+    const status = document.querySelector<HTMLElement>("#location-status");
+    if (status) {
+      status.textContent = locationMessage;
+      status.classList.add("error");
+      status.setAttribute("role", "alert");
+    }
+    return;
+  }
+  proposedStart = selected;
+  if (state.request.start !== start || state.request.distanceKm !== distanceKm) {
+    state = updateRequest(state, { start, distanceKm });
+  }
+  void workflow.submit(state.request, selected);
 }
 
 function bind(): void {
@@ -77,25 +189,38 @@ function bind(): void {
     const design = button.dataset.design;
     if (design) patchRequest({ design });
   }));
-  document.querySelector<HTMLInputElement>("#start")?.addEventListener("change", () => patchRequest({ start: inputValue("start") }));
+  document.querySelector<HTMLInputElement>("#start")?.addEventListener("change", () => {
+    const start = inputValue("start");
+    proposedStart = parseManualCoordinates(start) ?? null;
+    patchRequest({ start });
+  });
   document.querySelector<HTMLInputElement>("#distance")?.addEventListener("change", (event) => patchRequest({ distanceKm: Number((event.currentTarget as HTMLInputElement).value) }));
   document.querySelector<HTMLInputElement>("#loop")?.addEventListener("change", (event) => patchRequest({ returnsToStart: (event.currentTarget as HTMLInputElement).checked }));
   document.querySelector<HTMLSelectElement>("#tolerance")?.addEventListener("change", (event) => patchRequest({ tolerancePercent: Number((event.currentTarget as HTMLSelectElement).value) }));
   document.querySelector<HTMLFormElement>("#plan-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const start = inputValue("start");
-    const distanceKm = Number(inputValue("distance"));
-    if (!start || !Number.isFinite(distanceKm) || distanceKm < 1 || distanceKm > 100) return;
-    state = updateRequest(state, { start, distanceKm });
-    state = beginRequest(state);
-    navigate("generating");
+    submitPlan();
   });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => button.addEventListener("click", () => {
     if (button.dataset.action === "expand") { state = updateUi(state, { mapExpanded: !state.mapExpanded }); render(); }
-    if (button.dataset.action === "location") useBrowserLocation();
+    if (button.dataset.action === "location") void useBrowserLocation();
+    if (button.dataset.action === "confirm-start") void workflow.confirmAndStart();
+    if (button.dataset.action === "cancel-job") void workflow.cancel();
+    if (button.dataset.action === "edit-start") document.querySelector<HTMLInputElement>("#start")?.select();
     if (button.dataset.action === "google") navigate("auth-pending");
   }));
 }
 
+window.addEventListener("gpsart:search-selection", (event) => {
+  const detail = (event as CustomEvent<{ point?: GeoPoint; label?: string }>).detail;
+  if (!detail?.point || typeof detail.label !== "string") return;
+  const selected = fromSearchSelection(detail.point, detail.label);
+  if (selected) selectStart(selected);
+});
+window.addEventListener("gpsart:session-ready", () => {
+  resuming = true;
+  void workflow.resume().finally(() => { resuming = false; });
+});
 window.addEventListener("hashchange", render);
+window.addEventListener("pagehide", () => workflow.dispose());
 render();
