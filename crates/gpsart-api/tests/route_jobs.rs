@@ -129,7 +129,7 @@ async fn auth(app: &axum::Router) -> (String, String) {
 fn body(key: &str, distance: i32, start: Uuid) -> String {
     serde_json::json!({
     "resolved_start_id": start, "revision": 1, "idempotency_key": key,
-    "requested_distance_metres": distance, "distance_tolerance_metres": 250,
+    "requested_distance_metres": distance, "distance_tolerance_metres": 250, "return_to_start": true,
         "profile": {"activity":"walking","profile_version":"walking-v1"},
         "coverage_policy_version":"coverage-v1",
     "template_id":"heart", "template_version":"1", "map_data_version":"map-v1", "algorithm_version":"algorithm-v1"
