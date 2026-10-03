@@ -10,6 +10,8 @@ use time::OffsetDateTime;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+pub mod jobs;
+
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
