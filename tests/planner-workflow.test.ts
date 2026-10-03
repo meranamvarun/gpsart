@@ -135,6 +135,7 @@ test("refresh resumes an owned unexpired job with ETag polling and bounded backo
   }));
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const delays: number[] = [];
+  const currentRevision = 1;
   const workflow = new PlannerWorkflow({
     fetcher: async (url, init) => {
       calls.push({ url: String(url), init });
@@ -142,7 +143,7 @@ test("refresh resumes an owned unexpired job with ETag polling and bounded backo
         ? json(activeStatus(), 200, { etag: '"3"' })
         : new Response(null, { status: 304, headers: { etag: '"3"' } });
     },
-    storage, csrfToken: () => "csrf", currentRevision: () => workflow.snapshot.request?.revision ?? 0,
+    storage, csrfToken: () => "csrf", currentRevision: () => currentRevision,
     newIdempotencyKey: () => "key",
     schedule: (callback, delay) => { delays.push(delay); if (delays.length === 1) queueMicrotask(callback); return delays.length; },
     cancelSchedule: () => undefined,
