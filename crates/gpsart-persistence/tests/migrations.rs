@@ -787,7 +787,7 @@ async fn terminal_jobs_require_exactly_one_matching_outcome() {
 
     let mut active_with_outcome = pool.begin().await.unwrap();
     sqlx::query(
-        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded', 'succeeded')",
+        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'failed', 'attempts_exhausted')",
     )
     .execute(&mut *active_with_outcome)
     .await
@@ -805,13 +805,13 @@ async fn terminal_jobs_require_exactly_one_matching_outcome() {
 
     let mut matching = pool.begin().await.unwrap();
     sqlx::query(
-        "UPDATE generation_jobs SET state = 'succeeded', completed_at = now() WHERE id = '30000000-0000-0000-0000-000000000001'",
+        "UPDATE generation_jobs SET state = 'failed', completed_at = now() WHERE id = '30000000-0000-0000-0000-000000000001'",
     )
     .execute(&mut *matching)
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'succeeded', 'succeeded')",
+        "INSERT INTO generation_job_outcomes (generation_job_id, outcome, public_code) VALUES ('30000000-0000-0000-0000-000000000001', 'failed', 'attempts_exhausted')",
     )
     .execute(&mut *matching)
     .await

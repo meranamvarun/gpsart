@@ -21,9 +21,10 @@ Contract version: 1
   `provider_unavailable`, `attempts_exhausted`, `cancelled`, and `timed_out`. Only provider
   unavailability currently advises a retry (30 seconds). `legacy_unknown` is reserved for
   migrated historical rows and cannot be published by a worker.
-- State, classification, completion timestamp, and any already-validated candidate references
-  commit in one transaction. The status read returns candidate IDs only for a succeeded job and
-  rejects inconsistent stored state instead of guessing.
+- State, classification, completion timestamp, and the exact already-validated candidate ID list
+  commit in one immutable outcome row. Later candidate inserts cannot alter the terminal response
+  or its ETag. The status read returns IDs only for a succeeded job and rejects inconsistent stored
+  state instead of guessing.
 - The TypeScript client boundary is `decodeRouteJobStatus` in `src/domain/job-status.ts`. It is
   intentionally strict about exact fields, version-4 UUIDs, lifecycle consistency, classifications,
   budget flags, and retry guidance.

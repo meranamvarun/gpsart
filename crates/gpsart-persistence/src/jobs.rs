@@ -548,7 +548,7 @@ impl PostgresJobCoordinator {
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
         sqlx::query("WITH terminal AS (UPDATE generation_jobs SET state=(CASE WHEN deadline_at <= $1 THEN 'timed_out' ELSE 'failed' END)::generation_job_state, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL, status_version=status_version+1 WHERE state IN ('queued','running') AND (lease_expires_at IS NULL OR lease_expires_at <= $1) AND (deadline_at <= $1 OR attempt_count >= max_attempts) RETURNING id,state) INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) SELECT id,state::text::generation_terminal_outcome,CASE WHEN state='timed_out' THEN 'timed_out' ELSE 'attempts_exhausted' END,state='timed_out' FROM terminal")
             .bind(OffsetDateTime::from(now)).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
-        let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', stage='checking_roads', status_version=status_version+1, started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at")
+        let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', stage=CASE WHEN j.state='queued' THEN 'checking_roads' ELSE j.stage END, status_version=status_version+1, started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at")
             .bind(OffsetDateTime::from(now)).bind(worker).bind(OffsetDateTime::from(now + lease_for))
             .fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         let Some(row) = row else {
@@ -625,7 +625,7 @@ impl PostgresJobCoordinator {
     }
 
     pub async fn status(&self, owner: Uuid, job_id: Uuid) -> Result<JobStatusSnapshot, JobError> {
-        let row = sqlx::query("SELECT gj.id, pr.revision, gj.state::text AS state, gj.stage, gj.status_version, gj.queued_at, gj.started_at, gj.completed_at, gj.deadline_at, pr.expires_at, outcome.public_code, outcome.budget_exhausted, ARRAY(SELECT rc.id FROM route_candidates rc WHERE rc.generation_job_id=gj.id AND gj.state='succeeded' ORDER BY rc.candidate_version) AS result_ids FROM generation_jobs gj JOIN planning_requests pr ON pr.id=gj.planning_request_id LEFT JOIN generation_job_outcomes outcome ON outcome.generation_job_id=gj.id WHERE gj.id=$1 AND gj.guest_session_id=$2")
+        let row = sqlx::query("SELECT gj.id, pr.revision, gj.state::text AS state, gj.stage, gj.status_version, gj.queued_at, gj.started_at, gj.completed_at, gj.deadline_at, pr.expires_at, outcome.public_code, outcome.budget_exhausted, COALESCE(outcome.result_ids, '{}'::uuid[]) AS result_ids FROM generation_jobs gj JOIN planning_requests pr ON pr.id=gj.planning_request_id LEFT JOIN generation_job_outcomes outcome ON outcome.generation_job_id=gj.id WHERE gj.id=$1 AND gj.guest_session_id=$2")
             .bind(job_id)
             .bind(owner)
             .fetch_optional(&self.pool)
@@ -799,7 +799,7 @@ impl PostgresJobCoordinator {
             row.try_get::<OffsetDateTime, _>("deadline_at")
                 .map_err(|_| JobError::Unavailable)?,
         );
-        let (next, public_code, budget_exhausted) = match completion {
+        let (next, public_code, budget_exhausted, result_ids) = match completion {
             Completion::Succeeded {
                 candidate_ids,
                 budget_exhausted,
@@ -811,16 +811,25 @@ impl PostgresJobCoordinator {
                         JobState::Succeeded,
                         JobOutcomeCode::Succeeded,
                         *budget_exhausted,
+                        candidate_ids.clone(),
                     )
                 } else if now >= deadline_at {
-                    (JobState::TimedOut, JobOutcomeCode::TimedOut, true)
+                    (
+                        JobState::TimedOut,
+                        JobOutcomeCode::TimedOut,
+                        true,
+                        Vec::new(),
+                    )
                 } else {
                     return Err(JobError::InvalidInput);
                 }
             }
-            Completion::Succeeded { .. } | Completion::TimedOut if now >= deadline_at => {
-                (JobState::TimedOut, JobOutcomeCode::TimedOut, true)
-            }
+            Completion::Succeeded { .. } | Completion::TimedOut if now >= deadline_at => (
+                JobState::TimedOut,
+                JobOutcomeCode::TimedOut,
+                true,
+                Vec::new(),
+            ),
             Completion::NoMatch { code }
                 if code.matches_state(JobState::NoMatch)
                     && *code != JobOutcomeCode::LegacyUnknown =>
@@ -829,13 +838,14 @@ impl PostgresJobCoordinator {
                     JobState::NoMatch,
                     *code,
                     matches!(code, JobOutcomeCode::ExhaustedBudget),
+                    Vec::new(),
                 )
             }
             Completion::Failed { code }
                 if code.matches_state(JobState::Failed)
                     && *code != JobOutcomeCode::LegacyUnknown =>
             {
-                (JobState::Failed, *code, false)
+                (JobState::Failed, *code, false, Vec::new())
             }
             Completion::Succeeded { .. }
             | Completion::NoMatch { .. }
@@ -857,8 +867,8 @@ impl PostgresJobCoordinator {
             .bind(state_name).bind(OffsetDateTime::from(now)).bind(lease.job_id).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         sqlx::query("UPDATE job_attempts SET finished_at=$1,result_code=$2 WHERE generation_job_id=$3 AND attempt_number=$4")
             .bind(OffsetDateTime::from(now)).bind(state_name).bind(lease.job_id).bind(lease.attempt as i32).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
-        sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) VALUES ($1,$2::generation_terminal_outcome,$3,$4)")
-            .bind(lease.job_id).bind(state_name).bind(public_code.as_str()).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at)
+        sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted,result_ids) VALUES ($1,$2::generation_terminal_outcome,$3,$4,$5)")
+            .bind(lease.job_id).bind(state_name).bind(public_code.as_str()).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at).bind(result_ids)
             .execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
         Ok(next)
