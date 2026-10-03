@@ -10,10 +10,25 @@ use uuid::Uuid;
 pub const MAX_CONFIRMABLE_SNAP_METRES: u32 = 30;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, try_from = "PointWire")]
 pub struct Point {
     pub longitude: f64,
     pub latitude: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PointWire {
+    longitude: f64,
+    latitude: f64,
+}
+
+impl TryFrom<PointWire> for Point {
+    type Error = &'static str;
+
+    fn try_from(value: PointWire) -> Result<Self, Self::Error> {
+        Self::new(value.longitude, value.latitude).map_err(|_| "invalid coordinates")
+    }
 }
 
 impl Point {
@@ -98,6 +113,55 @@ pub struct NetworkPoint {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderError;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfiguredNetworkPoint {
+    pub point: Point,
+    pub profile_versions: Vec<ProfileVersion>,
+}
+
+pub struct ConfiguredNetworkProvider {
+    points: Vec<ConfiguredNetworkPoint>,
+}
+
+impl ConfiguredNetworkProvider {
+    pub fn new(points: Vec<ConfiguredNetworkPoint>) -> Result<Self, ProviderError> {
+        if points.is_empty() || points.iter().any(|entry| entry.profile_versions.is_empty()) {
+            return Err(ProviderError);
+        }
+        Ok(Self { points })
+    }
+}
+
+impl StartResolverProvider for ConfiguredNetworkProvider {
+    fn nearest_routable(
+        &self,
+        requested: Point,
+        profile: RouteRequestProfile,
+    ) -> Result<Option<NetworkPoint>, ProviderError> {
+        Ok(self
+            .points
+            .iter()
+            .filter(|entry| entry.profile_versions.contains(&profile.version()))
+            .map(|entry| NetworkPoint {
+                point: entry.point,
+                snap_distance_metres: great_circle_metres(requested, entry.point),
+            })
+            .min_by_key(|entry| entry.snap_distance_metres))
+    }
+}
+
+fn great_circle_metres(from: Point, to: Point) -> u32 {
+    let latitude_delta = (to.latitude - from.latitude).to_radians();
+    let longitude_delta = (to.longitude - from.longitude).to_radians();
+    let from_latitude = from.latitude.to_radians();
+    let to_latitude = to.latitude.to_radians();
+    let haversine = (latitude_delta / 2.0).sin().powi(2)
+        + from_latitude.cos() * to_latitude.cos() * (longitude_delta / 2.0).sin().powi(2);
+    let metres = 6_371_000.0 * 2.0 * haversine.sqrt().asin();
+    metres.round().clamp(0.0, u32::MAX as f64) as u32
+}
 
 pub trait StartResolverProvider: Send + Sync + 'static {
     fn nearest_routable(

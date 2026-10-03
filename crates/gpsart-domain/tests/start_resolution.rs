@@ -1,6 +1,6 @@
 use gpsart_domain::starts::{
-    Coverage, NetworkPoint, Point, ProviderError, ResolutionContext, ResolveError, StartResolver,
-    StartResolverProvider,
+    ConfiguredNetworkPoint, ConfiguredNetworkProvider, Coverage, NetworkPoint, Point,
+    ProviderError, ResolutionContext, ResolveError, StartResolver, StartResolverProvider,
 };
 use gpsart_domain::{ActivityProfile, RouteRequestProfile};
 use std::sync::Mutex;
@@ -135,5 +135,32 @@ fn confirmation_rejects_changed_profile_policy_or_data_version() {
     assert_eq!(
         service.confirm(resolution.id, &changed, now),
         Err(ResolveError::DataVersionChanged)
+    );
+}
+
+#[test]
+fn configured_network_snapshot_uses_only_explicit_profiled_points() {
+    let provider = ConfiguredNetworkProvider::new(vec![ConfiguredNetworkPoint {
+        point: Point::new(77.2001, 28.6001).unwrap(),
+        profile_versions: vec![gpsart_domain::ProfileVersion::WalkingV1],
+    }])
+    .unwrap();
+    assert!(
+        provider
+            .nearest_routable(
+                Point::new(77.2, 28.6).unwrap(),
+                RouteRequestProfile::new(ActivityProfile::Walking),
+            )
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        provider
+            .nearest_routable(
+                Point::new(77.2, 28.6).unwrap(),
+                RouteRequestProfile::new(ActivityProfile::Cycling),
+            )
+            .unwrap(),
+        None
     );
 }

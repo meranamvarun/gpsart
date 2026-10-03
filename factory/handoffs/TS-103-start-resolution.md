@@ -13,6 +13,7 @@
 - Both start endpoints require `x-gpsart-guest-session`; a resolution is bound to that opaque session identifier, exact activity-profile version, coverage-policy version, map-data version, and expiry.
 - Machine outcomes are `invalid_coordinates`, `unsupported_coverage`, `no_routable_access`, `provider_failure`, `expired_resolution`, `wrong_session`, `profile_changed`, `coverage_policy_changed`, `data_version_changed`, `snap_too_far`, and `authorization_required`.
 - `ConfiguredStartService` is the adapter boundary. A deployment supplies a `StartResolverProvider`; absence or provider failure stays explicit and never fabricates a routable point.
+- The API binary requires `GPSART_COVERAGE_VERSION`, `GPSART_COVERAGE_BOUNDS` (`min_lon,min_lat,max_lon,max_lat`), `GPSART_MAP_DATA_VERSION`, and `GPSART_ROUTABLE_STARTS_JSON`. Each configured network point names the exact profile versions for which the pinned snapshot marks it routable; startup rejects missing, empty, or malformed configuration.
 
 Exact coordinates must remain in request/response bodies and private persistence. Do not add them to public URLs, logs, analytics, error messages, or identifiers.
 

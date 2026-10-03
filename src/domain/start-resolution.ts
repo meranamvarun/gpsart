@@ -26,7 +26,46 @@ export type StartOutcomeCode =
   | "coverage_policy_changed"
   | "data_version_changed"
   | "snap_too_far"
-  | "authorization_required";
+  | "authorization_required"
+  | "invalid_request";
+
+export type CoverageResponse = Readonly<{
+  version: string;
+  geojson: Readonly<Record<string, unknown>>;
+  local_route_feasibility: "not_evaluated";
+}>;
+
+export function decodeCoverageResponse(value: unknown): CoverageResponse | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.version !== "string" || !candidate.version ||
+    !candidate.geojson || typeof candidate.geojson !== "object" || Array.isArray(candidate.geojson) ||
+    candidate.local_route_feasibility !== "not_evaluated"
+  ) return undefined;
+  return candidate as CoverageResponse;
+}
+
+const outcomeCodes: readonly StartOutcomeCode[] = [
+  "invalid_coordinates", "unsupported_coverage", "no_routable_access",
+  "provider_failure", "expired_resolution", "wrong_session", "profile_changed",
+  "coverage_policy_changed", "data_version_changed", "snap_too_far",
+  "authorization_required",
+  "invalid_request",
+];
+
+export function decodeStartOutcome(value: unknown): StartOutcomeCode | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const outcome = (value as Record<string, unknown>).outcome;
+  if (!outcome || typeof outcome !== "object") return undefined;
+  const code = (outcome as Record<string, unknown>).code;
+  return outcomeCodes.includes(code as StartOutcomeCode) ? code as StartOutcomeCode : undefined;
+}
+
+export function decodeConfirmedStart(value: unknown): GeoPoint | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return point((value as Record<string, unknown>).confirmed_start);
+}
 
 const versions: Readonly<Record<Activity, ProfileVersion>> = {
   walking: "walking-v1",

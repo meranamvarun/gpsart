@@ -66,10 +66,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StartResolution' }
-        '400': { description: Invalid coordinates }
-        '401': { description: Missing guest-session authorization }
-        '422': { description: Unsupported coverage or no routable access }
-        '502': { description: Routing provider failure }
+        '400':
+          description: Invalid coordinates or malformed request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              examples:
+                malformed: { value: { outcome: { code: invalid_request } } }
+                coordinates: { value: { outcome: { code: invalid_coordinates } } }
+        '401':
+          description: Missing guest-session authorization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              example: { outcome: { code: authorization_required } }
+        '422':
+          description: Unsupported coverage or no routable access
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              examples:
+                outside: { value: { outcome: { code: unsupported_coverage } } }
+                noAccess: { value: { outcome: { code: no_routable_access } } }
+        '502':
+          description: Routing provider failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              example: { outcome: { code: provider_failure } }
   /api/v1/starts/{resolution_id}/confirm:
     post:
       summary: Explicitly confirm a proposed start displaced by at most 30 metres
@@ -92,11 +116,51 @@ paths:
               properties:
                 profile: { $ref: '#/components/schemas/RouteProfile' }
       responses:
-        '200': { description: Confirmed candidate network point }
-        '404': { description: Resolution is private to another session }
-        '409': { description: Profile, policy, or data version changed }
-        '410': { description: Resolution expired }
-        '422': { description: Snap exceeds 30 metres }
+        '200':
+          description: Confirmed candidate network point
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmedStart' }
+              example: { confirmed_start: { longitude: 77.2, latitude: 28.6 } }
+        '400':
+          description: Malformed request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              example: { outcome: { code: invalid_request } }
+        '401':
+          description: Missing guest-session authorization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              example: { outcome: { code: authorization_required } }
+        '404':
+          description: Resolution is private to another session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              example: { outcome: { code: wrong_session } }
+        '409':
+          description: Profile, policy, or data version changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              examples:
+                profile: { value: { outcome: { code: profile_changed } } }
+                policy: { value: { outcome: { code: coverage_policy_changed } } }
+                data: { value: { outcome: { code: data_version_changed } } }
+        '410':
+          description: Resolution expired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              example: { outcome: { code: expired_resolution } }
+        '422':
+          description: Snap exceeds 30 metres
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartError' }
+              example: { outcome: { code: snap_too_far } }
 components:
   schemas:
     DesignSummary:
@@ -155,3 +219,22 @@ components:
         data_version: { type: string }
         expires_at_epoch_seconds: { type: integer, minimum: 1 }
         confirmation_required: { const: true }
+    ConfirmedStart:
+      type: object
+      additionalProperties: false
+      required: [confirmed_start]
+      properties:
+        confirmed_start: { $ref: '#/components/schemas/GeoPoint' }
+    StartError:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome:
+          type: object
+          additionalProperties: false
+          required: [code]
+          properties:
+            code:
+              type: string
+              enum: [invalid_request, invalid_coordinates, unsupported_coverage, no_routable_access, provider_failure, expired_resolution, wrong_session, profile_changed, coverage_policy_changed, data_version_changed, snap_too_far, authorization_required]

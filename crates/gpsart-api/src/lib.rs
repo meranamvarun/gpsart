@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use axum::{
     Json, Router,
+    extract::rejection::JsonRejection,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
@@ -268,8 +269,22 @@ async fn coverage(State(state): State<AppState>) -> impl IntoResponse {
 async fn resolve_start(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<ResolveStartBody>,
+    body: Result<Json<ResolveStartBody>, JsonRejection>,
 ) -> axum::response::Response {
+    let Json(body) = match body {
+        Ok(value) => value,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    outcome: ErrorOutcome {
+                        code: "invalid_request",
+                    },
+                }),
+            )
+                .into_response();
+        }
+    };
     let guest = match guest_session(&headers) {
         Ok(value) => value,
         Err(value) => return value.into_response(),
@@ -291,8 +306,22 @@ async fn confirm_start(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<ResolutionId>,
-    Json(body): Json<ConfirmStartBody>,
+    body: Result<Json<ConfirmStartBody>, JsonRejection>,
 ) -> axum::response::Response {
+    let Json(body) = match body {
+        Ok(value) => value,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    outcome: ErrorOutcome {
+                        code: "invalid_request",
+                    },
+                }),
+            )
+                .into_response();
+        }
+    };
     let guest = match guest_session(&headers) {
         Ok(value) => value,
         Err(value) => return value.into_response(),
@@ -342,6 +371,17 @@ pub async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
     axum::serve(listener, app(readiness))
+        .with_graceful_shutdown(shutdown)
+        .await
+}
+
+pub async fn serve_with_starts(
+    listener: tokio::net::TcpListener,
+    readiness: impl Readiness,
+    starts: impl StartService,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    axum::serve(listener, app_with_starts(readiness, starts))
         .with_graceful_shutdown(shutdown)
         .await
 }

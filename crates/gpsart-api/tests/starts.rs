@@ -1,8 +1,11 @@
 use async_trait::async_trait;
 use axum::{body::Body, http::Request};
-use gpsart_api::{ConfiguredStartService, Readiness, app_with_starts};
+use gpsart_api::{
+    ConfiguredStartService, CoveragePayload, Readiness, StartService, app_with_starts,
+};
 use gpsart_domain::starts::{
-    Coverage, NetworkPoint, Point, ProviderError, StartResolver, StartResolverProvider,
+    Coverage, NetworkPoint, Point, ProviderError, ResolutionId, ResolveError, StartResolution,
+    StartResolver, StartResolverProvider,
 };
 use gpsart_domain::{ActivityProfile, RouteRequestProfile};
 use http_body_util::BodyExt;
@@ -42,6 +45,47 @@ fn router(snap_distance_metres: u32) -> axum::Router {
         Duration::from_secs(300),
     );
     app_with_starts(Healthy, ConfiguredStartService::new(resolver, "map-v1"))
+}
+
+struct OutcomeService;
+
+#[async_trait]
+impl StartService for OutcomeService {
+    fn coverage(&self) -> CoveragePayload {
+        CoveragePayload {
+            version: "coverage-v1".into(),
+            geojson: serde_json::json!({"type":"Feature"}),
+            local_route_feasibility: "not_evaluated",
+        }
+    }
+
+    async fn resolve(
+        &self,
+        _: &str,
+        requested: Point,
+        _: RouteRequestProfile,
+    ) -> Result<StartResolution, ResolveError> {
+        Err(match requested.longitude as i32 {
+            70 => ResolveError::UnsupportedCoverage,
+            71 => ResolveError::NoRoutableAccess,
+            _ => ResolveError::ProviderFailure,
+        })
+    }
+
+    async fn confirm(
+        &self,
+        guest: &str,
+        _: ResolutionId,
+        _: RouteRequestProfile,
+    ) -> Result<Point, ResolveError> {
+        Err(match guest {
+            "expired" => ResolveError::ExpiredResolution,
+            "wrong" => ResolveError::WrongSession,
+            "profile" => ResolveError::ProfileChanged,
+            "policy" => ResolveError::CoveragePolicyChanged,
+            _ => ResolveError::DataVersionChanged,
+        })
+    }
 }
 
 async fn json(response: axum::response::Response) -> serde_json::Value {
@@ -173,4 +217,93 @@ async fn invalid_coordinates_and_long_snap_are_machine_readable() {
         .unwrap();
     assert_eq!(response.status(), 422);
     assert_eq!(json(response).await["outcome"]["code"], "snap_too_far");
+}
+
+#[tokio::test]
+async fn every_resolution_failure_has_a_stable_http_status_and_code() {
+    let malformed = app_with_starts(Healthy, OutcomeService)
+        .oneshot(
+            Request::post("/api/v1/starts/resolve")
+                .header("content-type", "application/json")
+                .header("x-gpsart-guest-session", "guest-a")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), 400);
+    assert_eq!(json(malformed).await["outcome"]["code"], "invalid_request");
+
+    let unauthorized = app_with_starts(Healthy, OutcomeService)
+        .oneshot(
+            Request::post("/api/v1/starts/resolve")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "requested_point": {"longitude": 70.0, "latitude": 28.6},
+                        "profile": {"activity": "walking", "profile_version": "walking-v1"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), 401);
+    assert_eq!(
+        json(unauthorized).await["outcome"]["code"],
+        "authorization_required"
+    );
+
+    for (longitude, status, code) in [
+        (70.0, 422, "unsupported_coverage"),
+        (71.0, 422, "no_routable_access"),
+        (72.0, 502, "provider_failure"),
+    ] {
+        let response = app_with_starts(Healthy, OutcomeService)
+            .oneshot(
+                Request::post("/api/v1/starts/resolve")
+                    .header("content-type", "application/json")
+                    .header("x-gpsart-guest-session", "guest-a")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "requested_point": {"longitude": longitude, "latitude": 28.6},
+                            "profile": {"activity": "walking", "profile_version": "walking-v1"}
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(json(response).await["outcome"]["code"], code);
+    }
+
+    let id = "7bf80ccf-68e8-49ec-a3e8-cad667bb95a0";
+    for (guest, status, code) in [
+        ("expired", 410, "expired_resolution"),
+        ("wrong", 404, "wrong_session"),
+        ("profile", 409, "profile_changed"),
+        ("policy", 409, "coverage_policy_changed"),
+        ("data", 409, "data_version_changed"),
+    ] {
+        let response = app_with_starts(Healthy, OutcomeService)
+            .oneshot(
+                Request::post(format!("/api/v1/starts/{id}/confirm"))
+                    .header("content-type", "application/json")
+                    .header("x-gpsart-guest-session", guest)
+                    .body(Body::from(
+                        serde_json::json!({
+                            "profile": {"activity": "walking", "profile_version": "walking-v1"}
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(json(response).await["outcome"]["code"], code);
+    }
 }

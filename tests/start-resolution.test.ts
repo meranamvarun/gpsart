@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodeStartResolution } from "../src/domain/start-resolution";
+import {
+  decodeConfirmedStart,
+  decodeCoverageResponse,
+  decodeStartOutcome,
+  decodeStartResolution,
+} from "../src/domain/start-resolution";
 
 const valid = {
   id: "7bf80ccf-68e8-49ec-a3e8-cad667bb95a0",
@@ -16,6 +21,24 @@ const valid = {
 
 test("start resolution decoder preserves requested and candidate coordinates", () => {
   assert.deepEqual(decodeStartResolution(valid), valid);
+});
+
+test("coverage, confirmation, and machine outcomes are decoded explicitly", () => {
+  assert.deepEqual(
+    decodeCoverageResponse({
+      version: "coverage-v1",
+      geojson: { type: "Feature", geometry: { type: "Polygon", coordinates: [] } },
+      local_route_feasibility: "not_evaluated",
+    })?.version,
+    "coverage-v1",
+  );
+  assert.deepEqual(
+    decodeConfirmedStart({ confirmed_start: { longitude: 77.2, latitude: 28.6 } }),
+    { longitude: 77.2, latitude: 28.6 },
+  );
+  assert.equal(decodeStartOutcome({ outcome: { code: "no_routable_access" } }), "no_routable_access");
+  assert.equal(decodeStartOutcome({ outcome: { code: "nearest-ish" } }), undefined);
+  assert.equal(decodeCoverageResponse({ version: "v1", geojson: null }), undefined);
 });
 
 test("start resolution decoder rejects unknown, invalid, or implicitly confirmed data", () => {
