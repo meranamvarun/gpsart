@@ -11,9 +11,9 @@
 
 ## Verification results
 
-- Focused browser/domain suite: 10 passed.
-- Complete TypeScript unit suite: 31 passed.
+- Focused browser/domain suite: 11 passed.
+- Complete TypeScript unit suite: 32 passed.
 - Visual-shell regression suite: 2 passed.
 - Production TypeScript/Vite build: passed.
 - Rust route-job API integration test: passed.
-- Factory verification: pending final pre-review run.
+- Factory verification: passed, including Rust format, clippy, all workspace tests/builds, factory contracts, browser tests, Sites tests, and production build.
