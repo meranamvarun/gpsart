@@ -15,8 +15,12 @@ use gpsart_domain::{
         StartResolverProvider,
     },
 };
-use gpsart_persistence::jobs::{JobError, JobState, PostgresJobCoordinator, RouteJobSubmission};
-use gpsart_persistence::{DependencyProbe, GuestSessionStore, PostgresProbe};
+use gpsart_persistence::jobs::{
+    JobError, JobState, PostgresJobCoordinator, RouteJobSubmission, SUPPORTED_ALGORITHM_VERSION,
+};
+use gpsart_persistence::{
+    DependencyProbe, GuestSessionStore, PostgresProbe, ResolvedStartRecord, ResolvedStartStore,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -261,6 +265,7 @@ impl RouteJobService for UnavailableRouteJobService {
 pub struct ConfiguredStartService<P> {
     resolver: StartResolver<P>,
     data_version: String,
+    store: Option<Arc<dyn ResolvedStartStore>>,
 }
 
 impl<P: StartResolverProvider> ConfiguredStartService<P> {
@@ -268,6 +273,19 @@ impl<P: StartResolverProvider> ConfiguredStartService<P> {
         Self {
             resolver,
             data_version: data_version.into(),
+            store: None,
+        }
+    }
+
+    pub fn with_store(
+        resolver: StartResolver<P>,
+        data_version: impl Into<String>,
+        store: Arc<impl ResolvedStartStore>,
+    ) -> Self {
+        Self {
+            resolver,
+            data_version: data_version.into(),
+            store: Some(store),
         }
     }
 
@@ -310,11 +328,36 @@ impl<P: StartResolverProvider> StartService for ConfiguredStartService<P> {
         id: ResolutionId,
         profile: RouteRequestProfile,
     ) -> Result<Point, ResolveError> {
-        self.resolver.confirm(
+        let now = std::time::SystemTime::now();
+        let resolution = self.resolver.confirmed_resolution(
             id,
             &self.context(guest_session_id, profile),
-            std::time::SystemTime::now(),
-        )
+            now,
+        )?;
+        if let Some(store) = &self.store {
+            let owner = uuid::Uuid::parse_str(guest_session_id)
+                .map_err(|_| ResolveError::StorageUnavailable)?;
+            let expires_at = UNIX_EPOCH
+                .checked_add(Duration::from_secs(resolution.expires_at_epoch_seconds))
+                .ok_or(ResolveError::StorageUnavailable)?;
+            store
+                .insert_resolved_start(ResolvedStartRecord {
+                    id: resolution.id.as_uuid(),
+                    guest_session_id: owner,
+                    requested_longitude: resolution.requested_point.longitude,
+                    requested_latitude: resolution.requested_point.latitude,
+                    confirmed_longitude: resolution.candidate_network_point.longitude,
+                    confirmed_latitude: resolution.candidate_network_point.latitude,
+                    profile_version: resolution.profile_version.to_string(),
+                    coverage_policy_version: resolution.coverage_policy_version.clone(),
+                    map_data_version: resolution.data_version.clone(),
+                    created_at: now,
+                    expires_at,
+                })
+                .await
+                .map_err(|_| ResolveError::StorageUnavailable)?;
+        }
+        Ok(resolution.candidate_network_point)
     }
 }
 
@@ -412,6 +455,7 @@ fn error_response(error: ResolveError) -> axum::response::Response {
         ResolveError::InvalidCoordinates => StatusCode::BAD_REQUEST,
         ResolveError::WrongSession => StatusCode::NOT_FOUND,
         ResolveError::ProviderFailure => StatusCode::BAD_GATEWAY,
+        ResolveError::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ResolveError::ExpiredResolution => StatusCode::GONE,
         ResolveError::UnsupportedCoverage
         | ResolveError::NoRoutableAccess
@@ -504,6 +548,7 @@ async fn confirm_start(
 }
 
 #[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CreateRouteJobBody {
     resolved_start_id: uuid::Uuid,
     revision: i32,
@@ -521,7 +566,6 @@ struct CreateRouteJobBody {
 #[derive(Serialize)]
 struct RouteJobAccepted {
     job_id: uuid::Uuid,
-    state: &'static str,
     request_revision: i32,
 }
 
@@ -545,9 +589,10 @@ async fn create_route_job(
     if body.revision <= 0
         || body.idempotency_key.is_empty()
         || body.idempotency_key.len() > 200
-        || body.requested_distance_metres <= 0
+        || !(1_000..=100_000).contains(&body.requested_distance_metres)
         || body.distance_tolerance_metres < 0
         || body.distance_tolerance_metres > body.requested_distance_metres
+        || body.algorithm_version != SUPPORTED_ALGORITHM_VERSION
         || [
             &body.template_id,
             &body.template_version,
@@ -560,11 +605,28 @@ async fn create_route_job(
     {
         return job_error_response(JobError::InvalidInput);
     }
+    let template_version = match body.template_version.parse::<u32>() {
+        Ok(value) => value,
+        Err(_) => return job_error_response(JobError::InvalidInput),
+    };
+    let template_is_published = embedded_catalogue().is_ok_and(|catalogue| {
+        catalogue.published(None).iter().any(|template| {
+            template.definition.id == body.template_id
+                && template.definition.version == template_version
+        })
+    });
+    if !template_is_published {
+        return job_error_response(JobError::InvalidInput);
+    }
     let canonical = match serde_json::to_vec(&body) {
         Ok(value) => value,
         Err(_) => return job_error_response(JobError::InvalidInput),
     };
     let now = SystemTime::now();
+    let activity_profile_json = match serde_json::to_string(&body.profile) {
+        Ok(value) => value,
+        Err(_) => return job_error_response(JobError::InvalidInput),
+    };
     let submission = RouteJobSubmission {
         resolved_start_id: body.resolved_start_id,
         revision: body.revision,
@@ -572,7 +634,7 @@ async fn create_route_job(
         input_hash: Sha256::digest(canonical).into(),
         requested_distance_metres: body.requested_distance_metres,
         distance_tolerance_metres: body.distance_tolerance_metres,
-        activity_profile_json: serde_json::to_string(&body.profile).unwrap_or_else(|_| "{}".into()),
+        activity_profile_json,
         activity_profile_version: body.profile.version().to_string(),
         coverage_policy_version: body.coverage_policy_version,
         template_id: body.template_id,
@@ -588,7 +650,6 @@ async fn create_route_job(
             StatusCode::ACCEPTED,
             Json(RouteJobAccepted {
                 job_id,
-                state: "queued",
                 request_revision: body.revision,
             }),
         )

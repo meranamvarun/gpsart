@@ -183,6 +183,12 @@ pub struct ResolutionContext {
 #[serde(transparent)]
 pub struct ResolutionId(Uuid);
 
+impl ResolutionId {
+    pub const fn as_uuid(self) -> Uuid {
+        self.0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StartResolution {
     pub id: ResolutionId,
@@ -278,6 +284,16 @@ impl<P: StartResolverProvider> StartResolver<P> {
         context: &ResolutionContext,
         now: SystemTime,
     ) -> Result<Point, ResolveError> {
+        self.confirmed_resolution(id, context, now)
+            .map(|resolution| resolution.candidate_network_point)
+    }
+
+    pub fn confirmed_resolution(
+        &self,
+        id: ResolutionId,
+        context: &ResolutionContext,
+        now: SystemTime,
+    ) -> Result<StartResolution, ResolveError> {
         let resolutions = self.resolutions.lock().expect("resolution lock poisoned");
         let stored = resolutions
             .get(&id)
@@ -300,7 +316,7 @@ impl<P: StartResolverProvider> StartResolver<P> {
         if stored.public.snap_distance_metres > MAX_CONFIRMABLE_SNAP_METRES {
             return Err(ResolveError::SnapTooFar);
         }
-        Ok(stored.public.candidate_network_point)
+        Ok(stored.public.clone())
     }
 }
 
@@ -311,6 +327,7 @@ pub enum ResolveError {
     UnsupportedCoverage,
     NoRoutableAccess,
     ProviderFailure,
+    StorageUnavailable,
     ExpiredResolution,
     WrongSession,
     ProfileChanged,
@@ -326,6 +343,7 @@ impl ResolveError {
             Self::UnsupportedCoverage => "unsupported_coverage",
             Self::NoRoutableAccess => "no_routable_access",
             Self::ProviderFailure => "provider_failure",
+            Self::StorageUnavailable => "storage_unavailable",
             Self::ExpiredResolution => "expired_resolution",
             Self::WrongSession => "wrong_session",
             Self::ProfileChanged => "profile_changed",

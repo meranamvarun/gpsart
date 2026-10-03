@@ -3,9 +3,9 @@ use gpsart_config::{AppConfig, init_tracing};
 use gpsart_domain::starts::{
     ConfiguredNetworkPoint, ConfiguredNetworkProvider, Coverage, StartResolver,
 };
-use gpsart_persistence::PostgresGuestSessionStore;
 use gpsart_persistence::jobs::PostgresJobCoordinator;
 use gpsart_persistence::{DependencyProbe, PostgresProbe};
+use gpsart_persistence::{PostgresGuestSessionStore, PostgresResolvedStartStore};
 use std::{error::Error, sync::Arc, time::Duration};
 
 #[tokio::main]
@@ -28,9 +28,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let coverage =
         Coverage::rectangle(coverage_version, bounds[0], bounds[1], bounds[2], bounds[3])
             .map_err(|_| "GPSART_COVERAGE_BOUNDS is invalid")?;
-    let starts = gpsart_api::ConfiguredStartService::new(
+    let start_store =
+        Arc::new(PostgresResolvedStartStore::connect(config.database_url.expose()).await?);
+    let starts = gpsart_api::ConfiguredStartService::with_store(
         StartResolver::new(coverage, provider, Duration::from_secs(300)),
         data_version,
+        start_store,
     );
     let sessions =
         Arc::new(PostgresGuestSessionStore::connect(config.database_url.expose()).await?);

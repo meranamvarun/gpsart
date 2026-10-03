@@ -190,6 +190,48 @@ async fn creation_is_validated_owned_and_idempotent() {
             .status(),
         400
     );
+    assert_eq!(
+        post(&app, &cookie, &csrf, body("too-far", 100_001, start))
+            .await
+            .status(),
+        400
+    );
+    let mut unknown_top: serde_json::Value =
+        serde_json::from_str(&body("unknown-top", 5_000, start)).unwrap();
+    unknown_top["invented"] = serde_json::json!(true);
+    assert_eq!(
+        post(&app, &cookie, &csrf, unknown_top.to_string())
+            .await
+            .status(),
+        400
+    );
+    let mut unknown_profile: serde_json::Value =
+        serde_json::from_str(&body("unknown-profile", 5_000, start)).unwrap();
+    unknown_profile["profile"]["invented"] = serde_json::json!(true);
+    assert_eq!(
+        post(&app, &cookie, &csrf, unknown_profile.to_string())
+            .await
+            .status(),
+        400
+    );
+    let mut unpublished: serde_json::Value =
+        serde_json::from_str(&body("unknown-template", 5_000, start)).unwrap();
+    unpublished["template_id"] = serde_json::json!("not-published");
+    assert_eq!(
+        post(&app, &cookie, &csrf, unpublished.to_string())
+            .await
+            .status(),
+        400
+    );
+    let mut unsupported_algorithm: serde_json::Value =
+        serde_json::from_str(&body("unknown-algorithm", 5_000, start)).unwrap();
+    unsupported_algorithm["algorithm_version"] = serde_json::json!("client-invented-v99");
+    assert_eq!(
+        post(&app, &cookie, &csrf, unsupported_algorithm.to_string())
+            .await
+            .status(),
+        400
+    );
     let job_id = first_body["job_id"].as_str().unwrap();
     for _ in 0..2 {
         let cancelled = app

@@ -1,4 +1,4 @@
-use sqlx::{PgPool, Row, postgres::PgPoolOptions};
+use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use std::{
     collections::HashMap,
     sync::Mutex,
@@ -7,6 +7,8 @@ use std::{
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
+
+pub const SUPPORTED_ALGORITHM_VERSION: &str = "algorithm-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StartOwnership {
@@ -261,7 +263,12 @@ impl InMemoryJobCoordinator {
                 job.candidate_ids = candidate_ids;
                 job.budget_exhausted = budget_exhausted || now >= job.deadline_at;
             }
-            Completion::Succeeded { .. } | Completion::TimedOut => job.state = JobState::TimedOut,
+            Completion::Succeeded { .. } | Completion::TimedOut if now >= job.deadline_at => {
+                job.state = JobState::TimedOut
+            }
+            Completion::Succeeded { .. } | Completion::TimedOut => {
+                return Err(JobError::InvalidInput);
+            }
         }
         job.lease = None;
         Ok(())
@@ -328,6 +335,21 @@ pub struct PostgresJobCoordinator {
     pool: PgPool,
 }
 
+pub struct PostgresProviderCallPermit {
+    transaction: Option<Transaction<'static, Postgres>>,
+}
+
+impl PostgresProviderCallPermit {
+    pub async fn commit(mut self) -> Result<(), JobError> {
+        self.transaction
+            .take()
+            .expect("provider-call permit transaction")
+            .commit()
+            .await
+            .map_err(|_| JobError::Unavailable)
+    }
+}
+
 impl PostgresJobCoordinator {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -346,10 +368,23 @@ impl PostgresJobCoordinator {
         if input.revision <= 0
             || input.idempotency_key.is_empty()
             || input.idempotency_key.len() > 200
-            || input.requested_distance_metres <= 0
+            || !(1_000..=100_000).contains(&input.requested_distance_metres)
             || input.distance_tolerance_metres < 0
+            || input.distance_tolerance_metres > input.requested_distance_metres
             || input.max_attempts <= 0
             || input.deadline_at <= SystemTime::now()
+            || input.expires_at <= input.deadline_at
+            || input.algorithm_version != SUPPORTED_ALGORITHM_VERSION
+            || [
+                &input.activity_profile_version,
+                &input.coverage_policy_version,
+                &input.template_id,
+                &input.template_version,
+                &input.map_data_version,
+                &input.algorithm_version,
+            ]
+            .iter()
+            .any(|value| value.is_empty())
         {
             return Err(JobError::InvalidInput);
         }
@@ -359,7 +394,7 @@ impl PostgresJobCoordinator {
             .execute(&mut *tx)
             .await
             .map_err(|_| JobError::Unavailable)?;
-        if let Some(row) = sqlx::query("SELECT pr.input_hash, gj.id FROM planning_requests pr JOIN generation_jobs gj ON gj.planning_request_id = pr.id WHERE pr.guest_session_id = $1 AND pr.idempotency_key = $2 FOR UPDATE")
+        if let Some(row) = sqlx::query("SELECT pr.input_hash, gj.id FROM planning_requests pr JOIN generation_jobs gj ON gj.planning_request_id = pr.id WHERE pr.guest_session_id = $1 AND pr.idempotency_key = $2 ORDER BY gj.queued_at LIMIT 1 FOR UPDATE OF pr, gj")
             .bind(owner).bind(&input.idempotency_key).fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)? {
             let hash: Vec<u8> = row.try_get("input_hash").map_err(|_| JobError::Unavailable)?;
             let id: Uuid = row.try_get("id").map_err(|_| JobError::Unavailable)?;
@@ -438,15 +473,50 @@ impl PostgresJobCoordinator {
         }
     }
 
-    pub async fn may_schedule_provider(
+    pub async fn begin_provider_call(
         &self,
         lease: &JobLease,
         now: SystemTime,
         required: Duration,
-    ) -> Result<bool, JobError> {
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM generation_jobs WHERE id=$1 AND state='running' AND cancellation_requested_at IS NULL AND lease_owner=$2 AND attempt_count=$3 AND lease_expires_at>$4 AND deadline_at>=$5)")
-            .bind(lease.job_id).bind(lease.worker_id).bind(lease.attempt as i32).bind(OffsetDateTime::from(now)).bind(OffsetDateTime::from(now + required))
-            .fetch_one(&self.pool).await.map_err(|_| JobError::Unavailable)
+    ) -> Result<Option<PostgresProviderCallPermit>, JobError> {
+        let required_until = now.checked_add(required).ok_or(JobError::InvalidInput)?;
+        let mut transaction = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
+        let row = sqlx::query("SELECT state::text AS state, cancellation_requested_at, lease_owner, attempt_count, lease_expires_at, deadline_at FROM generation_jobs WHERE id=$1 FOR UPDATE")
+            .bind(lease.job_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let state: String = row.try_get("state").map_err(|_| JobError::Unavailable)?;
+        let cancellation_requested_at: Option<OffsetDateTime> = row
+            .try_get("cancellation_requested_at")
+            .map_err(|_| JobError::Unavailable)?;
+        let lease_owner: Option<Uuid> = row
+            .try_get("lease_owner")
+            .map_err(|_| JobError::Unavailable)?;
+        let attempt: i32 = row
+            .try_get("attempt_count")
+            .map_err(|_| JobError::Unavailable)?;
+        let lease_expires_at: Option<OffsetDateTime> = row
+            .try_get("lease_expires_at")
+            .map_err(|_| JobError::Unavailable)?;
+        let deadline_at: OffsetDateTime = row
+            .try_get("deadline_at")
+            .map_err(|_| JobError::Unavailable)?;
+        let allowed = state == "running"
+            && cancellation_requested_at.is_none()
+            && lease_owner == Some(lease.worker_id)
+            && attempt == lease.attempt as i32
+            && lease_expires_at.is_some_and(|expires| expires > OffsetDateTime::from(now))
+            && deadline_at >= OffsetDateTime::from(required_until);
+        if !allowed {
+            return Ok(None);
+        }
+        Ok(Some(PostgresProviderCallPermit {
+            transaction: Some(transaction),
+        }))
     }
 
     pub async fn cancel(
@@ -502,20 +572,31 @@ impl PostgresJobCoordinator {
         if !valid_lease {
             return Err(JobError::LeaseLost);
         }
+        let deadline_at = SystemTime::from(
+            row.try_get::<OffsetDateTime, _>("deadline_at")
+                .map_err(|_| JobError::Unavailable)?,
+        );
         let (next, budget_exhausted) = match completion {
             Completion::Succeeded {
                 candidate_ids,
                 budget_exhausted,
             } if !candidate_ids.is_empty() => {
-                let count: i64 = sqlx::query_scalar("SELECT count(*) FROM route_candidates WHERE generation_job_id=$1 AND id=ANY($2)")
+                let count: i64 = sqlx::query_scalar("SELECT count(*) FROM route_candidates rc JOIN generation_jobs gj ON gj.id=rc.generation_job_id JOIN planning_requests pr ON pr.id=gj.planning_request_id WHERE rc.generation_job_id=$1 AND rc.id=ANY($2) AND rc.map_data_version=pr.map_data_version AND rc.algorithm_version=pr.algorithm_version")
                     .bind(lease.job_id).bind(candidate_ids).fetch_one(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
                 if count == candidate_ids.len() as i64 {
                     (JobState::Succeeded, *budget_exhausted)
-                } else {
+                } else if now >= deadline_at {
                     (JobState::TimedOut, true)
+                } else {
+                    return Err(JobError::InvalidInput);
                 }
             }
-            Completion::Succeeded { .. } | Completion::TimedOut => (JobState::TimedOut, true),
+            Completion::Succeeded { .. } | Completion::TimedOut if now >= deadline_at => {
+                (JobState::TimedOut, true)
+            }
+            Completion::Succeeded { .. } | Completion::TimedOut => {
+                return Err(JobError::InvalidInput);
+            }
         };
         let state_name = match next {
             JobState::Succeeded => "succeeded",
@@ -526,7 +607,7 @@ impl PostgresJobCoordinator {
         sqlx::query("UPDATE job_attempts SET finished_at=$1,result_code=$2 WHERE generation_job_id=$3 AND attempt_number=$4")
             .bind(OffsetDateTime::from(now)).bind(state_name).bind(lease.job_id).bind(lease.attempt as i32).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) VALUES ($1,$2::generation_terminal_outcome,$3,$4)")
-            .bind(lease.job_id).bind(state_name).bind(state_name).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= SystemTime::from(row.try_get::<OffsetDateTime,_>("deadline_at").map_err(|_| JobError::Unavailable)?))
+            .bind(lease.job_id).bind(state_name).bind(state_name).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at)
             .execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
         Ok(next)

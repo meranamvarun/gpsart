@@ -20,7 +20,7 @@ paths:
       responses:
         '202':
           description: Job queued, or the original job for an identical retry.
-          content: { application/json: { schema: { $ref: '#/components/schemas/AcceptedRouteJob' }, example: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, state: queued, request_revision: 1 } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/AcceptedRouteJob' }, example: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, request_revision: 1 } } }
         '400': { $ref: '#/components/responses/InvalidJobRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -285,7 +285,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/StartError' }
               example: { outcome: { code: expired_resolution } }
-        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '503':
+          description: Guest-session authentication or confirmed-start storage is unavailable
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ApiError' }
+                  - { $ref: '#/components/schemas/StartError' }
+              examples:
+                authentication: { value: { code: authentication_unavailable } }
+                storage: { value: { outcome: { code: storage_unavailable } } }
         '422':
           description: Snap exceeds 30 metres
           content:
@@ -353,21 +363,20 @@ components:
         resolved_start_id: { type: string, format: uuid }
         revision: { type: integer, minimum: 1 }
         idempotency_key: { type: string, minLength: 1, maxLength: 200 }
-        requested_distance_metres: { type: integer, minimum: 1 }
+        requested_distance_metres: { type: integer, minimum: 1000, maximum: 100000 }
         distance_tolerance_metres: { type: integer, minimum: 0 }
         profile: { $ref: '#/components/schemas/RouteProfile' }
         coverage_policy_version: { type: string, minLength: 1 }
         template_id: { type: string, minLength: 1 }
         template_version: { type: string, minLength: 1 }
         map_data_version: { type: string, minLength: 1 }
-        algorithm_version: { type: string, minLength: 1 }
+        algorithm_version: { type: string, const: algorithm-v1 }
     AcceptedRouteJob:
       type: object
       additionalProperties: false
-      required: [job_id, state, request_revision]
+      required: [job_id, request_revision]
       properties:
         job_id: { type: string, format: uuid }
-        state: { const: queued }
         request_revision: { type: integer, minimum: 1 }
     JobError:
       type: object
@@ -465,4 +474,4 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, invalid_coordinates, unsupported_coverage, no_routable_access, provider_failure, expired_resolution, wrong_session, profile_changed, coverage_policy_changed, data_version_changed, snap_too_far, authorization_required]
+              enum: [invalid_request, invalid_coordinates, unsupported_coverage, no_routable_access, provider_failure, storage_unavailable, expired_resolution, wrong_session, profile_changed, coverage_policy_changed, data_version_changed, snap_too_far, authorization_required]

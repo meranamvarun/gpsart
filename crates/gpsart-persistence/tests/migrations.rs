@@ -1,5 +1,8 @@
-use gpsart_persistence::jobs::{Completion, JobError, PostgresJobCoordinator};
-use gpsart_persistence::{MIGRATOR, MigrationStatus, migration_status};
+use gpsart_persistence::jobs::{Completion, JobError, PostgresJobCoordinator, RouteJobSubmission};
+use gpsart_persistence::{
+    MIGRATOR, MigrationStatus, PostgresResolvedStartStore, ResolvedStartRecord, ResolvedStartStore,
+    migration_status,
+};
 use sqlx::{Connection, Executor, PgConnection, PgPool, Row, postgres::PgConnectOptions};
 use std::time::{Duration, SystemTime};
 use std::{
@@ -317,6 +320,162 @@ async fn concurrent_claim_and_cancellation_are_atomic() {
             .complete(&lease, &Completion::TimedOut, now)
             .await,
         Err(JobError::Terminal)
+    );
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn confirmed_start_store_feeds_owned_job_submission() {
+    let Some((admin, pool, database_name)) = isolated_database("confirmed_start_job").await else {
+        return;
+    };
+    MIGRATOR.run(&pool).await.expect("migrations apply");
+    let owner = Uuid::new_v4();
+    let start_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO guest_sessions (id, token_hash, expires_at, cleanup_after) VALUES ($1, decode(repeat('11', 32), 'hex'), now() + interval '1 day', now() + interval '2 days')")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let now = SystemTime::now();
+    PostgresResolvedStartStore::new(pool.clone())
+        .insert_resolved_start(ResolvedStartRecord {
+            id: start_id,
+            guest_session_id: owner,
+            requested_longitude: 10.0,
+            requested_latitude: 10.0,
+            confirmed_longitude: 10.0001,
+            confirmed_latitude: 10.0001,
+            profile_version: "walking-v1".into(),
+            coverage_policy_version: "coverage-v1".into(),
+            map_data_version: "map-v1".into(),
+            created_at: now,
+            expires_at: now + Duration::from_secs(300),
+        })
+        .await
+        .unwrap();
+    let job = PostgresJobCoordinator::new(pool.clone())
+        .submit(
+            owner,
+            &RouteJobSubmission {
+                resolved_start_id: start_id,
+                revision: 1,
+                idempotency_key: "resolved-flow".into(),
+                input_hash: [9; 32],
+                requested_distance_metres: 5_000,
+                distance_tolerance_metres: 250,
+                activity_profile_json: r#"{"activity":"walking","profile_version":"walking-v1"}"#
+                    .into(),
+                activity_profile_version: "walking-v1".into(),
+                coverage_policy_version: "coverage-v1".into(),
+                template_id: "heart".into(),
+                template_version: "1".into(),
+                map_data_version: "map-v1".into(),
+                algorithm_version: "algorithm-v1".into(),
+                expires_at: now + Duration::from_secs(3_600),
+                deadline_at: now + Duration::from_secs(120),
+                max_attempts: 3,
+            },
+        )
+        .await
+        .unwrap();
+    let stored: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM generation_jobs WHERE id=$1 AND guest_session_id=$2)",
+    )
+    .bind(job)
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(stored);
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn provider_reservation_orders_scheduling_before_cancellation() {
+    let Some((admin, pool, database_name)) = isolated_database("provider_cancel_order").await
+    else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(30))
+        .await
+        .unwrap()
+        .unwrap();
+    let permit = coordinator
+        .begin_provider_call(&lease, now, Duration::from_secs(5))
+        .await
+        .unwrap()
+        .expect("running lease receives a provider permit");
+    let cancelling = {
+        let coordinator = coordinator.clone();
+        tokio::spawn(async move { coordinator.cancel(owner, lease.job_id, now).await })
+    };
+    tokio::pin!(cancelling);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut cancelling)
+            .await
+            .is_err(),
+        "cancellation must wait until the scheduling permit is committed"
+    );
+    permit.commit().await.unwrap();
+    assert_eq!(
+        cancelling.await.unwrap().unwrap(),
+        gpsart_persistence::jobs::JobState::Cancelled
+    );
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn candidate_publication_requires_request_versions_and_the_deadline() {
+    let Some((admin, pool, database_name)) = isolated_database("candidate_versions").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(1_200))
+        .await
+        .unwrap()
+        .unwrap();
+    let candidate = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO route_candidates (
+          id, guest_session_id, generation_job_id, candidate_version, start_point,
+          end_point, canonical_route, distance_metres, map_data_version,
+          algorithm_version, expires_at
+        ) VALUES (
+          $1, '00000000-0000-0000-0000-000000000001', $2, 1,
+          ST_SetSRID(ST_MakePoint(10.0, 10.0), 4326),
+          ST_SetSRID(ST_MakePoint(10.1, 10.1), 4326),
+          ST_SetSRID(ST_MakeLine(ST_MakePoint(10.0, 10.0), ST_MakePoint(10.1, 10.1)), 4326),
+          5000, 'map-v1', 'wrong-algorithm', now() + interval '1 day'
+        )"#,
+    )
+    .bind(candidate)
+    .bind(lease.job_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let completion = Completion::Succeeded {
+        candidate_ids: vec![candidate],
+        budget_exhausted: false,
+    };
+    assert_eq!(
+        coordinator.complete(&lease, &completion, now).await,
+        Err(JobError::InvalidInput)
+    );
+    assert_eq!(
+        coordinator
+            .complete(&lease, &completion, now + Duration::from_secs(660))
+            .await
+            .unwrap(),
+        gpsart_persistence::jobs::JobState::TimedOut
     );
     drop_database(admin, pool, &database_name).await;
 }
