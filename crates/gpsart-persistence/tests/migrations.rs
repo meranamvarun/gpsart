@@ -185,7 +185,10 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(legacy_rows, 0, "invalid legacy credentials fail closed during upgrade");
+    assert_eq!(
+        legacy_rows, 0,
+        "invalid legacy credentials fail closed during upgrade"
+    );
     let state_labels: Vec<String> = sqlx::query(
         "SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid = pg_enum.enumtypid WHERE typname = 'generation_job_state' ORDER BY enumsortorder",
     )

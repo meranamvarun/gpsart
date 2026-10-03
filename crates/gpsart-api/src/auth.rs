@@ -64,6 +64,8 @@ pub enum AuthError {
     NotFound,
     #[error("authentication service unavailable")]
     Unavailable,
+    #[error("credential rotation is not due")]
+    RotationNotDue,
     #[error("session policy is invalid")]
     InvalidPolicy,
 }
@@ -306,6 +308,22 @@ impl InMemorySessionStore {
         };
         self.insert_session(record).await.expect("memory insert");
         format!("{SESSION_COOKIE}={token}")
+    }
+    pub async fn age_session_for_test(
+        &self,
+        cookie_header: &str,
+        age: Duration,
+    ) -> Result<(), AuthError> {
+        let raw = cookie_header
+            .split_once('=')
+            .map(|(_, value)| value)
+            .ok_or(AuthError::Unauthenticated)?;
+        let mut sessions = self.sessions.write().expect("session lock");
+        let session = sessions
+            .get_mut(&digest(raw.as_bytes()))
+            .ok_or(AuthError::Unauthenticated)?;
+        session.created_at = SystemTime::now() - age;
+        Ok(())
     }
     pub async fn cleanup(&self, cutoff: SystemTime) -> Result<CleanupReport, SessionStoreError> {
         self.cleanup_expired_sessions(cutoff).await

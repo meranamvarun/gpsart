@@ -137,7 +137,11 @@ async fn foreign_and_unknown_resources_receive_the_same_denial() {
     let route = Uuid::new_v4();
     let resolved_start = Uuid::new_v4();
     store
-        .assign(PrivateResourceKind::ResolvedStart, resolved_start, &owner_cookie)
+        .assign(
+            PrivateResourceKind::ResolvedStart,
+            resolved_start,
+            &owner_cookie,
+        )
         .await
         .unwrap();
     store

@@ -14,6 +14,7 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations"
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PrivateResourceKind {
+    ResolvedStart,
     Job,
     Route,
 }
@@ -168,6 +169,7 @@ impl GuestSessionStore for PostgresGuestSessionStore {
         resource_id: Uuid,
     ) -> Result<bool, SessionStoreError> {
         let owned = match kind {
+            PrivateResourceKind::ResolvedStart => sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM resolved_starts WHERE id = $1 AND guest_session_id = $2)"),
             PrivateResourceKind::Job => sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM generation_jobs WHERE id = $1 AND guest_session_id = $2)"),
             PrivateResourceKind::Route => sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM route_candidates WHERE id = $1 AND guest_session_id = $2)"),
         }.bind(resource_id).bind(session_id).fetch_one(&self.pool).await.map_err(|_| SessionStoreError::Unavailable)?;

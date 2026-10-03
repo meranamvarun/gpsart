@@ -115,7 +115,24 @@ pub fn app_with_auth(
 #[derive(Serialize)]
 struct SessionBody {
     expires_at: u64,
+    rotate_at: u64,
     rotate_after: u64,
+}
+
+fn session_body(issued: &auth::IssuedSession, policy: &SessionPolicy) -> SessionBody {
+    SessionBody {
+        expires_at: issued
+            .record
+            .expires_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        rotate_at: (issued.record.created_at + policy.rotate_after)
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        rotate_after: policy.rotate_after.as_secs(),
+    }
 }
 
 async fn create_guest_session(
@@ -139,15 +156,7 @@ async fn create_guest_session(
         Ok(issued) => {
             let mut response = (
                 StatusCode::CREATED,
-                Json(SessionBody {
-                    expires_at: issued
-                        .record
-                        .expires_at
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                    rotate_after: state.session_policy.rotate_after.as_secs(),
-                }),
+                Json(session_body(&issued, &state.session_policy)),
             )
                 .into_response();
             if let Ok(value) =
@@ -202,6 +211,12 @@ async fn rotate_guest_session(
     if let Err(error) = enforce_request_protection(&state.session_policy, &method, &headers) {
         return auth_error(error);
     }
+    if !state
+        .session_policy
+        .rotation_due(&current, SystemTime::now())
+    {
+        return auth_error(AuthError::RotationNotDue);
+    }
     let issued = match rotate_session(
         state.sessions.as_ref(),
         current.id,
@@ -215,15 +230,7 @@ async fn rotate_guest_session(
     };
     let mut response = (
         StatusCode::OK,
-        Json(SessionBody {
-            expires_at: issued
-                .record
-                .expires_at
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            rotate_after: state.session_policy.rotate_after.as_secs(),
-        }),
+        Json(session_body(&issued, &state.session_policy)),
     )
         .into_response();
     if let Ok(value) = HeaderValue::from_str(&session_cookie(&issued.token, &state.session_policy))
@@ -249,6 +256,7 @@ fn auth_error(error: AuthError) -> axum::response::Response {
             (StatusCode::FORBIDDEN, "request_forbidden")
         }
         AuthError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+        AuthError::RotationNotDue => (StatusCode::CONFLICT, "rotation_not_due"),
         AuthError::Unavailable => (
             StatusCode::SERVICE_UNAVAILABLE,
             "authentication_unavailable",

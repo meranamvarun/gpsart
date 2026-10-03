@@ -19,29 +19,48 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GuestSessionPolicy' }
-              example: { expires_at: 1790995200, rotate_after: 43200 }
+              example: { expires_at: 1790995200, rotate_at: 1790952000, rotate_after: 43200 }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
   /api/v1/guest-sessions/current:
     delete:
       summary: Revoke the current guest session
       description: Requires the session cookie, exact Origin, CSRF cookie, and matching X-CSRF-Token.
+      security:
+        - guestSession: []
+      parameters:
+        - $ref: '#/components/parameters/Origin'
+        - $ref: '#/components/parameters/CsrfToken'
       responses:
-        '204': { description: Revoked }
+        '204':
+          description: Revoked; both browser cookies are expired.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetCookie' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
   /api/v1/guest-sessions/current/rotate:
     post:
       summary: Atomically rotate the current guest credential
       description: Clients rotate after the policy interval. Requires exact Origin and double-submit CSRF protection.
+      security:
+        - guestSession: []
+      parameters:
+        - $ref: '#/components/parameters/Origin'
+        - $ref: '#/components/parameters/CsrfToken'
       responses:
         '200':
           description: Previous digest revoked and replacement session issued
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetCookie' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GuestSessionPolicy' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Rotation was requested before the server-provided rotate_at time.
+          content: { application/json: { example: { code: rotation_not_due } } }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
   /api/v1/designs:
     get:
@@ -77,6 +96,28 @@ paths:
                         definition_hash: 64-lowercase-hex-characters
         '400': { description: Unsupported category }
 components:
+  securitySchemes:
+    guestSession:
+      type: apiKey
+      in: cookie
+      name: gpsart_guest
+      description: Opaque Secure, HttpOnly, SameSite=Lax guest-session credential.
+  parameters:
+    Origin:
+      in: header
+      name: Origin
+      required: true
+      schema: { type: string, format: uri }
+    CsrfToken:
+      in: header
+      name: X-CSRF-Token
+      required: true
+      description: Must exactly match the non-HttpOnly gpsart_csrf cookie.
+      schema: { type: string, minLength: 1 }
+  headers:
+    SetCookie:
+      description: Session and CSRF cookie mutations. Multiple Set-Cookie fields may be returned.
+      schema: { type: string }
   responses:
     Unauthenticated:
       description: Missing, expired, or revoked session
@@ -91,9 +132,10 @@ components:
     GuestSessionPolicy:
       type: object
       additionalProperties: false
-      required: [expires_at, rotate_after]
+      required: [expires_at, rotate_at, rotate_after]
       properties:
         expires_at: { type: integer, minimum: 1, description: Unix timestamp in seconds }
+        rotate_at: { type: integer, minimum: 1, description: Earliest credential rotation time as a Unix timestamp in seconds }
         rotate_after: { type: integer, minimum: 1, description: Credential rotation interval in seconds }
     DesignSummary:
       type: object
