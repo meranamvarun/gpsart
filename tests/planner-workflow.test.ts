@@ -108,6 +108,42 @@ test("a job cannot start before explicit confirmation and duplicate submission s
   assert.equal(stored.expiresAtEpochSeconds, null, "start-resolution expiry is not the job expiry");
 });
 
+test("an uncertain creation retry replays the exact confirmed request and idempotency key", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  let creations = 0;
+  const workflow = new PlannerWorkflow({
+    fetcher: async (url, init) => {
+      const target = String(url);
+      calls.push({ url: target, init });
+      if (target.endsWith("/starts/resolve")) return json(resolution);
+      if (target.includes("/confirm")) return json({ confirmed_start: resolution.candidate_network_point });
+      if (target.endsWith("/route-jobs")) {
+        creations += 1;
+        if (creations === 1) throw new TypeError("response lost after acceptance");
+        return json({ job_id: jobId, request_revision: 1 }, 202);
+      }
+      throw new Error("unexpected request");
+    },
+    storage: new MemoryStorage(), csrfToken: () => "csrf",
+    currentRevision: () => 1, newIdempotencyKey: () => "one-logical-key",
+    schedule: () => 1, cancelSchedule: () => undefined,
+    now: () => 1_800_000_000_000,
+  });
+  await workflow.submit(request, proposed);
+  await workflow.confirmAndStart();
+  assert.equal(workflow.snapshot.issue, "network_unavailable");
+  await workflow.submit(request, proposed);
+  const resolveCalls = calls.filter((call) => call.url.endsWith("/starts/resolve"));
+  const confirmCalls = calls.filter((call) => call.url.includes("/confirm"));
+  const creationCalls = calls.filter((call) => call.url.endsWith("/route-jobs"));
+  assert.equal(resolveCalls.length, 1);
+  assert.equal(confirmCalls.length, 1);
+  assert.equal(creationCalls.length, 2);
+  assert.equal(creationCalls[0]?.init?.body, creationCalls[1]?.init?.body);
+  assert.equal(JSON.parse(String(creationCalls[1]?.init?.body)).idempotency_key, "one-logical-key");
+  assert.equal(workflow.snapshot.phase, "polling");
+});
+
 test("invalid fields and unsupported coverage never create a job", async () => {
   const calls: string[] = [];
   const workflow = new PlannerWorkflow({
