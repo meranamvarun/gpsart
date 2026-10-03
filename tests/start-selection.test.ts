@@ -10,23 +10,23 @@ import {
 } from "../src/domain/start-selection.ts";
 
 test("manual, search, and map inputs produce one proposed-start model", () => {
-  assert.deepEqual(parseManualCoordinates("28.60000, 77.20000"), {
-    point: { latitude: 28.6, longitude: 77.2 },
+  assert.deepEqual(parseManualCoordinates("0.50000, -150.25000"), {
+    point: { latitude: 0.5, longitude: -150.25 },
     source: "manual",
-    label: "28.60000, 77.20000",
+    label: "0.50000, -150.25000",
   });
   assert.deepEqual(
-    fromSearchSelection({ latitude: 28.6, longitude: 77.2 }, "Selected public entrance"),
+    fromSearchSelection({ latitude: 0.5, longitude: -150.25 }, "Synthetic ocean test point"),
     {
-      point: { latitude: 28.6, longitude: 77.2 },
+      point: { latitude: 0.5, longitude: -150.25 },
       source: "search",
-      label: "Selected public entrance",
+      label: "Synthetic ocean test point",
     },
   );
-  assert.deepEqual(fromMapSelection({ latitude: 28.6, longitude: 77.2 }), {
-    point: { latitude: 28.6, longitude: 77.2 },
+  assert.deepEqual(fromMapSelection({ latitude: 0.5, longitude: -150.25 }), {
+    point: { latitude: 0.5, longitude: -150.25 },
     source: "map",
-    label: "28.60000, 77.20000",
+    label: "0.50000, -150.25000",
   });
   assert.equal(parseManualCoordinates("a nearby park"), undefined);
   assert.equal(parseManualCoordinates("91, 181"), undefined);
@@ -37,16 +37,16 @@ test("geolocation runs only on demand and classifies denial, timeout, unsupporte
   const successful = {
     getCurrentPosition(success: PositionCallback) {
       requests += 1;
-      success({ coords: { latitude: 28.6, longitude: 77.2, accuracy: 12 } } as GeolocationPosition);
+      success({ coords: { latitude: 0.5, longitude: -150.25, accuracy: 12 } } as GeolocationPosition);
     },
   } as Geolocation;
   assert.equal(requests, 0);
   assert.deepEqual(await requestBrowserStart(successful), {
     kind: "selected",
     start: {
-      point: { latitude: 28.6, longitude: 77.2 },
+      point: { latitude: 0.5, longitude: -150.25 },
       source: "geolocation",
-      label: "28.60000, 77.20000",
+      label: "0.50000, -150.25000",
       accuracyMetres: 12,
     },
   });
@@ -63,7 +63,7 @@ test("geolocation runs only on demand and classifies denial, timeout, unsupporte
   }
   const inaccurate = {
     getCurrentPosition(success: PositionCallback) {
-      success({ coords: { latitude: 28.6, longitude: 77.2, accuracy: GEOLOCATION_MAX_ACCURACY_METRES + 1 } } as GeolocationPosition);
+      success({ coords: { latitude: 0.5, longitude: -150.25, accuracy: GEOLOCATION_MAX_ACCURACY_METRES + 1 } } as GeolocationPosition);
     },
   } as Geolocation;
   assert.deepEqual(await requestBrowserStart(inaccurate), {

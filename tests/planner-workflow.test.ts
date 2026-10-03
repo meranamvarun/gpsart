@@ -17,7 +17,7 @@ class MemoryStorage implements StoragePort {
 }
 
 const request: RouteRequest = {
-  start: "28.60000, 77.20000",
+  start: "0.50000, -150.25000",
   activity: "Walking",
   design: "Heart",
   distanceKm: 5,
@@ -28,8 +28,8 @@ const request: RouteRequest = {
 const proposed = parseManualCoordinates(request.start)!;
 const resolution = {
   id: "7bf80ccf-68e8-49ec-a3e8-cad667bb95a0",
-  requested_point: { longitude: 77.2, latitude: 28.6 },
-  candidate_network_point: { longitude: 77.2001, latitude: 28.6001 },
+  requested_point: { longitude: -150.25, latitude: 0.5 },
+  candidate_network_point: { longitude: -150.2499, latitude: 0.5001 },
   snap_distance_metres: 15,
   profile_version: "walking-v1",
   coverage_policy_version: "coverage-v1",
@@ -92,6 +92,8 @@ test("a job cannot start before explicit confirmation and duplicate submission s
   await Promise.all([one, two]);
   assert.equal(workflow.snapshot.phase, "awaiting_confirmation");
   assert.equal(calls.filter((call) => call.url.endsWith("/route-jobs")).length, 0);
+  await workflow.submit(request, proposed);
+  assert.equal(calls.filter((call) => call.url.endsWith("/starts/resolve")).length, 1);
 
   await Promise.all([workflow.confirmAndStart(), workflow.confirmAndStart()]);
   assert.equal(calls.filter((call) => call.url.includes("/confirm")).length, 1);
