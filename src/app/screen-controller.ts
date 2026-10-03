@@ -25,6 +25,7 @@ function workflowIssue(issue: WorkflowIssue | null): string {
   if (!issue) return "";
   const messages: Partial<Record<WorkflowIssue, string>> = {
     invalid_fields: "Choose a start using exact coordinates, the map, location, or a search result, then check every field.",
+    active_job: "Your earlier request is still active. Cancel it or let it finish before starting another.",
     unsupported_coverage: "That start is outside currently verified coverage. Your plan has not been submitted.",
     no_routable_access: "The service could not verify routable access near that point.",
     snap_too_far: "The nearest routable point is too far away. Choose a different start.",
@@ -59,6 +60,7 @@ function catalogue(state: AppState): string {
 }
 
 function generating(state: AppState, workflow: PlannerWorkflowSnapshot | null): string {
+  const activeState = workflow?.request ? { ...state, request: workflow.request } : state;
   const stages = ["checking_roads", "fitting_design", "comparing_routes"] as const;
   const current = workflow?.status?.stage ?? "queued";
   const currentIndex = stages.indexOf(current as (typeof stages)[number]);
@@ -68,7 +70,7 @@ function generating(state: AppState, workflow: PlannerWorkflowSnapshot | null): 
     const marker = index <= currentIndex ? "check-circle" : "circle";
     return `<li class="${className}">${icon(marker)} ${labels[index]}</li>`;
   }).join("");
-  return `${top("Finding your next adventure.", "Only observed service stages are shown; no percentage is estimated.")}${summary(state)}<ol class="stage-list" aria-live="polite">${items}</ol><p class="small muted">Your active request is private to this guest session and can resume after a refresh.</p>${workflowIssue(workflow?.issue ?? null)}<button type="button" class="secondary full" style="margin-top:24px" data-action="cancel-job">Cancel search</button>`;
+  return `${top("Finding your next adventure.", "Only observed service stages are shown; no percentage is estimated.")}${summary(activeState)}<ol class="stage-list" aria-live="polite">${items}</ol><p class="small muted">Your active request is private to this guest session and can resume after a refresh.</p>${workflowIssue(workflow?.issue ?? null)}<button type="button" class="secondary full" style="margin-top:24px" data-action="cancel-job">Cancel search</button>`;
 }
 
 function unavailableResult(state: AppState, details: boolean): string {

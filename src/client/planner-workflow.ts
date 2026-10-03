@@ -34,6 +34,7 @@ export type WorkflowPhase =
 
 export type WorkflowIssue = StartOutcomeCode | RouteJobErrorCode
   | "invalid_fields"
+  | "active_job"
   | "invalid_response"
   | "network_unavailable"
   | "csrf_unavailable"
@@ -70,7 +71,7 @@ type ActiveJob = {
   jobId: string;
   request: RouteRequest;
   proposedStart: ProposedStart;
-  expiresAtEpochSeconds: number;
+  expiresAtEpochSeconds: number | null;
   etag: string | null;
   statusPayload: unknown | null;
 };
@@ -127,18 +128,23 @@ export class PlannerWorkflow {
       && ["awaiting_confirmation", "submitting", "polling"].includes(this.value.phase)) {
       return Promise.resolve();
     }
-    if (!validRequest(request) || !validProposedStart(proposedStart)) {
+    if (this.active) {
+      this.update({ ...this.value, issue: "active_job" });
+      return Promise.resolve();
+    }
+    if (!validRequest(request) || !validProposedStart(proposedStart) || request.start !== proposedStart.label) {
       this.update({ ...emptySnapshot(), request, proposedStart, phase: "error", issue: "invalid_fields" });
       return Promise.resolve();
     }
     this.stopTimer();
-    this.generation += 1;
+    const token = ++this.generation;
+    this.confirming = null;
     if (this.submitFingerprint !== fingerprint || !this.submissionKey) {
       this.submissionKey = this.newIdempotencyKey();
     }
     this.submitFingerprint = fingerprint;
     this.update({ ...emptySnapshot(), request, proposedStart, phase: "resolving" });
-    const operation = this.resolveStart(request, proposedStart)
+    const operation = this.resolveStart(request, proposedStart, token)
       .finally(() => {
         if (this.submitting === operation) this.submitting = null;
       });
@@ -158,8 +164,9 @@ export class PlannerWorkflow {
       this.update({ ...this.value, phase: "stale", resolution: null, issue: null });
       return Promise.resolve();
     }
+    const token = this.generation;
     this.update({ ...this.value, phase: "submitting", issue: null });
-    const operation = this.confirmThenCreate(request, proposedStart, resolution, this.submissionKey)
+    const operation = this.confirmThenCreate(request, proposedStart, resolution, this.submissionKey, token)
       .finally(() => {
         if (this.confirming === operation) this.confirming = null;
       });
@@ -169,7 +176,8 @@ export class PlannerWorkflow {
 
   async resume(): Promise<boolean> {
     const active = loadActive(this.storage);
-    if (!active || active.expiresAtEpochSeconds <= Math.floor(this.now() / 1_000)) {
+    if (!active || active.expiresAtEpochSeconds !== null
+      && active.expiresAtEpochSeconds <= Math.floor(this.now() / 1_000)) {
       this.removeActive();
       return false;
     }
@@ -232,7 +240,8 @@ export class PlannerWorkflow {
     this.generation += 1;
   }
 
-  private async resolveStart(request: RouteRequest, proposedStart: ProposedStart): Promise<void> {
+  private async resolveStart(request: RouteRequest, proposedStart: ProposedStart, token: number): Promise<void> {
+    if (!this.fenceAsyncStep(token, request.revision)) return;
     const csrf = this.csrfToken();
     if (!csrf) {
       this.update({ ...this.value, phase: "error", issue: "csrf_unavailable" });
@@ -250,10 +259,13 @@ export class PlannerWorkflow {
         }),
       });
     } catch {
-      this.update({ ...this.value, phase: "error", issue: "network_unavailable" });
+      if (this.fenceAsyncStep(token, request.revision)) {
+        this.update({ ...this.value, phase: "error", issue: "network_unavailable" });
+      }
       return;
     }
     const payload = await responseJson(response);
+    if (!this.fenceAsyncStep(token, request.revision)) return;
     if (!response.ok) {
       this.update({ ...this.value, phase: "error", issue: decodeStartOutcome(payload) ?? "invalid_response" });
       return;
@@ -268,7 +280,8 @@ export class PlannerWorkflow {
     this.update({ ...this.value, phase: "awaiting_confirmation", resolution, issue: null });
   }
 
-  private async confirmThenCreate(request: RouteRequest, proposedStart: ProposedStart, resolution: StartResolution, key: string): Promise<void> {
+  private async confirmThenCreate(request: RouteRequest, proposedStart: ProposedStart, resolution: StartResolution, key: string, token: number): Promise<void> {
+    if (!this.fenceAsyncStep(token, request.revision)) return;
     const csrf = this.csrfToken();
     if (!csrf) {
       this.update({ ...this.value, phase: "error", issue: "csrf_unavailable" });
@@ -282,6 +295,7 @@ export class PlannerWorkflow {
         body: JSON.stringify({ profile: profile(request.activity) }),
       });
       const confirmationPayload = await responseJson(confirmation);
+      if (!this.fenceAsyncStep(token, request.revision)) return;
       if (!confirmation.ok) {
         this.update({ ...this.value, phase: "error", issue: decodeStartOutcome(confirmationPayload) ?? "invalid_response" });
         return;
@@ -319,37 +333,57 @@ export class PlannerWorkflow {
       });
       const creationPayload = await responseJson(creation);
       if (!creation.ok) {
-        this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(creationPayload) ?? "invalid_response" });
+        if (this.fenceAsyncStep(token, request.revision)) {
+          this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(creationPayload) ?? "invalid_response" });
+        }
         return;
       }
       const accepted = decodeAcceptedRouteJob(creationPayload);
       if (!accepted || accepted.requestRevision !== request.revision) {
-        this.update({ ...this.value, phase: "error", issue: "invalid_response" });
+        if (this.fenceAsyncStep(token, request.revision)) {
+          this.update({ ...this.value, phase: "error", issue: "invalid_response" });
+        }
         return;
       }
+      const acceptedForCurrentRequest = token === this.generation
+        && request.revision === this.currentRevision();
       const active: ActiveJob = {
         version: 1,
         jobId: accepted.jobId,
         request,
         proposedStart,
-        expiresAtEpochSeconds: resolution.expires_at_epoch_seconds,
+        expiresAtEpochSeconds: null,
         etag: null,
         statusPayload: null,
       };
       this.active = active;
+      this.submitFingerprint = JSON.stringify({ request, proposedStart });
+      this.submissionKey = key;
       storeActive(this.storage, active);
-      const token = ++this.generation;
-      this.update({ ...this.value, phase: "polling", jobId: accepted.jobId, status: null, issue: null });
-      this.schedulePoll(token, MIN_POLL_MILLISECONDS);
+      const pollToken = ++this.generation;
+      this.update({
+        ...this.value,
+        phase: "polling",
+        request,
+        proposedStart,
+        resolution,
+        jobId: accepted.jobId,
+        status: null,
+        issue: acceptedForCurrentRequest ? null : "active_job",
+      });
+      this.schedulePoll(pollToken, MIN_POLL_MILLISECONDS);
     } catch {
-      this.update({ ...this.value, phase: "error", issue: "network_unavailable" });
+      if (this.fenceAsyncStep(token, request.revision)) {
+        this.update({ ...this.value, phase: "error", issue: "network_unavailable" });
+      }
     }
   }
 
   private async poll(token: number): Promise<void> {
     const active = this.active;
     if (!active || token !== this.generation) return;
-    if (active.expiresAtEpochSeconds <= Math.floor(this.now() / 1_000)) {
+    if (active.expiresAtEpochSeconds !== null
+      && active.expiresAtEpochSeconds <= Math.floor(this.now() / 1_000)) {
       this.removeActive();
       this.update({ ...this.value, phase: "error", jobId: null, issue: "expired_job" });
       return;
@@ -434,6 +468,15 @@ export class PlannerWorkflow {
     this.submitFingerprint = null;
     this.submissionKey = null;
   }
+
+  private fenceAsyncStep(token: number, revision: number): boolean {
+    if (token !== this.generation) return false;
+    if (revision !== this.currentRevision()) {
+      this.update({ ...this.value, phase: "stale", resolution: null, issue: null });
+      return false;
+    }
+    return true;
+  }
 }
 
 function emptySnapshot(): PlannerWorkflowSnapshot {
@@ -448,7 +491,9 @@ function profile(activity: RouteRequest["activity"]): { activity: string; profil
 }
 
 function validRequest(request: RouteRequest): boolean {
-  return Number.isSafeInteger(request.revision) && request.revision > 0
+  return typeof request.start === "string" && request.start.length > 0 && request.start.length <= 500
+    && ["Walking", "Running", "Cycling"].includes(request.activity)
+    && Number.isSafeInteger(request.revision) && request.revision > 0
     && Number.isFinite(request.distanceKm) && request.distanceKm >= 1 && request.distanceKm <= 100
     && Number.isFinite(request.tolerancePercent) && request.tolerancePercent >= 0 && request.tolerancePercent <= 100
     && typeof request.returnsToStart === "boolean"
@@ -456,9 +501,15 @@ function validRequest(request: RouteRequest): boolean {
 }
 
 function validProposedStart(start: ProposedStart): boolean {
-  return !!start.label && Number.isFinite(start.point.latitude) && Number.isFinite(start.point.longitude)
+  const accuracyIsValid = start.source === "geolocation"
+    ? Number.isFinite(start.accuracyMetres) && Number(start.accuracyMetres) >= 0 && Number(start.accuracyMetres) <= 100
+    : start.accuracyMetres === undefined;
+  return ["manual", "search", "map", "geolocation"].includes(start.source)
+    && typeof start.label === "string" && start.label.length > 0 && start.label.length <= 500
+    && !!start.point && Number.isFinite(start.point.latitude) && Number.isFinite(start.point.longitude)
     && start.point.latitude >= -90 && start.point.latitude <= 90
-    && start.point.longitude >= -180 && start.point.longitude <= 180;
+    && start.point.longitude >= -180 && start.point.longitude <= 180
+    && accuracyIsValid;
 }
 
 function samePoint(left: { latitude: number; longitude: number }, right: { latitude: number; longitude: number }): boolean {
@@ -490,20 +541,23 @@ function loadActive(storage: StoragePort): ActiveJob | null {
     if (value.version !== 1 || typeof value.jobId !== "string" || !isUuidV4(value.jobId)
       || !value.request || typeof value.request !== "object"
       || !value.proposedStart || typeof value.proposedStart !== "object"
-      || !Number.isSafeInteger(value.expiresAtEpochSeconds) || Number(value.expiresAtEpochSeconds) <= 0
+      || (value.expiresAtEpochSeconds !== null
+        && (!Number.isSafeInteger(value.expiresAtEpochSeconds) || Number(value.expiresAtEpochSeconds) <= 0))
       || (value.etag !== null && typeof value.etag !== "string")) return null;
     const request = value.request as RouteRequest;
     const proposedStart = value.proposedStart as ProposedStart;
-    if (!validRequest(request) || !validProposedStart(proposedStart)) return null;
+    if (!validRequest(request) || !validProposedStart(proposedStart) || request.start !== proposedStart.label) return null;
     const statusPayload = value.statusPayload ?? null;
     const status = statusPayload === null ? null : decodeRouteJobStatus(statusPayload);
-    if (status && (status.jobId !== value.jobId || status.requestRevision !== request.revision || status.state !== "queued" && status.state !== "running")) return null;
+    if (status && (status.jobId !== value.jobId || status.requestRevision !== request.revision
+      || status.state !== "queued" && status.state !== "running"
+      || value.expiresAtEpochSeconds !== status.expiresAtEpochSeconds)) return null;
     return {
       version: 1,
       jobId: value.jobId,
       request,
       proposedStart,
-      expiresAtEpochSeconds: Number(value.expiresAtEpochSeconds),
+      expiresAtEpochSeconds: value.expiresAtEpochSeconds === null ? null : Number(value.expiresAtEpochSeconds),
       etag: status ? value.etag as string | null : null,
       statusPayload: status ? statusPayload : null,
     };

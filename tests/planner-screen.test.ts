@@ -26,7 +26,7 @@ test("generation progress is labelled with the active job request, not a newer e
     previousStatus: null,
     issue: "active_job",
   };
-  const markup = renderScreen("generating", newer, { kind: "ok", snapshots: [] }, workflow);
+  const markup = renderScreen("generating", newer, { kind: "available", snapshots: [] }, workflow);
   assert.match(markup, /older synthetic start/);
   assert.doesNotMatch(markup, /newer synthetic start/);
   assert.match(markup, /earlier request is still active/i);

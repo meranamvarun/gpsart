@@ -208,6 +208,47 @@ test("an edit while confirmation is in flight cannot create or install the older
   assert.equal(calls.filter((url) => url.endsWith("/route-jobs")).length, 0);
 });
 
+test("a job accepted after its revision becomes stale is tracked until its outcome is retained", async () => {
+  let releaseCreation: (response: Response) => void = () => undefined;
+  const pendingCreation = new Promise<Response>((resolve) => { releaseCreation = resolve; });
+  const storage = new MemoryStorage();
+  const scheduled: Array<() => void> = [];
+  const calls: string[] = [];
+  let currentRevision = 1;
+  const workflow = new PlannerWorkflow({
+    fetcher: async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.endsWith("/starts/resolve")) return json(resolution);
+      if (target.includes("/confirm")) return json({ confirmed_start: resolution.candidate_network_point });
+      if (target.endsWith("/route-jobs")) return pendingCreation;
+      return json({
+        ...activeStatus(), state: "succeeded", stage: "comparing_routes",
+        status_version: 4, completed_at_epoch_seconds: 1_800_000_050,
+        outcome: { code: "succeeded", budget_exhausted: false, retryable: false, retry_after_seconds: null },
+        result_ids: ["8bf80ccf-68e8-49ec-a3e8-cad667bb95a0"], poll_after_seconds: null,
+      });
+    },
+    storage, csrfToken: () => "csrf", currentRevision: () => currentRevision,
+    newIdempotencyKey: () => "key", schedule: (callback) => { scheduled.push(callback); return scheduled.length; },
+    cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  await workflow.submit(request, proposed);
+  const creation = workflow.confirmAndStart();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls.filter((url) => url.endsWith("/route-jobs")).length, 1);
+  currentRevision = 2;
+  releaseCreation(json({ job_id: jobId, request_revision: 1 }, 202));
+  await creation;
+  assert.equal(workflow.snapshot.phase, "polling");
+  assert.equal(workflow.snapshot.issue, "active_job");
+  assert.equal(JSON.parse(storage.getItem(ACTIVE_JOB_STORAGE_KEY)!).jobId, jobId);
+  scheduled.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(workflow.snapshot.phase, "stale");
+  assert.equal(workflow.snapshot.previousStatus?.state, "succeeded");
+});
+
 test("refresh resumes an owned unexpired job with ETag polling and bounded backoff", async () => {
   const storage = new MemoryStorage();
   storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
@@ -284,6 +325,44 @@ test("refresh rejects tampered request and start discriminants before rendering 
     assert.equal(fetched, false);
     assert.equal(storage.getItem(ACTIVE_JOB_STORAGE_KEY), null);
   }
+});
+
+test("a newer submission cannot abandon an active older revision before its outcome is retained", async () => {
+  const storage = new MemoryStorage();
+  let currentRevision = 1;
+  const scheduled: Array<() => void> = [];
+  const calls: string[] = [];
+  const workflow = new PlannerWorkflow({
+    fetcher: async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.endsWith("/starts/resolve")) return json(resolution);
+      if (target.includes("/confirm")) return json({ confirmed_start: resolution.candidate_network_point });
+      if (target.endsWith("/route-jobs")) return json({ job_id: jobId, request_revision: 1 }, 202);
+      return json({
+        ...activeStatus(), state: "succeeded", stage: "comparing_routes",
+        status_version: 4, completed_at_epoch_seconds: 1_800_000_050,
+        outcome: { code: "succeeded", budget_exhausted: false, retryable: false, retry_after_seconds: null },
+        result_ids: ["8bf80ccf-68e8-49ec-a3e8-cad667bb95a0"], poll_after_seconds: null,
+      });
+    },
+    storage, csrfToken: () => "csrf", currentRevision: () => currentRevision,
+    newIdempotencyKey: () => "key", schedule: (callback) => { scheduled.push(callback); return scheduled.length; },
+    cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  await workflow.submit(request, proposed);
+  await workflow.confirmAndStart();
+  currentRevision = 2;
+  const newerRequest = { ...request, start: "0.60000, -150.35000", revision: 2 };
+  await workflow.submit(newerRequest, parseManualCoordinates(newerRequest.start)!);
+  assert.equal(workflow.snapshot.phase, "polling");
+  assert.equal(workflow.snapshot.issue, "active_job");
+  assert.equal(calls.filter((url) => url.endsWith("/starts/resolve")).length, 1);
+  scheduled.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(workflow.snapshot.phase, "stale");
+  assert.equal(workflow.snapshot.previousStatus?.state, "succeeded");
+  assert.equal(storage.getItem(ACTIVE_JOB_STORAGE_KEY), null);
 });
 
 test("cancellation and request revisions prevent late results from replacing current work", async () => {
