@@ -1,4 +1,4 @@
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use std::{
     collections::HashMap,
     sync::Mutex,
@@ -30,13 +30,18 @@ pub enum JobState {
     Queued,
     Running,
     Succeeded,
+    NoMatch,
+    Failed,
     Cancelled,
     TimedOut,
 }
 
 impl JobState {
     pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Cancelled | Self::TimedOut)
+        matches!(
+            self,
+            Self::Succeeded | Self::NoMatch | Self::Failed | Self::Cancelled | Self::TimedOut
+        )
     }
 }
 
@@ -136,6 +141,21 @@ impl InMemoryJobCoordinator {
 
     pub fn claim(&self, worker_id: Uuid, now: SystemTime, lease_for: Duration) -> Option<JobLease> {
         let mut state = self.state.lock().expect("job lock");
+        for job in state.jobs.values_mut().filter(|job| {
+            !job.state.is_terminal()
+                && job
+                    .lease
+                    .as_ref()
+                    .is_none_or(|lease| lease.lease_expires_at <= now)
+        }) {
+            if job.deadline_at <= now {
+                job.state = JobState::TimedOut;
+                job.lease = None;
+            } else if job.attempt >= job.input.max_attempts {
+                job.state = JobState::Failed;
+                job.lease = None;
+            }
+        }
         let job = state
             .jobs
             .values_mut()
@@ -293,6 +313,7 @@ pub struct RouteJobSubmission {
     pub distance_tolerance_metres: i32,
     pub activity_profile_json: String,
     pub activity_profile_version: String,
+    pub coverage_policy_version: String,
     pub template_id: String,
     pub template_version: String,
     pub map_data_version: String,
@@ -312,6 +333,15 @@ impl PostgresJobCoordinator {
         Self { pool }
     }
 
+    pub async fn connect(database_url: &str) -> Result<Self, JobError> {
+        PgPoolOptions::new()
+            .max_connections(10)
+            .connect(database_url)
+            .await
+            .map(Self::new)
+            .map_err(|_| JobError::Unavailable)
+    }
+
     pub async fn submit(&self, owner: Uuid, input: &RouteJobSubmission) -> Result<Uuid, JobError> {
         if input.revision <= 0
             || input.idempotency_key.is_empty()
@@ -324,6 +354,11 @@ impl PostgresJobCoordinator {
             return Err(JobError::InvalidInput);
         }
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("{owner}:{}", input.idempotency_key))
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
         if let Some(row) = sqlx::query("SELECT pr.input_hash, gj.id FROM planning_requests pr JOIN generation_jobs gj ON gj.planning_request_id = pr.id WHERE pr.guest_session_id = $1 AND pr.idempotency_key = $2 FOR UPDATE")
             .bind(owner).bind(&input.idempotency_key).fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)? {
             let hash: Vec<u8> = row.try_get("input_hash").map_err(|_| JobError::Unavailable)?;
@@ -331,12 +366,12 @@ impl PostgresJobCoordinator {
             return if hash == input.input_hash { Ok(id) } else { Err(JobError::IdempotencyConflict) };
         }
         let request_id = Uuid::new_v4();
-        let inserted = sqlx::query("INSERT INTO planning_requests (id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash, requested_pin, requested_distance_metres, distance_tolerance_metres, activity_profile, activity_profile_version, template_id, template_version, map_data_version, algorithm_version, expires_at) SELECT $1, $2, rs.id, $3, $4, $5, rs.confirmed_start, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14 FROM resolved_starts rs WHERE rs.id = $15 AND rs.guest_session_id = $2 AND rs.expires_at > now() AND rs.profile_version = $9 AND rs.map_data_version = $12 RETURNING id")
+        let inserted = sqlx::query("INSERT INTO planning_requests (id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash, requested_pin, requested_distance_metres, distance_tolerance_metres, activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version, expires_at) SELECT $1, $2, rs.id, $3, $4, $5, rs.confirmed_start, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15 FROM resolved_starts rs WHERE rs.id = $16 AND rs.guest_session_id = $2 AND rs.expires_at > now() AND rs.profile_version = $9 AND rs.coverage_policy_version = $10 AND rs.map_data_version = $13 RETURNING id")
             .bind(request_id).bind(owner).bind(input.revision).bind(&input.idempotency_key)
             .bind(input.input_hash.as_slice()).bind(input.requested_distance_metres).bind(input.distance_tolerance_metres)
-            .bind(&input.activity_profile_json).bind(&input.activity_profile_version).bind(&input.template_id)
-            .bind(&input.template_version).bind(&input.map_data_version).bind(&input.algorithm_version)
-            .bind(OffsetDateTime::from(input.expires_at)).bind(input.resolved_start_id)
+            .bind(&input.activity_profile_json).bind(&input.activity_profile_version).bind(&input.coverage_policy_version)
+            .bind(&input.template_id).bind(&input.template_version).bind(&input.map_data_version)
+            .bind(&input.algorithm_version).bind(OffsetDateTime::from(input.expires_at)).bind(input.resolved_start_id)
             .fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         if inserted.is_none() {
             return Err(JobError::StartNotFound);
@@ -356,6 +391,8 @@ impl PostgresJobCoordinator {
         lease_for: Duration,
     ) -> Result<Option<JobLease>, JobError> {
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
+        sqlx::query("WITH terminal AS (UPDATE generation_jobs SET state=(CASE WHEN deadline_at <= $1 THEN 'timed_out' ELSE 'failed' END)::generation_job_state, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL WHERE state IN ('queued','running') AND (lease_expires_at IS NULL OR lease_expires_at <= $1) AND (deadline_at <= $1 OR attempt_count >= max_attempts) RETURNING id,state) INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) SELECT id,state::text::generation_terminal_outcome,CASE WHEN state='timed_out' THEN 'timed_out' ELSE 'attempts_exhausted' END,state='timed_out' FROM terminal")
+            .bind(OffsetDateTime::from(now)).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at")
             .bind(OffsetDateTime::from(now)).bind(worker).bind(OffsetDateTime::from(now + lease_for))
             .fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
@@ -500,6 +537,8 @@ fn parse_state(state: &str) -> JobState {
     match state {
         "running" => JobState::Running,
         "succeeded" => JobState::Succeeded,
+        "no_match" => JobState::NoMatch,
+        "failed" => JobState::Failed,
         "cancelled" => JobState::Cancelled,
         "timed_out" => JobState::TimedOut,
         _ => JobState::Queued,

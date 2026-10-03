@@ -1,3 +1,4 @@
+use gpsart_persistence::jobs::{JobError, JobLease, PostgresJobCoordinator};
 use gpsart_persistence::{DependencyProbe, PostgresProbe};
 use std::{
     future::Future,
@@ -76,4 +77,40 @@ pub async fn run_until_shutdown(
 pub enum WorkerError {
     #[error("worker dependency is unavailable")]
     DependencyUnavailable,
+    #[error("durable job state is unavailable")]
+    JobStateUnavailable,
+}
+
+#[async_trait::async_trait]
+pub trait ProviderGate: Send + Sync {
+    async fn may_schedule(
+        &self,
+        lease: &JobLease,
+        required_budget: Duration,
+    ) -> Result<bool, JobError>;
+}
+
+#[async_trait::async_trait]
+impl ProviderGate for PostgresJobCoordinator {
+    async fn may_schedule(
+        &self,
+        lease: &JobLease,
+        required_budget: Duration,
+    ) -> Result<bool, JobError> {
+        self.may_schedule_provider(lease, std::time::SystemTime::now(), required_budget)
+            .await
+    }
+}
+
+pub async fn run_provider_call<T>(
+    gate: &dyn ProviderGate,
+    lease: &JobLease,
+    required_budget: Duration,
+    operation: impl FnOnce() -> T,
+) -> Result<Option<T>, WorkerError> {
+    let allowed = gate
+        .may_schedule(lease, required_budget)
+        .await
+        .map_err(|_| WorkerError::JobStateUnavailable)?;
+    Ok(allowed.then(operation))
 }

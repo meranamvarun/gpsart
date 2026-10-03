@@ -11,4 +11,5 @@ gpsart-persistence = { path = "../gpsart-persistence" }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 

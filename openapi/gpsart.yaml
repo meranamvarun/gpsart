@@ -3,6 +3,45 @@ info:
   title: GPSART API
   version: 0.1.0
 paths:
+  /api/v1/route-jobs:
+    post:
+      summary: Create an idempotent private route-generation job
+      security: [{ guestSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Origin'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/CsrfCookie'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRouteJob' }
+            example: { resolved_start_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, revision: 1, idempotency_key: request-1, requested_distance_metres: 5000, distance_tolerance_metres: 250, profile: { activity: walking, profile_version: walking-v1 }, coverage_policy_version: coverage-v1, template_id: heart, template_version: '1', map_data_version: map-v1, algorithm_version: algorithm-v1 }
+      responses:
+        '202':
+          description: Job queued, or the original job for an identical retry.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AcceptedRouteJob' }, example: { job_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, state: queued, request_revision: 1 } } }
+        '400': { $ref: '#/components/responses/InvalidJobRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/PrivateNotFound' }
+        '409': { $ref: '#/components/responses/JobConflict' }
+        '503': { $ref: '#/components/responses/JobUnavailable' }
+  /api/v1/route-jobs/{job_id}:
+    delete:
+      summary: Idempotently cancel an owned active job
+      security: [{ guestSession: [] }]
+      parameters:
+        - { in: path, name: job_id, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Origin'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/CsrfCookie'
+      responses:
+        '200': { description: Current terminal state, content: { application/json: { schema: { type: object, required: [state], properties: { state: { type: string, enum: [succeeded, no_match, failed, cancelled, timed_out] } } } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/PrivateNotFound' }
+        '503': { $ref: '#/components/responses/JobUnavailable' }
   /api/v1/guest-sessions:
     post:
       summary: Issue an opaque private guest session
@@ -283,6 +322,10 @@ components:
       description: Session and CSRF cookie mutations. Multiple Set-Cookie fields may be returned.
       schema: { type: string }
   responses:
+    InvalidJobRequest: { description: Complete request validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/JobError' }, example: { code: invalid_request } } } }
+    PrivateNotFound: { description: Owned resource is absent, stale, or belongs to another session, content: { application/json: { schema: { $ref: '#/components/schemas/JobError' }, example: { code: not_found } } } }
+    JobConflict: { description: Idempotency key or job state conflict, content: { application/json: { schema: { $ref: '#/components/schemas/JobError' }, example: { code: idempotency_conflict } } } }
+    JobUnavailable: { description: Durable job storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/JobError' }, example: { code: job_storage_unavailable } } } }
     Unauthenticated:
       description: Missing, expired, or revoked session
       content:
@@ -302,6 +345,36 @@ components:
           schema: { $ref: '#/components/schemas/ApiError' }
           example: { code: authentication_unavailable }
   schemas:
+    CreateRouteJob:
+      type: object
+      additionalProperties: false
+      required: [resolved_start_id, revision, idempotency_key, requested_distance_metres, distance_tolerance_metres, profile, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version]
+      properties:
+        resolved_start_id: { type: string, format: uuid }
+        revision: { type: integer, minimum: 1 }
+        idempotency_key: { type: string, minLength: 1, maxLength: 200 }
+        requested_distance_metres: { type: integer, minimum: 1 }
+        distance_tolerance_metres: { type: integer, minimum: 0 }
+        profile: { $ref: '#/components/schemas/RouteProfile' }
+        coverage_policy_version: { type: string, minLength: 1 }
+        template_id: { type: string, minLength: 1 }
+        template_version: { type: string, minLength: 1 }
+        map_data_version: { type: string, minLength: 1 }
+        algorithm_version: { type: string, minLength: 1 }
+    AcceptedRouteJob:
+      type: object
+      additionalProperties: false
+      required: [job_id, state, request_revision]
+      properties:
+        job_id: { type: string, format: uuid }
+        state: { const: queued }
+        request_revision: { type: integer, minimum: 1 }
+    JobError:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, enum: [invalid_request, not_found, idempotency_conflict, job_state_conflict, job_storage_unavailable] }
     ApiError:
       type: object
       additionalProperties: false

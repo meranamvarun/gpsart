@@ -160,3 +160,29 @@ fn deadline_publishes_only_validated_candidates_otherwise_times_out() {
     .unwrap();
     assert_eq!(jobs.state(job), Some(JobState::TimedOut));
 }
+
+#[test]
+fn exhausted_attempts_become_terminal_instead_of_staying_stuck() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(5_000);
+    let owner = Uuid::new_v4();
+    let jobs = InMemoryJobCoordinator::default();
+    let mut request = input("bounded", 6);
+    request.max_attempts = 1;
+    jobs.register_start(StartOwnership {
+        id: request.resolved_start_id,
+        owner,
+        expires_at: now + Duration::from_secs(60),
+    });
+    let job = jobs.submit(owner, request, now).unwrap();
+    jobs.claim(Uuid::new_v4(), now, Duration::from_secs(1))
+        .unwrap();
+    assert!(
+        jobs.claim(
+            Uuid::new_v4(),
+            now + Duration::from_secs(2),
+            Duration::from_secs(1)
+        )
+        .is_none()
+    );
+    assert_eq!(jobs.state(job), Some(JobState::Failed));
+}

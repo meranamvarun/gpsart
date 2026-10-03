@@ -1,10 +1,13 @@
+use gpsart_persistence::jobs::{Completion, JobError, PostgresJobCoordinator};
 use gpsart_persistence::{MIGRATOR, MigrationStatus, migration_status};
 use sqlx::{Connection, Executor, PgConnection, PgPool, Row, postgres::PgConnectOptions};
+use std::time::{Duration, SystemTime};
 use std::{
     env,
     str::FromStr,
     sync::atomic::{AtomicU64, Ordering},
 };
+use uuid::Uuid;
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -66,7 +69,7 @@ async fn seed_owned_request(pool: &PgPool) {
         INSERT INTO planning_requests (
           id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash,
           requested_pin, requested_distance_metres, distance_tolerance_metres,
-          activity_profile, activity_profile_version, template_id, template_version,
+          activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version,
           map_data_version, algorithm_version, expires_at
         ) VALUES (
           '20000000-0000-0000-0000-000000000001',
@@ -74,7 +77,7 @@ async fn seed_owned_request(pool: &PgPool) {
           '10000000-0000-0000-0000-000000000001', 1, 'request-one',
           decode(repeat('01', 32), 'hex'),
           ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326), 5000, 250,
-          '{"activity":"walking"}'::jsonb, 'walking-v1', 'heart', '1',
+          '{"activity":"walking"}'::jsonb, 'walking-v1', 'coverage-v1', 'heart', '1',
           'map-v1', 'algorithm-v1', now() + interval '1 day'
         );
         INSERT INTO generation_jobs (
@@ -246,7 +249,7 @@ async fn ownership_is_enforced_across_requests_and_candidates() {
         r#"INSERT INTO planning_requests (
           id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash,
           requested_pin, requested_distance_metres, distance_tolerance_metres,
-          activity_profile, activity_profile_version, template_id, template_version,
+          activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version,
           map_data_version, algorithm_version, expires_at
         ) VALUES (
           '20000000-0000-0000-0000-000000000002',
@@ -254,7 +257,7 @@ async fn ownership_is_enforced_across_requests_and_candidates() {
           '10000000-0000-0000-0000-000000000001', 1, 'cross-owner',
           decode(repeat('02', 32), 'hex'),
           ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326), 5000, 250,
-          '{}'::jsonb, 'walking-v1', 'heart', '1', 'map-v1', 'algorithm-v1',
+          '{}'::jsonb, 'walking-v1', 'coverage-v1', 'heart', '1', 'map-v1', 'algorithm-v1',
           now() + interval '1 day'
         )"#,
     )
@@ -281,6 +284,40 @@ async fn ownership_is_enforced_across_requests_and_candidates() {
     .await;
     assert!(cross_owner_candidate.is_err());
 
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn concurrent_claim_and_cancellation_are_atomic() {
+    let Some((admin, pool, database_name)) = isolated_database("job_lease").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let now = SystemTime::now();
+    let worker_one = Uuid::new_v4();
+    let worker_two = Uuid::new_v4();
+    let (one, two) = tokio::join!(
+        coordinator.claim(worker_one, now, Duration::from_secs(30)),
+        coordinator.claim(worker_two, now, Duration::from_secs(30)),
+    );
+    let leases = [one.unwrap(), two.unwrap()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(leases.len(), 1, "SKIP LOCKED permits one valid lease owner");
+    let lease = leases.into_iter().next().unwrap();
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    assert_eq!(
+        coordinator.cancel(owner, lease.job_id, now).await.unwrap(),
+        gpsart_persistence::jobs::JobState::Cancelled
+    );
+    assert_eq!(
+        coordinator
+            .complete(&lease, &Completion::TimedOut, now)
+            .await,
+        Err(JobError::Terminal)
+    );
     drop_database(admin, pool, &database_name).await;
 }
 
@@ -350,13 +387,13 @@ async fn immutable_snapshots_and_version_uniqueness_are_enforced() {
             r#"INSERT INTO planning_requests (
               id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash,
               requested_pin, requested_distance_metres, distance_tolerance_metres,
-              activity_profile, activity_profile_version, template_id, template_version,
+              activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version,
               map_data_version, algorithm_version, expires_at
             ) SELECT
               '20000000-0000-0000-0000-000000000003', guest_session_id,
               resolved_start_id, 2, idempotency_key, decode(repeat('03', 32), 'hex'),
               requested_pin, requested_distance_metres, distance_tolerance_metres,
-              activity_profile, activity_profile_version, template_id, template_version,
+              activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version,
               map_data_version, algorithm_version, expires_at
             FROM planning_requests WHERE id = '20000000-0000-0000-0000-000000000001'"#,
         )

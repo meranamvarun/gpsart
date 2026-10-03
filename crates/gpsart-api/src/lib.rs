@@ -15,8 +15,10 @@ use gpsart_domain::{
         StartResolverProvider,
     },
 };
+use gpsart_persistence::jobs::{JobError, JobState, PostgresJobCoordinator, RouteJobSubmission};
 use gpsart_persistence::{DependencyProbe, GuestSessionStore, PostgresProbe};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     future::Future,
     sync::Arc,
@@ -50,6 +52,7 @@ struct AppState {
     sessions: Arc<dyn GuestSessionStore>,
     session_policy: SessionPolicy,
     authenticate_starts: bool,
+    jobs: Arc<dyn RouteJobService>,
 }
 
 #[derive(Serialize)]
@@ -87,6 +90,7 @@ pub fn app(readiness: impl Readiness) -> Router {
         Arc::new(InMemorySessionStore::default()),
         default_session_policy(),
         false,
+        UnavailableRouteJobService,
     )
 }
 
@@ -97,6 +101,7 @@ pub fn app_with_starts(readiness: impl Readiness, starts: impl StartService) -> 
         Arc::new(InMemorySessionStore::default()),
         default_session_policy(),
         false,
+        UnavailableRouteJobService,
     )
 }
 
@@ -111,6 +116,7 @@ pub fn app_with_auth(
         sessions,
         session_policy,
         true,
+        UnavailableRouteJobService,
     )
 }
 
@@ -120,7 +126,24 @@ pub fn app_with_services(
     sessions: Arc<impl GuestSessionStore>,
     session_policy: SessionPolicy,
 ) -> Router {
-    build_app(readiness, starts, sessions, session_policy, true)
+    build_app(
+        readiness,
+        starts,
+        sessions,
+        session_policy,
+        true,
+        UnavailableRouteJobService,
+    )
+}
+
+pub fn app_with_all_services(
+    readiness: impl Readiness,
+    starts: impl StartService,
+    sessions: Arc<impl GuestSessionStore>,
+    session_policy: SessionPolicy,
+    jobs: impl RouteJobService,
+) -> Router {
+    build_app(readiness, starts, sessions, session_policy, true, jobs)
 }
 
 fn build_app(
@@ -129,6 +152,7 @@ fn build_app(
     sessions: Arc<impl GuestSessionStore>,
     session_policy: SessionPolicy,
     authenticate_starts: bool,
+    jobs: impl RouteJobService,
 ) -> Router {
     Router::new()
         .route("/health/live", get(live))
@@ -137,6 +161,11 @@ fn build_app(
         .route("/api/v1/coverage", get(coverage))
         .route("/api/v1/starts/resolve", post(resolve_start))
         .route("/api/v1/starts/{id}/confirm", post(confirm_start))
+        .route("/api/v1/route-jobs", post(create_route_job))
+        .route(
+            "/api/v1/route-jobs/{id}",
+            axum::routing::delete(cancel_route_job),
+        )
         .route(
             "/api/v1/guest-sessions",
             axum::routing::post(create_guest_session),
@@ -155,6 +184,7 @@ fn build_app(
             sessions,
             session_policy,
             authenticate_starts,
+            jobs: Arc::new(jobs),
         })
 }
 
@@ -190,6 +220,42 @@ pub trait StartService: Send + Sync + 'static {
         id: ResolutionId,
         profile: RouteRequestProfile,
     ) -> Result<Point, ResolveError>;
+}
+
+#[async_trait]
+pub trait RouteJobService: Send + Sync + 'static {
+    async fn submit(
+        &self,
+        owner: uuid::Uuid,
+        input: RouteJobSubmission,
+    ) -> Result<uuid::Uuid, JobError>;
+    async fn cancel(&self, owner: uuid::Uuid, job_id: uuid::Uuid) -> Result<JobState, JobError>;
+}
+
+#[async_trait]
+impl RouteJobService for PostgresJobCoordinator {
+    async fn submit(
+        &self,
+        owner: uuid::Uuid,
+        input: RouteJobSubmission,
+    ) -> Result<uuid::Uuid, JobError> {
+        self.submit(owner, &input).await
+    }
+    async fn cancel(&self, owner: uuid::Uuid, job_id: uuid::Uuid) -> Result<JobState, JobError> {
+        self.cancel(owner, job_id, SystemTime::now()).await
+    }
+}
+
+struct UnavailableRouteJobService;
+
+#[async_trait]
+impl RouteJobService for UnavailableRouteJobService {
+    async fn submit(&self, _: uuid::Uuid, _: RouteJobSubmission) -> Result<uuid::Uuid, JobError> {
+        Err(JobError::Unavailable)
+    }
+    async fn cancel(&self, _: uuid::Uuid, _: uuid::Uuid) -> Result<JobState, JobError> {
+        Err(JobError::Unavailable)
+    }
 }
 
 pub struct ConfiguredStartService<P> {
@@ -437,6 +503,146 @@ async fn confirm_start(
     }
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+struct CreateRouteJobBody {
+    resolved_start_id: uuid::Uuid,
+    revision: i32,
+    idempotency_key: String,
+    requested_distance_metres: i32,
+    distance_tolerance_metres: i32,
+    profile: RouteRequestProfile,
+    coverage_policy_version: String,
+    template_id: String,
+    template_version: String,
+    map_data_version: String,
+    algorithm_version: String,
+}
+
+#[derive(Serialize)]
+struct RouteJobAccepted {
+    job_id: uuid::Uuid,
+    state: &'static str,
+    request_revision: i32,
+}
+
+async fn create_route_job(
+    State(state): State<AppState>,
+    method: Method,
+    headers: HeaderMap,
+    body: Result<Json<CreateRouteJobBody>, JsonRejection>,
+) -> axum::response::Response {
+    let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
+        Ok(value) => value,
+        Err(error) => return auth_error(error),
+    };
+    if let Err(error) = enforce_request_protection(&state.session_policy, &method, &headers) {
+        return auth_error(error);
+    }
+    let Json(body) = match body {
+        Ok(value) => value,
+        Err(_) => return job_error_response(JobError::InvalidInput),
+    };
+    if body.revision <= 0
+        || body.idempotency_key.is_empty()
+        || body.idempotency_key.len() > 200
+        || body.requested_distance_metres <= 0
+        || body.distance_tolerance_metres < 0
+        || body.distance_tolerance_metres > body.requested_distance_metres
+        || [
+            &body.template_id,
+            &body.template_version,
+            &body.coverage_policy_version,
+            &body.map_data_version,
+            &body.algorithm_version,
+        ]
+        .iter()
+        .any(|value| value.is_empty())
+    {
+        return job_error_response(JobError::InvalidInput);
+    }
+    let canonical = match serde_json::to_vec(&body) {
+        Ok(value) => value,
+        Err(_) => return job_error_response(JobError::InvalidInput),
+    };
+    let now = SystemTime::now();
+    let submission = RouteJobSubmission {
+        resolved_start_id: body.resolved_start_id,
+        revision: body.revision,
+        idempotency_key: body.idempotency_key,
+        input_hash: Sha256::digest(canonical).into(),
+        requested_distance_metres: body.requested_distance_metres,
+        distance_tolerance_metres: body.distance_tolerance_metres,
+        activity_profile_json: serde_json::to_string(&body.profile).unwrap_or_else(|_| "{}".into()),
+        activity_profile_version: body.profile.version().to_string(),
+        coverage_policy_version: body.coverage_policy_version,
+        template_id: body.template_id,
+        template_version: body.template_version,
+        map_data_version: body.map_data_version,
+        algorithm_version: body.algorithm_version,
+        expires_at: now + Duration::from_secs(86_400),
+        deadline_at: now + Duration::from_secs(120),
+        max_attempts: 3,
+    };
+    match state.jobs.submit(session.id, submission).await {
+        Ok(job_id) => (
+            StatusCode::ACCEPTED,
+            Json(RouteJobAccepted {
+                job_id,
+                state: "queued",
+                request_revision: body.revision,
+            }),
+        )
+            .into_response(),
+        Err(error) => job_error_response(error),
+    }
+}
+
+async fn cancel_route_job(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    method: Method,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
+        Ok(value) => value,
+        Err(error) => return auth_error(error),
+    };
+    if let Err(error) = enforce_request_protection(&state.session_policy, &method, &headers) {
+        return auth_error(error);
+    }
+    match state.jobs.cancel(session.id, id).await {
+        Ok(state) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "state": job_state_name(state) })),
+        )
+            .into_response(),
+        Err(error) => job_error_response(error),
+    }
+}
+
+fn job_state_name(state: JobState) -> &'static str {
+    match state {
+        JobState::Queued => "queued",
+        JobState::Running => "running",
+        JobState::Succeeded => "succeeded",
+        JobState::NoMatch => "no_match",
+        JobState::Failed => "failed",
+        JobState::Cancelled => "cancelled",
+        JobState::TimedOut => "timed_out",
+    }
+}
+
+fn job_error_response(error: JobError) -> axum::response::Response {
+    let (status, code) = match error {
+        JobError::InvalidInput => (StatusCode::BAD_REQUEST, "invalid_request"),
+        JobError::StartNotFound | JobError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+        JobError::IdempotencyConflict => (StatusCode::CONFLICT, "idempotency_conflict"),
+        JobError::LeaseLost | JobError::Terminal => (StatusCode::CONFLICT, "job_state_conflict"),
+        JobError::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "job_storage_unavailable"),
+    };
+    (status, Json(serde_json::json!({ "code": code }))).into_response()
+}
+
 #[derive(Serialize)]
 struct SessionBody {
     expires_at: u64,
@@ -663,6 +869,23 @@ pub async fn serve_with_services(
     axum::serve(
         listener,
         app_with_services(readiness, starts, sessions, session_policy),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
+}
+
+pub async fn serve_with_all_services(
+    listener: tokio::net::TcpListener,
+    readiness: impl Readiness,
+    starts: impl StartService,
+    sessions: Arc<impl GuestSessionStore>,
+    session_policy: SessionPolicy,
+    jobs: impl RouteJobService,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    axum::serve(
+        listener,
+        app_with_all_services(readiness, starts, sessions, session_policy, jobs),
     )
     .with_graceful_shutdown(shutdown)
     .await
