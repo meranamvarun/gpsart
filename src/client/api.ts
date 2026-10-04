@@ -15,3 +15,33 @@ export function decodeApiRouteResult(value: unknown): ApiRouteResult {
   const snapshot = decodeRouteSnapshot(payload.snapshot);
   return snapshot ? { kind: "route", snapshot } : { kind: "invalid_response" };
 }
+
+export type CandidateSnapshotLoad =
+  | { readonly kind: "available"; readonly snapshots: readonly RouteSnapshot[] }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "invalid_response" };
+
+export async function fetchRouteCandidates(
+  resultIds: readonly string[],
+  fetcher: typeof fetch = fetch,
+): Promise<CandidateSnapshotLoad> {
+  const uniqueIds = [...new Set(resultIds)];
+  if (uniqueIds.length < 1 || uniqueIds.length > 3 || uniqueIds.length !== resultIds.length) return { kind: "invalid_response" };
+  try {
+    const responses = await Promise.all(uniqueIds.map((id) => fetcher(`/api/v1/routes/${encodeURIComponent(id)}`, {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    })));
+    if (responses.some((response) => !response.ok)) return { kind: "unavailable" };
+    const payloads = await Promise.all(responses.map((response) => response.json() as Promise<unknown>));
+    const snapshots = payloads.map(decodeRouteSnapshot);
+    if (snapshots.some((snapshot) => snapshot === null)) return { kind: "invalid_response" };
+    const decoded = snapshots as RouteSnapshot[];
+    if (decoded.some((snapshot, index) => snapshot.id !== uniqueIds[index])) return { kind: "invalid_response" };
+    return { kind: "available", snapshots: Object.freeze(decoded) };
+  } catch {
+    return { kind: "unavailable" };
+  }
+}

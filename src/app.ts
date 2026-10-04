@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
 import "./styles.css";
 import { readCsrfCookie } from "./client/guest-session.ts";
+import { fetchRouteCandidates } from "./client/api.ts";
 import {
   PlannerWorkflow,
   type PlannerWorkflowSnapshot,
@@ -16,7 +17,8 @@ import { renderMap } from "./app/map.ts";
 import { currentScreen, navigate, type Screen } from "./app/router.ts";
 import { screenForWorkflow } from "./app/outcome-flow.ts";
 import { isStandaloneScreen, renderScreen } from "./app/screen-controller.ts";
-import { initialState, recordCompletedAttempt, retryCompletedAttempt, updateRequest, updateUi } from "./app/state.ts";
+import { acceptCandidateLoad, beginCandidateLoad, initialState, recordCompletedAttempt, retryCompletedAttempt, selectCandidate, updateRequest, updateUi } from "./app/state.ts";
+import { buildCandidateComparison, routeMapModel } from "./app/route-presentation.ts";
 import type { DesignCategory } from "./app/catalogue.ts";
 import type { RouteRequest } from "./domain/planner.ts";
 import {
@@ -62,6 +64,7 @@ function render(): void {
   document.title = `${screen} · GPSART`;
   bind();
   bindPlannerMap(screen);
+  bindRouteMap(screen);
   const locationStatus = document.querySelector<HTMLElement>("#location-status");
   if (locationStatus) locationStatus.textContent = locationMessage;
   window.scrollTo(0, 0);
@@ -125,6 +128,43 @@ function bindPlannerMap(screen: Screen): void {
   });
 }
 
+function bindRouteMap(screen: Screen): void {
+  if (screen !== "results" && screen !== "details") return;
+  const element = document.querySelector<HTMLElement>("#route-map");
+  if (!element || state.candidateLoad !== "available" || !state.routeResults.length) return;
+  const request = state.lastAttempt?.status.requestRevision === state.candidateRequestRevision ? state.lastAttempt.request : state.request;
+  const comparison = buildCandidateComparison(state.routeResults, request.distanceKm * 1000);
+  const model = routeMapModel(comparison, state.selectedCandidateId ?? "");
+  const center = model.highlighted.trace[0]!;
+  leafletMap = L.map(element, { center: [center.latitude, center.longitude], zoom: 15, zoomControl: true });
+  const status = document.querySelector<HTMLElement>("#base-map-status");
+  let tileFailureReported = false;
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 19,
+  }).on("tileerror", () => {
+    if (tileFailureReported || !status) return;
+    tileFailureReported = true;
+    status.innerHTML = "<strong>Base map unavailable.</strong> Complete routed geometry remains visible; route facts remain in the comparison and details panel.";
+  }).addTo(leafletMap);
+  for (const alternative of model.alternatives) {
+    L.polyline(alternative.trace.map((point) => [point.latitude, point.longitude]), { color: "#7d837e", opacity: 0.5, weight: 4 }).addTo(leafletMap);
+  }
+  const selected = state.routeResults.find(({ id }) => id === model.highlighted.id)!;
+  for (const traversal of selected.traversals) {
+    const points = selected.trace.slice(traversal.beginGeometryIndex, traversal.endGeometryIndex + 1).map((point) => [point.latitude, point.longitude] as L.LatLngTuple);
+    const connector = traversal.class !== "artwork" || traversal.retraced;
+    L.polyline(points, { color: connector ? "#f58a23" : "#154c36", opacity: 1, weight: 6, dashArray: connector ? "9 7" : undefined }).addTo(leafletMap);
+  }
+  for (const marker of model.highlighted.directionMarkers) {
+    L.circleMarker([marker.position.latitude, marker.position.longitude], { radius: 4, color: "#154c36", fillColor: "#faf8f1", fillOpacity: 1, weight: 2 }).bindTooltip(marker.direction).addTo(leafletMap);
+  }
+  L.circleMarker([selected.start.latitude, selected.start.longitude], { radius: 7, color: "#154c36", fillColor: "#faf8f1", fillOpacity: 1, weight: 3 }).bindTooltip("Start").addTo(leafletMap);
+  L.circleMarker([selected.finish.latitude, selected.finish.longitude], { radius: 7, color: "#8c3f2f", fillColor: "#faf8f1", fillOpacity: 1, weight: 3 }).bindTooltip("Finish").addTo(leafletMap);
+  const bounds = L.latLngBounds(model.highlighted.trace.map((point) => [point.latitude, point.longitude] as L.LatLngTuple));
+  leafletMap.fitBounds(bounds, { padding: [35, 35], maxZoom: 17 });
+}
+
 function showScreen(screen: Screen): void {
   if (currentScreen(window.location.hash, document.body.dataset.screen) === screen) render();
   else navigate(screen);
@@ -141,6 +181,14 @@ function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
       : null;
   if (snapshot.request && completed) {
     state = recordCompletedAttempt(state, snapshot.request, completed);
+  }
+  if (snapshot.request && completed?.outcome?.code === "succeeded" && completed.resultIds.length && state.candidateRequestRevision !== snapshot.request.revision) {
+    const requestRevision = snapshot.request.revision;
+    state = beginCandidateLoad(state, requestRevision);
+    void fetchRouteCandidates(completed.resultIds).then((result) => {
+      state = acceptCandidateLoad(state, requestRevision, result);
+      showScreen("results");
+    });
   }
   showScreen(screenForWorkflow(snapshot));
 }
@@ -194,6 +242,10 @@ function bind(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-design]").forEach((button) => button.addEventListener("click", () => {
     const design = button.dataset.design;
     if (design) patchRequest({ design });
+  }));
+  document.querySelectorAll<HTMLButtonElement>("[data-candidate-id]").forEach((button) => button.addEventListener("click", () => {
+    const candidateId = button.dataset.candidateId;
+    if (candidateId) { state = selectCandidate(state, candidateId); render(); }
   }));
   document.querySelector<HTMLInputElement>("#start")?.addEventListener("change", () => {
     const start = inputValue("start");

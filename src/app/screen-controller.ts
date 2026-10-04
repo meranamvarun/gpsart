@@ -7,6 +7,7 @@ import type { PlannerWorkflowSnapshot, WorkflowIssue } from "../client/planner-w
 import type { RouteJobOutcomeCode } from "../domain/job-status.ts";
 import type { RouteRequest } from "../domain/planner.ts";
 import { outcomePresentation, type OutcomePresentation } from "./outcome-flow.ts";
+import { buildCandidateComparison, renderCandidateDetails, renderCandidateResults, ROUTE_USE_ADVISORY } from "./route-presentation.ts";
 
 const escapeHtml = (value: string): string => value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 const icon = (name: string): string => `<i class="ph ph-${name}" aria-hidden="true"></i>`;
@@ -98,6 +99,22 @@ function unavailableResult(state: AppState, details: boolean): string {
   return `${top(details ? "Route details" : "A few ways to make it yours.", details ? "A validated candidate is required before details can be shown." : observed, details ? "results" : "planner")}${requestSummary(request)}<span class="hero-icon">${icon("map-trifold")}</span><div class="notice">No route geometry is displayed. GPSART never creates geometry, connectivity, distance, access, instructions, or success metrics in the browser.</div>${link("planner", "Refine your plan")}`;
 }
 
+function candidateResult(state: AppState, details: boolean): string {
+  if (state.candidateLoad === "idle") return unavailableResult(state, details);
+  const attempt = state.lastAttempt;
+  const request = attempt?.status.requestRevision === state.candidateRequestRevision ? attempt.request : state.request;
+  const heading = top(details ? "Route details" : "A few ways to make it yours.", details ? "Every fact below comes from the selected immutable route snapshot." : "Compare the complete routed candidates north-up.", details ? "results" : "planner");
+  if (state.candidateLoad === "loading") return `${heading}${requestSummary(request)}<div class="notice" role="status">Loading complete validated route snapshots…</div>`;
+  if (state.candidateLoad !== "available" || !state.routeResults.length) {
+    const reason = state.candidateLoad === "invalid_response" ? "The route service returned an invalid or mismatched snapshot." : "The route snapshots could not be loaded.";
+    return `${heading}${requestSummary(request)}<div class="notice" role="alert">${reason} No partial geometry or metrics are shown.</div>${link("planner", "Refine your plan")}`;
+  }
+  const comparison = buildCandidateComparison(state.routeResults, request.distanceKm * 1000);
+  const selectedId = state.selectedCandidateId ?? comparison.candidates[0]!.snapshot.id;
+  if (details) return `${heading}${requestSummary(request)}${renderCandidateDetails(comparison, selectedId)}<div class="actions">${link("results", "Compare routes")}</div>`;
+  return `${heading}${requestSummary(request)}${renderCandidateResults(comparison, selectedId)}<div class="notice">${escapeHtml(ROUTE_USE_ADVISORY)}</div><div class="actions"><a class="primary" href="#/details">View selected route details ${icon("arrow-right")}</a>${link("planner", "Refine your plan")}</div>`;
+}
+
 function saved(loaded: LoadedSnapshots): string {
   let content: string;
   if (loaded.kind === "unsupported_snapshot") content = `<div class="notice">A saved route uses an older, malformed, or unsupported format. It has not been loaded or changed.</div>`;
@@ -174,8 +191,8 @@ export function renderScreen(screen: Screen, state: AppState, loaded: LoadedSnap
   if (screen === "planner") return planner(state, workflow);
   if (screen === "catalogue") return catalogue(state);
   if (screen === "generating") return generating(state, workflow);
-  if (screen === "results") return unavailableResult(state, false);
-  if (screen === "details") return unavailableResult(state, true);
+  if (screen === "results") return candidateResult(state, false);
+  if (screen === "details") return candidateResult(state, true);
   if (screen === "saved") return saved(loaded);
   if (screen === "no-match" || screen === "coverage" || screen === "error") return failure(screen, state, workflow);
   if (screen === "screens") return screenIndex();
