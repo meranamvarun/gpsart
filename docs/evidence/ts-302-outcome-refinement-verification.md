@@ -14,4 +14,4 @@
 - Complete TypeScript unit suite: 47 passed.
 - Visual-shell regression suite: 2 passed.
 - Typecheck and production build: passed.
-- Factory verification: pending final story gate.
+- Factory verification: passed with the repository's documented `stable-x86_64-pc-windows-gnu` toolchain, including Rust format, clippy, all workspace tests/builds, factory contracts, browser tests, Sites tests, and production build.
