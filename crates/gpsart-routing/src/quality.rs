@@ -1,4 +1,4 @@
-use crate::{CandidatePart, GeoPointE7, HeartCandidate};
+use crate::{CandidatePart, GeoPointE7, HeartCandidate, ValidatedCandidate};
 use gpsart_domain::{
     Metres,
     templates::{Category, TraversalPart, VersionedTemplate},
@@ -96,7 +96,7 @@ pub struct UserQuality {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScoredCandidate {
-    pub candidate: HeartCandidate,
+    pub candidate: ValidatedCandidate,
     pub metrics: CandidateQualityMetrics,
     pub quality_band: QualityBand,
     internal_penalty: u64,
@@ -120,11 +120,10 @@ pub enum QualityError {
     InvalidConfiguration,
 }
 
-/// Scores a candidate only after the routing provider and `CandidateSearch` have completed
-/// network-legality validation. This layer rechecks retained structural and distance invariants;
-/// it cannot reconstruct access or turn evidence that is absent from `HeartCandidate`.
+/// Scores only the sealed candidate value returned by `CandidateSearch` after
+/// routing-policy evidence and occurrence-level legality have been retained.
 pub fn score_candidate(
-    candidate: HeartCandidate,
+    candidate: ValidatedCandidate,
     template: &VersionedTemplate,
     config: &CandidateQualityConfig,
 ) -> Result<ScoredCandidate, QualityError> {
@@ -447,6 +446,7 @@ fn simplify_collinear(points: &[GeoPointE7]) -> Vec<GeoPointE7> {
 pub struct BenchmarkPins {
     pub map_version: String,
     pub profile_version: String,
+    pub routing_policy_version: String,
     pub template_id: String,
     pub template_version: u32,
     pub template_hash: String,
@@ -522,6 +522,7 @@ impl BenchmarkHarness {
         }
         if pins.map_version.is_empty()
             || pins.profile_version.is_empty()
+            || pins.routing_policy_version.is_empty()
             || pins.template_id.is_empty()
             || pins.template_version == 0
             || pins.template_hash.is_empty()

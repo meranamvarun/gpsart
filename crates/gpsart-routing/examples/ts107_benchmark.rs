@@ -92,6 +92,7 @@ fn pins(template: &VersionedTemplate) -> BenchmarkPins {
     BenchmarkPins {
         map_version: format!("cubbon-park-osm-v1+{}", SNAPSHOT_HASH.trim()),
         profile_version: "walking-v1".into(),
+        routing_policy_version: "osm-pedestrian-policy-v2".into(),
         template_id: template.definition.id.clone(),
         template_version: template.definition.version,
         template_hash: template.definition_hash.clone(),

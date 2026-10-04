@@ -5,6 +5,7 @@ fn pins(template_id: &str) -> BenchmarkPins {
     BenchmarkPins {
         map_version: "cubbon-park-osm-v1+c4a009be".into(),
         profile_version: "walking-v1".into(),
+        routing_policy_version: "osm-pedestrian-policy-v2".into(),
         template_id: template_id.into(),
         template_version: 1,
         template_hash: "immutable-template-hash".into(),
@@ -50,6 +51,7 @@ fn harness_records_pinned_inputs_runtime_calls_outcome_validity_and_artifacts() 
     );
     let json = serde_json::to_string_pretty(&report).unwrap();
     assert!(json.contains("\"algorithm_version\": \"candidate-quality-v1\""));
+    assert!(json.contains("\"routing_policy_version\": \"osm-pedestrian-policy-v2\""));
     assert!(!json.contains("latitude"));
     assert!(!json.contains("longitude"));
 }
