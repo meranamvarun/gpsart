@@ -2,8 +2,11 @@ use crate::{
     AttemptControl, ControlledGraph, GeoPointE7, LocalOsmGraph, ManoeuvreKind, RoutePath,
     RouteProvenance, RouteProvider, RouteQuery, RoutingError,
 };
-use gpsart_domain::templates::{TraversalPart, VersionedTemplate};
+use gpsart_domain::templates::{
+    Category, OrientationRule, TraversalPart, VersionedTemplate, embedded_catalogue,
+};
 use gpsart_domain::{Metres, RouteCandidateProfile, RouteRequestProfile};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -71,6 +74,9 @@ pub struct HeartSearchConfig {
     pub anchor_tolerance_metres: u32,
 }
 
+pub type CuratedTextSearchRequest = HeartSearchRequest;
+pub type CuratedTextSearchConfig = HeartSearchConfig;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CandidatePart {
     Access,
@@ -99,9 +105,19 @@ pub struct HeartCandidate {
     pub ordered_design_anchors: Vec<GeoPointE7>,
     pub occurrences: Vec<TraversalOccurrence>,
     pub distance: Metres,
+    pub connector_distance_metres: u32,
+    pub repeated_distance_metres: u32,
     pub closure_distance_metres: u32,
     pub provenance: RouteProvenance,
 }
+
+impl HeartCandidate {
+    pub fn resemblance_trace(&self) -> &[GeoPointE7] {
+        &self.geometry
+    }
+}
+
+pub type CuratedTextCandidate = HeartCandidate;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MatchOutcome {
@@ -111,9 +127,9 @@ pub enum MatchOutcome {
 
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum CandidateError {
-    #[error("heart search request or configuration is invalid")]
+    #[error("candidate search request or configuration is invalid")]
     InvalidRequest,
-    #[error("heart search was cancelled")]
+    #[error("candidate search was cancelled")]
     Cancelled,
     #[error("routing failed without establishing whether a match exists: {0}")]
     Routing(#[source] RoutingError),
@@ -122,6 +138,12 @@ pub enum CandidateError {
 pub struct CandidateSearch<'a, P, A> {
     provider: &'a P,
     anchors: &'a A,
+}
+
+#[derive(Clone, Copy)]
+enum SearchKind {
+    Heart,
+    CuratedText,
 }
 
 impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
@@ -135,12 +157,12 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
         request: &HeartSearchRequest,
         config: &HeartSearchConfig,
     ) -> Result<MatchOutcome, CandidateError> {
-        validate_inputs(template, request, config)?;
+        validate_inputs(template, request, config, SearchKind::Heart)?;
         if config.max_provider_calls == 0 || config.wall_time.is_zero() {
             return Ok(MatchOutcome::NoMatch);
         }
         let control = AttemptControl::with_timeout(config.wall_time, config.max_provider_calls);
-        self.heart_with_control(template, request, config, &control)
+        self.search_with_control(template, request, config, &control, SearchKind::Heart)
             .await
     }
 
@@ -151,7 +173,45 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
         config: &HeartSearchConfig,
         control: &AttemptControl,
     ) -> Result<MatchOutcome, CandidateError> {
-        validate_inputs(template, request, config)?;
+        self.search_with_control(template, request, config, control, SearchKind::Heart)
+            .await
+    }
+
+    pub async fn curated_text(
+        &self,
+        template: &VersionedTemplate,
+        request: &CuratedTextSearchRequest,
+        config: &CuratedTextSearchConfig,
+    ) -> Result<MatchOutcome, CandidateError> {
+        validate_inputs(template, request, config, SearchKind::CuratedText)?;
+        if config.max_provider_calls == 0 || config.wall_time.is_zero() {
+            return Ok(MatchOutcome::NoMatch);
+        }
+        let control = AttemptControl::with_timeout(config.wall_time, config.max_provider_calls);
+        self.search_with_control(template, request, config, &control, SearchKind::CuratedText)
+            .await
+    }
+
+    pub async fn curated_text_with_control(
+        &self,
+        template: &VersionedTemplate,
+        request: &CuratedTextSearchRequest,
+        config: &CuratedTextSearchConfig,
+        control: &AttemptControl,
+    ) -> Result<MatchOutcome, CandidateError> {
+        self.search_with_control(template, request, config, control, SearchKind::CuratedText)
+            .await
+    }
+
+    async fn search_with_control(
+        &self,
+        template: &VersionedTemplate,
+        request: &HeartSearchRequest,
+        config: &HeartSearchConfig,
+        control: &AttemptControl,
+        kind: SearchKind,
+    ) -> Result<MatchOutcome, CandidateError> {
+        validate_inputs(template, request, config, kind)?;
         if control.is_cancelled() {
             return Err(CandidateError::Cancelled);
         }
@@ -182,7 +242,7 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
                     if Instant::now() >= deadline || provider_calls >= config.max_provider_calls {
                         return Ok(MatchOutcome::NoMatch);
                     }
-                    let Some(design_anchors) = project_and_match(
+                    let Some(projected) = project_and_match(
                         template,
                         request.confirmed_start,
                         east,
@@ -198,6 +258,17 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
                     else {
                         continue;
                     };
+                    let design_anchors = projected.anchors;
+                    if matches!(kind, SearchKind::Heart)
+                        && design_anchors.first() != design_anchors.last()
+                    {
+                        continue;
+                    }
+                    if matches!(kind, SearchKind::CuratedText)
+                        && design_anchors.first() == design_anchors.last()
+                    {
+                        continue;
+                    }
                     if control.is_cancelled() {
                         return Err(CandidateError::Cancelled);
                     }
@@ -222,9 +293,14 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
                         Err(RoutingError::Cancelled) => return Err(CandidateError::Cancelled),
                         Err(error) => return Err(CandidateError::Routing(error)),
                     };
-                    if let Some(candidate) =
-                        validate_candidate(template, request, config, design_anchors, path)
-                    {
+                    if let Some(candidate) = validate_candidate(
+                        template,
+                        request,
+                        config,
+                        design_anchors,
+                        projected.leg_parts,
+                        path,
+                    ) {
                         return Ok(MatchOutcome::Match(Box::new(candidate)));
                     }
                 }
@@ -238,10 +314,38 @@ fn validate_inputs(
     template: &VersionedTemplate,
     request: &HeartSearchRequest,
     config: &HeartSearchConfig,
+    kind: SearchKind,
 ) -> Result<(), CandidateError> {
-    if template.definition.id != "heart"
-        || template.definition.strokes.len() != 1
-        || template.definition.strokes[0].points.len() < 4
+    let canonical =
+        serde_json::to_vec(&template.definition).map_err(|_| CandidateError::InvalidRequest)?;
+    let hash_is_valid = format!("{:x}", Sha256::digest(canonical)) == template.definition_hash
+        && embedded_catalogue()
+            .ok()
+            .and_then(|catalogue| {
+                catalogue
+                    .get(&template.definition.id, template.definition.version)
+                    .map(|published| published.definition_hash == template.definition_hash)
+            })
+            .unwrap_or(false);
+    let template_is_valid = match kind {
+        SearchKind::Heart => {
+            template.definition.id == "heart"
+                && template.definition.category == Category::Shape
+                && template.definition.strokes.len() == 1
+                && template.definition.strokes[0].points.len() >= 4
+        }
+        SearchKind::CuratedText => {
+            template.definition.id == "HI"
+                && template.definition.category == Category::Text
+                && template.definition.strokes.len() > 1
+                && template.definition.transitions.len() + 1 == template.definition.strokes.len()
+                && template.definition.orientation.rule == OrientationRule::NorthUpBounded
+                && !template.definition.orientation.mirror
+                && !template.definition.orientation.stroke_reordering
+        }
+    };
+    if !hash_is_valid
+        || !template_is_valid
         || request.minimum_distance.value() > request.maximum_distance.value()
         || config.placement_offsets_metres.is_empty()
         || config.scales_metres.is_empty()
@@ -261,6 +365,11 @@ fn validate_inputs(
     Ok(())
 }
 
+struct ProjectedDesign {
+    anchors: Vec<GeoPointE7>,
+    leg_parts: Vec<CandidatePart>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn project_and_match<A: AnchorMatch>(
     template: &VersionedTemplate,
@@ -274,16 +383,23 @@ fn project_and_match<A: AnchorMatch>(
     anchor_matches: &mut usize,
     deadline: Instant,
     control: &AttemptControl,
-) -> Result<Option<Vec<GeoPointE7>>, CandidateError> {
+) -> Result<Option<ProjectedDesign>, CandidateError> {
     let radians = f64::from(rotation).to_radians();
     let (sin, cos) = radians.sin_cos();
     let mut matched = Vec::new();
+    let mut leg_parts = Vec::new();
+    let mut previous_template_point = None;
     for part in template.complete_traversal() {
-        let points = match part {
-            TraversalPart::Stroke(stroke) => &stroke.points,
-            TraversalPart::Transition(transition) => &transition.points,
+        let (points, candidate_part) = match part {
+            TraversalPart::Stroke(stroke) => (&stroke.points, CandidatePart::Artwork),
+            TraversalPart::Transition(transition) => (&transition.points, CandidatePart::Connector),
         };
         for point in points {
+            let template_point = (point.x.to_bits(), point.y.to_bits());
+            if previous_template_point == Some(template_point) {
+                continue;
+            }
+            previous_template_point = Some(template_point);
             if control.is_cancelled() {
                 return Err(CandidateError::Cancelled);
             }
@@ -308,6 +424,12 @@ fn project_and_match<A: AnchorMatch>(
             else {
                 return Ok(None);
             };
+            if matched.last() == Some(&anchor) {
+                return Ok(None);
+            }
+            if !matched.is_empty() {
+                leg_parts.push(candidate_part);
+            }
             matched.push(anchor);
         }
     }
@@ -317,7 +439,12 @@ fn project_and_match<A: AnchorMatch>(
     if Instant::now() >= deadline {
         return Ok(None);
     }
-    Ok((matched.len() >= 4 && matched.first() == matched.last()).then_some(matched))
+    Ok(
+        (matched.len() >= 2 && leg_parts.len() + 1 == matched.len()).then_some(ProjectedDesign {
+            anchors: matched,
+            leg_parts,
+        }),
+    )
 }
 
 fn offset_point(origin: GeoPointE7, east: f64, north: f64) -> Option<GeoPointE7> {
@@ -350,6 +477,7 @@ fn validate_candidate(
     request: &HeartSearchRequest,
     config: &HeartSearchConfig,
     design_anchors: Vec<GeoPointE7>,
+    design_leg_parts: Vec<CandidatePart>,
     path: RoutePath,
 ) -> Option<HeartCandidate> {
     if path.geometry.len() < 2
@@ -411,7 +539,12 @@ fn validate_candidate(
         return None;
     }
     let mut seen = HashSet::new();
+    if design_leg_parts.len() + 1 != design_anchors.len() {
+        return None;
+    }
     let mut occurrences = Vec::with_capacity(path.edges.len());
+    let mut connector_distance_metres = 0_u32;
+    let mut repeated_distance_metres = 0_u32;
     for edge in &path.edges {
         let leg = boundaries.partition_point(|boundary| *boundary <= edge.begin_geometry_index);
         let part = if leg == 0 {
@@ -419,15 +552,23 @@ fn validate_candidate(
         } else if leg == design_anchors.len() {
             CandidatePart::Return
         } else {
-            CandidatePart::Artwork
+            design_leg_parts[leg - 1]
         };
+        let distance = edge.distance?;
+        let retraced = !seen.insert(edge.edge_id.clone());
+        if part == CandidatePart::Connector {
+            connector_distance_metres = connector_distance_metres.checked_add(distance.value())?;
+        }
+        if retraced {
+            repeated_distance_metres = repeated_distance_metres.checked_add(distance.value())?;
+        }
         occurrences.push(TraversalOccurrence {
             edge_id: edge.edge_id.clone(),
             part,
-            retraced: !seen.insert(edge.edge_id.clone()),
+            retraced,
             begin_geometry_index: edge.begin_geometry_index,
             end_geometry_index: edge.end_geometry_index,
-            distance: edge.distance?,
+            distance,
         });
     }
     Some(HeartCandidate {
@@ -439,6 +580,8 @@ fn validate_candidate(
         ordered_design_anchors: design_anchors,
         occurrences,
         distance: path.distance,
+        connector_distance_metres,
+        repeated_distance_metres,
         closure_distance_metres: closure,
         provenance: path.provenance,
     })
