@@ -57,6 +57,7 @@ export function acceptApiResult(state: AppState, result: ApiRouteResult): AppSta
 }
 
 export function beginCandidateLoad(state: AppState, requestRevision: number): AppState {
+  if (state.candidateRequestRevision !== null && requestRevision < state.candidateRequestRevision) return state;
   return { ...state, routeResult: null, routeResults: Object.freeze([]), candidateLoad: "loading", candidateRequestRevision: requestRevision, selectedCandidateId: null };
 }
 

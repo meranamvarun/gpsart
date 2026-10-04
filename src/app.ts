@@ -13,7 +13,7 @@ import {
   type PlannerWorkflowSnapshot,
 } from "./client/planner-workflow.ts";
 import { loadRouteSnapshots } from "./client/storage.ts";
-import { renderMap } from "./app/map.ts";
+import { baseMapTileErrorHandler, renderMap } from "./app/map.ts";
 import { currentScreen, navigate, type Screen } from "./app/router.ts";
 import { screenForWorkflow } from "./app/outcome-flow.ts";
 import { isStandaloneScreen, renderScreen } from "./app/screen-controller.ts";
@@ -138,15 +138,10 @@ function bindRouteMap(screen: Screen): void {
   const center = model.highlighted.trace[0]!;
   leafletMap = L.map(element, { center: [center.latitude, center.longitude], zoom: 15, zoomControl: true });
   const status = document.querySelector<HTMLElement>("#base-map-status");
-  let tileFailureReported = false;
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors",
     maxZoom: 19,
-  }).on("tileerror", () => {
-    if (tileFailureReported || !status) return;
-    tileFailureReported = true;
-    status.innerHTML = "<strong>Base map unavailable.</strong> Complete routed geometry remains visible; route facts remain in the comparison and details panel.";
-  }).addTo(leafletMap);
+  }).on("tileerror", baseMapTileErrorHandler(status)).addTo(leafletMap);
   for (const alternative of model.alternatives) {
     L.polyline(alternative.trace.map((point) => [point.latitude, point.longitude]), { color: "#7d837e", opacity: 0.5, weight: 4 }).addTo(leafletMap);
   }
@@ -184,11 +179,14 @@ function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
   }
   if (snapshot.request && completed?.outcome?.code === "succeeded" && completed.resultIds.length && state.candidateRequestRevision !== snapshot.request.revision) {
     const requestRevision = snapshot.request.revision;
-    state = beginCandidateLoad(state, requestRevision);
-    void fetchRouteCandidates(completed.resultIds).then((result) => {
-      state = acceptCandidateLoad(state, requestRevision, result);
-      showScreen("results");
-    });
+    const loadingState = beginCandidateLoad(state, requestRevision);
+    if (loadingState !== state) {
+      state = loadingState;
+      void fetchRouteCandidates(completed.resultIds).then((result) => {
+        state = acceptCandidateLoad(state, requestRevision, result);
+        showScreen("results");
+      });
+    }
   }
   showScreen(screenForWorkflow(snapshot));
 }

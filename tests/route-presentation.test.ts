@@ -12,7 +12,7 @@ import { routeSnapshotPayload } from "./fixtures/route-snapshot.ts";
 
 function candidate(
   suffix: number,
-  options: { artwork?: number; connector?: number; quality?: "strong_match" | "approximate_match"; offset?: number } = {},
+  options: { artwork?: number; connector?: number; quality?: "strong_match" | "approximate_match"; offset?: number; swapClasses?: boolean } = {},
 ): RouteSnapshot {
   const payload = structuredClone(routeSnapshotPayload());
   const artwork = options.artwork ?? 600;
@@ -25,9 +25,13 @@ function candidate(
   payload.direction_markers[1]!.coordinate = [77.601 + offset, 12.901];
   payload.traversals[0]!.distance_metres = artwork;
   payload.traversals[1]!.distance_metres = connector;
+  if (options.swapClasses) {
+    payload.traversals[0]!.class = "connector";
+    payload.traversals[1]!.class = "artwork";
+  }
   payload.distances = {
-    artwork_metres: artwork,
-    connector_metres: connector,
+    artwork_metres: options.swapClasses ? connector : artwork,
+    connector_metres: options.swapClasses ? artwork : connector,
     total_metres: artwork + connector,
     repeated_metres: connector,
     repeated_included_in_total: true,
@@ -103,4 +107,12 @@ test("identical geometry is not presented as a second candidate", () => {
   const duplicate = { ...route, id: "40000000-0000-4000-8000-000000000099", version: 99 };
   const comparison = buildCandidateComparison([route, duplicate], 1_000);
   assert.equal(comparison.candidates.length, 1);
+});
+
+test("identical ordered traces remain one displayed geometry despite different traversal classification", () => {
+  const first = candidate(1, { artwork: 600, connector: 400, offset: 0.0001 });
+  const reclassified = candidate(2, { artwork: 600, connector: 400, offset: 0.0001, swapClasses: true });
+  assert.deepEqual(reclassified.trace, first.trace);
+  assert.notDeepEqual(reclassified.traversals, first.traversals);
+  assert.equal(buildCandidateComparison([first, reclassified], 1_000).candidates.length, 1);
 });

@@ -4,6 +4,17 @@ import { buildCandidateComparison } from "./route-presentation.ts";
 
 const previewScreens: readonly Screen[] = ["planner", "catalogue"];
 
+interface BaseMapStatus { innerHTML: string }
+
+export function baseMapTileErrorHandler(status: BaseMapStatus | null): () => void {
+  let reported = false;
+  return () => {
+    if (reported || !status) return;
+    reported = true;
+    status.innerHTML = "<strong>Base map unavailable.</strong> Complete routed geometry remains visible; route facts remain in the comparison and details panel.";
+  };
+}
+
 export function renderMap(screen: Screen, state: AppState): string {
   if (screen === "planner") {
     return `<section class="map-wrap" aria-label="Starting-point map"><div id="planner-map" class="map" aria-label="Choose a starting point on the map"></div><div class="map-label"><strong>Choose your start</strong><br>Click the map to propose an exact point</div><div class="north" aria-label="North"><i class="ph ph-navigation-arrow" aria-hidden="true"></i></div><div class="map-note">Map clicks propose a start · the routing service checks access and coverage</div></section>`;

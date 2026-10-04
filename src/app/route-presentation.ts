@@ -34,10 +34,7 @@ const kilometres = (metres: number): string => `${(metres / 1000).toFixed(1)} km
 const minutes = (seconds: number): string => `${Math.ceil(seconds / 60)} min`;
 
 function geometryIdentity(snapshot: RouteSnapshot): string {
-  return JSON.stringify({
-    trace: snapshot.trace.map(({ longitude, latitude }) => [longitude, latitude]),
-    traversals: snapshot.traversals.map(({ class: traversalClass, direction, beginGeometryIndex, endGeometryIndex, retraced }) => [traversalClass, direction, beginGeometryIndex, endGeometryIndex, retraced]),
-  });
+  return JSON.stringify(snapshot.trace.map(({ longitude, latitude }) => [longitude, latitude]));
 }
 
 export function buildCandidateComparison(snapshots: readonly RouteSnapshot[], targetMetres: number): CandidateComparison {

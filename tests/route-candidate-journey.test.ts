@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { fetchRouteCandidates } from "../src/client/api.ts";
-import { renderMap } from "../src/app/map.ts";
+import { baseMapTileErrorHandler, renderMap } from "../src/app/map.ts";
 import { renderScreen } from "../src/app/screen-controller.ts";
 import {
   acceptCandidateLoad,
@@ -44,6 +44,8 @@ test("a missing or malformed route never becomes a partial comparison", async ()
   assert.deepEqual(missing, { kind: "unavailable" });
   const malformed = await fetchRouteCandidates([ids[0]!], async () => json({ ...routeSnapshotPayload(), geometry: null }));
   assert.deepEqual(malformed, { kind: "invalid_response" });
+  const invalidJson = await fetchRouteCandidates([ids[0]!], async () => new Response("{bad json", { status: 200 }));
+  assert.deepEqual(invalidJson, { kind: "invalid_response" });
 });
 
 test("loaded candidates drive result cards, details, and selected route map", () => {
@@ -63,4 +65,26 @@ test("stale candidate responses cannot replace a newer load", () => {
   const snapshot = routeSnapshot();
   const loading = beginCandidateLoad(initialState(), snapshot.requestRevision + 1);
   assert.equal(acceptCandidateLoad(loading, snapshot.requestRevision, { kind: "available", snapshots: [snapshot] }), loading);
+});
+
+test("an older successful completion cannot even begin replacing newer candidates", () => {
+  const snapshot = routeSnapshot();
+  const newer = acceptCandidateLoad(beginCandidateLoad(initialState(), 2), 2, {
+    kind: "available",
+    snapshots: [{ ...snapshot, requestRevision: 2 }],
+  });
+  assert.equal(beginCandidateLoad(newer, 1), newer);
+  assert.equal(newer.candidateRequestRevision, 2);
+});
+
+test("the production tile-error handler reports only the base map as unavailable", () => {
+  const status = { innerHTML: "Complete routed geometry · north up" };
+  const handleTileError = baseMapTileErrorHandler(status);
+  handleTileError();
+  assert.match(status.innerHTML, /Base map unavailable/);
+  assert.match(status.innerHTML, /Complete routed geometry remains visible/);
+  assert.doesNotMatch(status.innerHTML, /Route unavailable/);
+  const firstMessage = status.innerHTML;
+  handleTileError();
+  assert.equal(status.innerHTML, firstMessage);
 });
