@@ -6,10 +6,20 @@ const snapshot = { id: "route-1", version: 1, requestRevision: 0, totalMetres: 1
 
 test("route-affecting input has one revisioned model", () => {
   const state = initialState();
-  const changed = updateRequest(state, { design: "Circle", distanceKm: 12 });
-  assert.equal(changed.request.design, "Circle");
-  assert.equal(changed.request.distanceKm, 12);
-  assert.equal(changed.request.revision, state.request.revision + 1);
+  for (const change of [
+    { start: "12.97160, 77.59460" },
+    { activity: "Walking" as const },
+    { design: "Circle" },
+    { distanceKm: 12 },
+    { tolerancePercent: 20 },
+    { returnsToStart: false },
+  ]) {
+    const changed = updateRequest(state, change);
+    assert.equal(changed.request.revision, state.request.revision + 1);
+    for (const [key, value] of Object.entries(change)) {
+      assert.equal(changed.request[key as keyof typeof changed.request], value);
+    }
+  }
 });
 
 test("decoded results enter state only when their request revision is current", () => {

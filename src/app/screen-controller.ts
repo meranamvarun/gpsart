@@ -4,16 +4,20 @@ import { previewsFor } from "./catalogue.ts";
 import type { AppState } from "./state.ts";
 import { screens, type Screen } from "./router.ts";
 import type { PlannerWorkflowSnapshot, WorkflowIssue } from "../client/planner-workflow.ts";
+import type { RouteJobOutcomeCode } from "../domain/job-status.ts";
+import type { RouteRequest } from "../domain/planner.ts";
+import { outcomePresentation, type OutcomePresentation } from "./outcome-flow.ts";
 
 const escapeHtml = (value: string): string => value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 const icon = (name: string): string => `<i class="ph ph-${name}" aria-hidden="true"></i>`;
 const link = (screen: Screen, label: string): string => `<a class="textbutton" href="#/${screen}">${label}</a>`;
 const top = (title: string, subtitle: string, back: Screen = "planner"): string => `<div class="section-top">${link(back, `${icon("arrow-left")} ${back === "results" ? "Back to results" : "Back to planner"}`)}<h1>${title}</h1><p class="muted small">${subtitle}</p></div>`;
 
-function summary(state: AppState): string {
-  const request = state.request;
+function requestSummary(request: RouteRequest): string {
   return `<div class="summary"><strong>${escapeHtml(request.design)} · ${request.activity} · ${request.distanceKm.toFixed(1)} km</strong>${escapeHtml(request.start)}<br>±${request.tolerancePercent}% · ${request.returnsToStart ? "Return to start" : "Separate finish · travel home excluded"}</div>`;
 }
+
+function summary(state: AppState): string { return requestSummary(state.request); }
 
 function designPicker(state: AppState, full = false): string {
   const previews = previewsFor(state.category);
@@ -46,13 +50,24 @@ function plannerRuntime(workflow: PlannerWorkflowSnapshot | null, currentRevisio
   return "";
 }
 
+function previousAttempt(state: AppState): string {
+  const attempt = state.lastAttempt;
+  const code = attempt?.status.outcome?.code;
+  if (!attempt || !code) return "";
+  const presentation = outcomePresentation(code);
+  const result = code === "succeeded"
+    ? `<p class="small muted">${attempt.status.resultIds.length} validated route ${attempt.status.resultIds.length === 1 ? "reference was" : "references were"} returned. Route geometry is shown only after the route-detail service verifies it.</p>`
+    : `<p class="small muted">${escapeHtml(presentation.explanation)}</p>`;
+  return `<section class="confirmation" aria-labelledby="previous-attempt-title"><span class="eyebrow">Previous search · revision ${attempt.request.revision}</span><h3 id="previous-attempt-title">${escapeHtml(presentation.title)}</h3>${requestSummary(attempt.request)}${result}</section>`;
+}
+
 function planner(state: AppState, workflow: PlannerWorkflowSnapshot | null): string {
   const request = state.request;
   const validDistance = Number.isFinite(request.distanceKm) && request.distanceKm >= 1 && request.distanceKm <= 100;
   const validTolerance = Number.isFinite(request.tolerancePercent) && request.tolerancePercent >= 0 && request.tolerancePercent <= 100;
   const bounds = distanceBounds(validDistance ? request.distanceKm : 1, validTolerance ? request.tolerancePercent : 0);
   const busy = workflow?.phase === "resolving" || workflow?.phase === "submitting";
-  return `<div class="intro"><h1>Make your miles<br>a little more creative.</h1><p>Draw shapes or turn a word into a route, and explore your city in a new way.</p></div><form id="plan-form"><div class="field"><label for="start">Starting point</label><div class="inputwrap">${icon("map-pin")}<input id="start" name="start" value="${escapeHtml(request.start)}" required autocomplete="off" placeholder="Latitude, longitude"></div><button type="button" class="textbutton" data-action="location">${icon("navigation-arrow")} Use my location</button><p id="location-status" class="helper">Location is requested only when you choose. You can always enter coordinates or click the map.</p></div><div class="activities" role="group" aria-label="Activity">${(["Walking", "Running", "Cycling"] as const).map((activity) => `<button type="button" class="activity ${request.activity === activity ? "selected" : ""}" data-activity="${activity}" aria-pressed="${request.activity === activity}">${icon(activity === "Walking" ? "person-simple-walk" : activity === "Running" ? "person-simple-run" : "bicycle")}${activity}</button>`).join("")}</div><div id="design-picker">${designPicker(state)}</div><div class="between" style="margin-top:-20px;margin-bottom:20px"><span class="small muted">${escapeHtml(request.design)} selected</span>${link("catalogue", `All designs ${icon("arrow-right")}`)}</div><div class="field"><label for="distance">Target distance</label><div class="inputwrap"><input id="distance" name="distance" type="number" value="${request.distanceKm}" min="1" max="100" step="0.1" required><span>km</span></div><p id="distance-help" class="helper">±${request.tolerancePercent}% · ${bounds.minimumKm.toFixed(1)}–${bounds.maximumKm.toFixed(1)} km · 1–100 km allowed</p></div><div class="settings"><label class="between small"><strong>Return to start</strong><span class="toggle"><input type="checkbox" id="loop" ${request.returnsToStart ? "checked" : ""} aria-label="Return to start"></span></label></div><details><summary class="small muted" style="cursor:pointer;margin-bottom:16px">Distance flexibility</summary><div class="row"><label for="tolerance">Allowed difference</label><select id="tolerance">${[5, 10, 20].map((value) => `<option value="${value}" ${request.tolerancePercent === value ? "selected" : ""}>±${value}%</option>`).join("")}</select></div></details>${workflowIssue(workflow?.issue ?? null)}<button class="primary full" type="submit" ${busy ? "disabled" : ""}>${icon(busy ? "circle-notch" : "sparkle")} ${busy ? "Checking start…" : "Generate routes"}</button><p class="helper">The server validates coverage and road access before you can confirm and start generation.</p></form>${plannerRuntime(workflow, request.revision)}`;
+  return `<div class="intro"><h1>Make your miles<br>a little more creative.</h1><p>Draw shapes or turn a word into a route, and explore your city in a new way.</p></div><form id="plan-form"><div class="field"><label for="start">Starting point</label><div class="inputwrap">${icon("map-pin")}<input id="start" name="start" value="${escapeHtml(request.start)}" required autocomplete="off" placeholder="Latitude, longitude"></div><button type="button" class="textbutton" data-action="location">${icon("navigation-arrow")} Use my location</button><p id="location-status" class="helper">Location is requested only when you choose. You can always enter coordinates or click the map.</p></div><div class="activities" role="group" aria-label="Activity">${(["Walking", "Running", "Cycling"] as const).map((activity) => `<button type="button" class="activity ${request.activity === activity ? "selected" : ""}" data-activity="${activity}" aria-pressed="${request.activity === activity}">${icon(activity === "Walking" ? "person-simple-walk" : activity === "Running" ? "person-simple-run" : "bicycle")}${activity}</button>`).join("")}</div><div id="design-picker">${designPicker(state)}</div><div class="between" style="margin-top:-20px;margin-bottom:20px"><span class="small muted">${escapeHtml(request.design)} selected</span>${link("catalogue", `All designs ${icon("arrow-right")}`)}</div><div class="field"><label for="distance">Target distance</label><div class="inputwrap"><input id="distance" name="distance" type="number" value="${request.distanceKm}" min="1" max="100" step="0.1" required><span>km</span></div><p id="distance-help" class="helper">±${request.tolerancePercent}% · ${bounds.minimumKm.toFixed(1)}–${bounds.maximumKm.toFixed(1)} km · 1–100 km allowed</p></div><div class="settings"><label class="between small"><strong>Return to start</strong><span class="toggle"><input type="checkbox" id="loop" ${request.returnsToStart ? "checked" : ""} aria-label="Return to start"></span></label></div><details><summary class="small muted" style="cursor:pointer;margin-bottom:16px">Distance flexibility</summary><div class="row"><label for="tolerance">Allowed difference</label><select id="tolerance">${[5, 10, 20].map((value) => `<option value="${value}" ${request.tolerancePercent === value ? "selected" : ""}>±${value}%</option>`).join("")}</select></div></details>${workflowIssue(workflow?.issue ?? null)}<button class="primary full" type="submit" ${busy ? "disabled" : ""}>${icon(busy ? "circle-notch" : "sparkle")} ${busy ? "Checking start…" : "Generate routes"}</button><p class="helper">The server validates coverage and road access before you can confirm and start generation.</p></form>${plannerRuntime(workflow, request.revision)}${previousAttempt(state)}`;
 }
 
 function catalogue(state: AppState): string {
@@ -74,7 +89,13 @@ function generating(state: AppState, workflow: PlannerWorkflowSnapshot | null): 
 }
 
 function unavailableResult(state: AppState, details: boolean): string {
-  return `${top(details ? "Route details" : "A few ways to make it yours.", details ? "A validated candidate is required before details can be shown." : "Validated route candidates will appear here.", details ? "results" : "planner")}${summary(state)}<span class="hero-icon">${icon("map-trifold")}</span><div class="notice">No route candidate is displayed. GPSART never creates geometry, connectivity, distance, access, instructions, or success metrics in the browser.</div>${link("planner", "Refine your plan")}`;
+  const attempt = state.lastAttempt?.status.state === "succeeded" ? state.lastAttempt : null;
+  const request = attempt?.request ?? state.request;
+  const resultCount = attempt?.status.resultIds.length ?? 0;
+  const observed = resultCount
+    ? `${resultCount} validated route ${resultCount === 1 ? "reference was" : "references were"} returned for the original request.`
+    : "A validated route reference is required before a result can be shown.";
+  return `${top(details ? "Route details" : "A few ways to make it yours.", details ? "A validated candidate is required before details can be shown." : observed, details ? "results" : "planner")}${requestSummary(request)}<span class="hero-icon">${icon("map-trifold")}</span><div class="notice">No route geometry is displayed. GPSART never creates geometry, connectivity, distance, access, instructions, or success metrics in the browser.</div>${link("planner", "Refine your plan")}`;
 }
 
 function saved(loaded: LoadedSnapshots): string {
@@ -86,9 +107,37 @@ function saved(loaded: LoadedSnapshots): string {
   return `${top("Your next adventures.", "Saved on this device. No account needed.")}<div class="notice">These routes stay in this browser. Clearing site data removes them.</div>${content}`;
 }
 
-function failure(screen: "no-match" | "coverage" | "error", state: AppState): string {
-  const copy = screen === "coverage" ? ["Outside our pilot area", "Coverage must be confirmed by the service.", "map-trifold"] : screen === "error" ? ["The route service is unavailable.", "Your inputs are safe and unchanged.", "cloud-slash"] : ["We couldn’t find a fit this time.", "No qualifying route was returned within the search budget.", "path"];
-  return `${top(copy[0], copy[1])}<span class="hero-icon">${icon(copy[2])}</span>${summary(state)}${screen === "no-match" ? `<h3>Try a different approach</h3><p class="notice">Change the distance or design. Suggestions are not treated as routing facts until checked by the service.</p>` : `<div class="notice">${screen === "coverage" ? "No coverage is assumed in the browser." : "Try again when the service is available."}</div>`}${link("planner", "Edit your original request")}`;
+function failure(screen: "no-match" | "coverage" | "error", state: AppState, workflow: PlannerWorkflowSnapshot | null): string {
+  const workflowCode = workflow?.status?.outcome?.code ?? workflow?.previousStatus?.outcome?.code;
+  const issueCode = workflow?.issue === "unsupported_coverage" || workflow?.issue === "no_routable_access"
+    ? workflow.issue
+    : null;
+  const attempt = state.lastAttempt;
+  const retainedCode = workflow?.phase === "error" ? undefined : attempt?.status.outcome?.code;
+  const code = (workflowCode ?? issueCode ?? retainedCode) as RouteJobOutcomeCode | undefined;
+  const request = workflow?.request ?? attempt?.request ?? state.request;
+  const fallback: OutcomePresentation = screen === "coverage" ? {
+    title: "Coverage or road access was not verified.",
+    explanation: "The service did not accept this exact start for route generation.",
+    suggestions: ["Review the exact start and activity profile."], feasibility: "not_evaluated", retryable: false,
+  } : screen === "no-match" ? {
+    title: "No qualifying result was returned.",
+    explanation: "A bounded search ended without a qualifying route for this exact request.",
+    suggestions: ["Review the start, design, distance, and allowed difference."], feasibility: "not_evaluated", retryable: false,
+  } : {
+    title: "The route service could not complete this request.",
+    explanation: "The original inputs remain unchanged and no route result is being inferred.",
+    suggestions: ["Review the request or try again when the dependency is available."], feasibility: "not_evaluated", retryable: false,
+  };
+  const presentation = code ? outcomePresentation(code) : fallback;
+  const iconName = screen === "coverage" ? "map-trifold" : screen === "error" ? "cloud-slash" : "path";
+  const suggestions = presentation.suggestions.length
+    ? `<h3>Options to review</h3><ul class="rows">${presentation.suggestions.map((suggestion) => `<li>${escapeHtml(suggestion)}</li>`).join("")}</ul><p class="notice">These options have not been checked for local feasibility. Only a new service search can evaluate them.</p>`
+    : "";
+  const retry = presentation.retryable && attempt?.status.outcome?.code === code
+    ? `<button type="button" class="primary full" data-action="retry-job">Retry as a new request revision</button><p class="helper">The service advises waiting ${attempt?.status.outcome?.retryAfterSeconds ?? 0} seconds. The completed job is retained; repeated clicks share the new logical request.</p>`
+    : "";
+  return `${top(presentation.title, presentation.explanation)}<span class="hero-icon">${icon(iconName)}</span>${requestSummary(request)}${suggestions}${retry}${link("planner", "Review or edit the original request")}`;
 }
 
 function auth(screen: Screen, state: AppState): string {
@@ -116,7 +165,7 @@ export function renderScreen(screen: Screen, state: AppState, loaded: LoadedSnap
   if (screen === "results") return unavailableResult(state, false);
   if (screen === "details") return unavailableResult(state, true);
   if (screen === "saved") return saved(loaded);
-  if (screen === "no-match" || screen === "coverage" || screen === "error") return failure(screen, state);
+  if (screen === "no-match" || screen === "coverage" || screen === "error") return failure(screen, state, workflow);
   if (screen === "screens") return screenIndex();
   return auth(screen, state);
 }
