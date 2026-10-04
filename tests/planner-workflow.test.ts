@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ACTIVE_JOB_STORAGE_KEY,
+  PENDING_CREATION_STORAGE_KEY,
   PlannerWorkflow,
   type StoragePort,
 } from "../src/client/planner-workflow.ts";
@@ -147,6 +148,80 @@ test("an uncertain creation retry recovers the exact confirmed request before ne
   assert.equal(workflow.snapshot.phase, "polling");
   assert.equal(workflow.snapshot.request?.revision, 1);
   assert.equal(workflow.snapshot.issue, "active_job");
+});
+
+test("refresh strictly restores and replays an uncertain creation before new work", async () => {
+  const storage = new MemoryStorage();
+  let firstBody: BodyInit | null | undefined;
+  const first = new PlannerWorkflow({
+    fetcher: async (url, init) => {
+      const target = String(url);
+      if (target.endsWith("/starts/resolve")) return json(resolution);
+      if (target.includes("/confirm")) return json({ confirmed_start: resolution.candidate_network_point });
+      if (target.endsWith("/route-jobs")) {
+        firstBody = init?.body;
+        throw new TypeError("response lost after acceptance");
+      }
+      throw new Error("unexpected request");
+    },
+    storage, csrfToken: () => "csrf", currentRevision: () => 1,
+    newIdempotencyKey: () => "refresh-safe-key", schedule: () => 1,
+    cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  await first.submit(request, proposed);
+  await first.confirmAndStart();
+  assert.equal(first.snapshot.issue, "network_unavailable");
+  assert.ok(storage.getItem(PENDING_CREATION_STORAGE_KEY));
+
+  const replayed: Array<{ url: string; body: BodyInit | null | undefined }> = [];
+  const refreshed = new PlannerWorkflow({
+    fetcher: async (url, init) => {
+      replayed.push({ url: String(url), body: init?.body });
+      return json({ job_id: jobId, request_revision: 1 }, 202);
+    },
+    storage, csrfToken: () => "csrf", currentRevision: () => 2,
+    newIdempotencyKey: () => { throw new Error("refresh must retain the original key"); },
+    schedule: () => 1, cancelSchedule: () => undefined,
+    now: () => 1_800_000_000_000,
+  });
+  assert.equal(await refreshed.resume(), true);
+  assert.deepEqual(replayed.map((call) => call.url), ["/api/v1/route-jobs"]);
+  assert.equal(replayed[0]?.body, firstBody);
+  assert.equal(refreshed.snapshot.request?.revision, 1);
+  assert.equal(refreshed.snapshot.issue, "active_job");
+  assert.equal(storage.getItem(PENDING_CREATION_STORAGE_KEY), null);
+  assert.ok(storage.getItem(ACTIVE_JOB_STORAGE_KEY));
+});
+
+test("refresh rejects a tampered uncertain creation instead of replaying it", async () => {
+  const storage = new MemoryStorage();
+  const first = new PlannerWorkflow({
+    fetcher: async (url) => {
+      const target = String(url);
+      if (target.endsWith("/starts/resolve")) return json(resolution);
+      if (target.includes("/confirm")) return json({ confirmed_start: resolution.candidate_network_point });
+      throw new TypeError("response lost after acceptance");
+    },
+    storage, csrfToken: () => "csrf", currentRevision: () => 1,
+    newIdempotencyKey: () => "tamper-key", schedule: () => 1,
+    cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  await first.submit(request, proposed);
+  await first.confirmAndStart();
+  const stored = JSON.parse(storage.getItem(PENDING_CREATION_STORAGE_KEY)!);
+  stored.body = JSON.stringify({ ...JSON.parse(stored.body), resolved_start_id: jobId });
+  storage.setItem(PENDING_CREATION_STORAGE_KEY, JSON.stringify(stored));
+
+  let fetched = false;
+  const refreshed = new PlannerWorkflow({
+    fetcher: async () => { fetched = true; throw new Error("must not replay tampered input"); },
+    storage, csrfToken: () => "csrf", currentRevision: () => 1,
+    newIdempotencyKey: () => "new-key", schedule: () => 1,
+    cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  assert.equal(await refreshed.resume(), false);
+  assert.equal(fetched, false);
+  assert.equal(storage.getItem(PENDING_CREATION_STORAGE_KEY), null);
 });
 
 test("invalid fields and unsupported coverage never create a job", async () => {

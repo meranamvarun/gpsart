@@ -1,6 +1,6 @@
 # TS-204 planner workflow handoff
 
-**Version:** 2  
+**Version:** 3
 **Producer:** TS-204  
 **Consumers:** TS-302, TS-304 and later browser journey work
 
@@ -8,7 +8,7 @@
 
 - `ProposedStart` is the single input model for manual coordinates, a selected search result, a map click, and explicit browser geolocation. Search integrations dispatch `gpsart:search-selection` with `{ point: { latitude, longitude }, label }`; free text is never geocoded or guessed in the browser.
 - `PlannerWorkflow` owns start resolution, explicit confirmation, idempotent creation, conditional polling, cancellation, refresh recovery, and stale-response fencing. Callers supply the current request revision and a CSRF-token reader.
-- After confirmation, creation retries reuse the exact serialized request and idempotency key. An ambiguous response is recovered before newer work can start, so a key is never paired with changed resolved-start or route inputs.
+- After confirmation, creation retries reuse the exact serialized request and idempotency key. `gpsart.pending-creation.v1` stores that private request in `sessionStorage` before the POST, is strictly decoded on refresh, and is removed only after the accepted active-job record is stored. An ambiguous response is therefore recovered before newer work can start, without pairing a key with changed inputs or replaying tampered data.
 - Exactly one accepted or uncertain job is followed at a time. If its request becomes stale, it remains owned and polled to a terminal `previousStatus`; the UI labels progress with that job's immutable request.
 - `gpsart.active-job.v1` is a private `sessionStorage` recovery record. It contains the owned job ID, immutable request, proposed start, expiry, and the last validated status representation/ETag. A newly accepted job keeps expiry explicitly unknown until its first authoritative status response. The record is not analytics or cross-session storage.
 - `gpsart.guest-policy.v1` in `localStorage` contains only public rotation/expiry policy. Reusing it while secure guest cookies exist prevents refresh from replacing job ownership; no credential is copied into browser storage.

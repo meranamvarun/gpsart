@@ -12,6 +12,7 @@ import {
 } from "../domain/start-resolution.ts";
 
 export const ACTIVE_JOB_STORAGE_KEY = "gpsart.active-job.v1";
+export const PENDING_CREATION_STORAGE_KEY = "gpsart.pending-creation.v1";
 const MIN_POLL_MILLISECONDS = 1_000;
 const MAX_POLL_MILLISECONDS = 8_000;
 
@@ -194,24 +195,38 @@ export class PlannerWorkflow {
 
   async resume(): Promise<boolean> {
     const active = loadActive(this.storage);
-    if (!active || active.expiresAtEpochSeconds !== null
-      && active.expiresAtEpochSeconds <= Math.floor(this.now() / 1_000)) {
-      this.removeActive();
+    if (active) {
+      this.removePendingCreation();
+      if (active.expiresAtEpochSeconds !== null
+        && active.expiresAtEpochSeconds <= Math.floor(this.now() / 1_000)) {
+        this.removeActive();
+        return false;
+      }
+      this.stopTimer();
+      const token = ++this.generation;
+      this.active = active;
+      const storedStatus = active.statusPayload === null ? null : decodeRouteJobStatus(active.statusPayload) ?? null;
+      this.update({
+        ...emptySnapshot(),
+        phase: "polling",
+        request: active.request,
+        proposedStart: active.proposedStart,
+        jobId: active.jobId,
+        status: storedStatus,
+      });
+      await this.poll(token);
+      return true;
+    }
+    this.removeActive();
+    const pending = loadPendingCreation(this.storage);
+    if (!pending) {
+      this.removePendingCreation();
       return false;
     }
-    this.stopTimer();
-    const token = ++this.generation;
-    this.active = active;
-    const storedStatus = active.statusPayload === null ? null : decodeRouteJobStatus(active.statusPayload) ?? null;
-    this.update({
-      ...emptySnapshot(),
-      phase: "polling",
-      request: active.request,
-      proposedStart: active.proposedStart,
-      jobId: active.jobId,
-      status: storedStatus,
-    });
-    await this.poll(token);
+    this.pendingCreation = pending;
+    this.submitFingerprint = JSON.stringify({ request: pending.request, proposedStart: pending.proposedStart });
+    this.submissionKey = pending.key;
+    await this.retryPendingCreation();
     return true;
   }
 
@@ -323,32 +338,17 @@ export class PlannerWorkflow {
         this.update({ ...this.value, phase: "error", issue: "invalid_response" });
         return;
       }
-      const template = templateIdentities[request.design];
-      if (!template) {
+      const body = creationBody(request, resolution, key);
+      if (!body) {
         this.update({ ...this.value, phase: "error", issue: "invalid_fields" });
         return;
       }
-      const requestedMetres = Math.round(request.distanceKm * 1_000);
-      const toleranceMetres = Math.round(requestedMetres * request.tolerancePercent / 100);
       this.pendingCreation = {
         request,
         proposedStart,
         resolution,
         key,
-        body: JSON.stringify({
-          resolved_start_id: resolution.id,
-          revision: request.revision,
-          idempotency_key: key,
-          requested_distance_metres: requestedMetres,
-          distance_tolerance_metres: toleranceMetres,
-          return_to_start: request.returnsToStart,
-          profile: profile(request.activity),
-          coverage_policy_version: resolution.coverage_policy_version,
-          template_id: template.id,
-          template_version: template.version,
-          map_data_version: resolution.data_version,
-          algorithm_version: "algorithm-v1",
-        }),
+        body,
       };
       await this.createPending(token);
     } catch {
@@ -381,6 +381,12 @@ export class PlannerWorkflow {
   private async createPending(token: number): Promise<void> {
     const pending = this.pendingCreation;
     if (!pending) return;
+    if (!storePendingCreation(this.storage, pending)) {
+      if (token === this.generation) {
+        this.update({ ...this.value, phase: "error", issue: "storage_unavailable" });
+      }
+      return;
+    }
     const csrf = this.csrfToken();
     if (!csrf) {
       if (token === this.generation) {
@@ -404,7 +410,7 @@ export class PlannerWorkflow {
     }
     const creationPayload = await responseJson(creation);
     if (!creation.ok) {
-      if (creation.status < 500) this.pendingCreation = null;
+      if (creation.status < 500) this.removePendingCreation();
       if (token === this.generation) {
         this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(creationPayload) ?? "invalid_response" });
       }
@@ -428,11 +434,12 @@ export class PlannerWorkflow {
       etag: null,
       statusPayload: null,
     };
-    this.pendingCreation = null;
     this.active = active;
     this.submitFingerprint = JSON.stringify({ request: pending.request, proposedStart: pending.proposedStart });
     this.submissionKey = pending.key;
-    storeActive(this.storage, active);
+    const activeStored = storeActive(this.storage, active);
+    this.pendingCreation = null;
+    if (activeStored) this.removePendingCreation();
     const pollToken = ++this.generation;
     this.update({
       ...this.value,
@@ -527,6 +534,11 @@ export class PlannerWorkflow {
     try { this.storage.removeItem(ACTIVE_JOB_STORAGE_KEY); } catch { /* storage is optional */ }
   }
 
+  private removePendingCreation(): void {
+    this.pendingCreation = null;
+    try { this.storage.removeItem(PENDING_CREATION_STORAGE_KEY); } catch { /* storage is optional */ }
+  }
+
   private update(next: PlannerWorkflowSnapshot): void {
     this.value = Object.freeze(next);
     this.onChange(this.value);
@@ -535,7 +547,7 @@ export class PlannerWorkflow {
   private resetLogicalSubmission(): void {
     this.submitFingerprint = null;
     this.submissionKey = null;
-    this.pendingCreation = null;
+    this.removePendingCreation();
   }
 
   private fenceAsyncStep(token: number, revision: number): boolean {
@@ -557,6 +569,27 @@ function emptySnapshot(): PlannerWorkflowSnapshot {
 
 function profile(activity: RouteRequest["activity"]): { activity: string; profile_version: ProfileVersion } {
   return { activity: activity.toLowerCase(), profile_version: profileVersions[activity] };
+}
+
+function creationBody(request: RouteRequest, resolution: StartResolution, key: string): string | null {
+  const template = templateIdentities[request.design];
+  if (!template || key.length < 1 || key.length > 200) return null;
+  const requestedMetres = Math.round(request.distanceKm * 1_000);
+  const toleranceMetres = Math.round(requestedMetres * request.tolerancePercent / 100);
+  return JSON.stringify({
+    resolved_start_id: resolution.id,
+    revision: request.revision,
+    idempotency_key: key,
+    requested_distance_metres: requestedMetres,
+    distance_tolerance_metres: toleranceMetres,
+    return_to_start: request.returnsToStart,
+    profile: profile(request.activity),
+    coverage_policy_version: resolution.coverage_policy_version,
+    template_id: template.id,
+    template_version: template.version,
+    map_data_version: resolution.data_version,
+    algorithm_version: "algorithm-v1",
+  });
 }
 
 function validRequest(request: RouteRequest): boolean {
@@ -635,8 +668,81 @@ function loadActive(storage: StoragePort): ActiveJob | null {
   }
 }
 
-function storeActive(storage: StoragePort, active: ActiveJob): void {
-  try { storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify(active)); } catch { /* polling remains available in memory */ }
+function storeActive(storage: StoragePort, active: ActiveJob): boolean {
+  try {
+    storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify(active));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function loadPendingCreation(storage: StoragePort): PendingCreation | null {
+  try {
+    const raw = storage.getItem(PENDING_CREATION_STORAGE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (!hasExactKeys(value, ["version", "request", "proposedStart", "resolution", "key", "body"])
+      || value.version !== 1
+      || typeof value.key !== "string" || value.key.length < 1 || value.key.length > 200
+      || typeof value.body !== "string"
+      || !value.request || typeof value.request !== "object" || Array.isArray(value.request)
+      || !value.proposedStart || typeof value.proposedStart !== "object" || Array.isArray(value.proposedStart)
+      || !value.resolution || typeof value.resolution !== "object" || Array.isArray(value.resolution)) return null;
+    const request = value.request as RouteRequest;
+    const proposedStart = value.proposedStart as ProposedStart;
+    const resolutionValue = value.resolution as Record<string, unknown>;
+    if (!hasExactKeys(request as unknown as Record<string, unknown>, [
+      "start", "activity", "design", "distanceKm", "tolerancePercent", "returnsToStart", "revision",
+    ])
+      || !hasExactProposedStartKeys(proposedStart)
+      || !hasExactKeys(resolutionValue, [
+        "id", "requested_point", "candidate_network_point", "snap_distance_metres", "profile_version",
+        "coverage_policy_version", "data_version", "expires_at_epoch_seconds", "confirmation_required",
+      ])) return null;
+    const resolution = decodeStartResolution(resolutionValue);
+    if (!validRequest(request) || !validProposedStart(proposedStart)
+      || request.start !== proposedStart.label
+      || !resolution || !isUuidV4(resolution.id)
+      || !resolution.coverage_policy_version || !resolution.data_version
+      || !hasExactPointKeys(resolution.requested_point) || !hasExactPointKeys(resolution.candidate_network_point)
+      || !samePoint(resolution.requested_point, proposedStart.point)
+      || resolution.profile_version !== profileVersions[request.activity]) return null;
+    const body = creationBody(request, resolution, value.key);
+    if (!body || body !== value.body) return null;
+    return { request, proposedStart, resolution, key: value.key, body };
+  } catch {
+    return null;
+  }
+}
+
+function storePendingCreation(storage: StoragePort, pending: PendingCreation): boolean {
+  const serialized = JSON.stringify({ version: 1, ...pending });
+  try {
+    storage.setItem(PENDING_CREATION_STORAGE_KEY, serialized);
+    return true;
+  } catch {
+    try { return storage.getItem(PENDING_CREATION_STORAGE_KEY) === serialized; } catch { return false; }
+  }
+}
+
+function hasExactProposedStartKeys(start: ProposedStart): boolean {
+  return hasExactKeys(
+    start as unknown as Record<string, unknown>,
+    start.source === "geolocation"
+      ? ["source", "label", "point", "accuracyMetres"]
+      : ["source", "label", "point"],
+  ) && hasExactPointKeys(start.point);
+}
+
+function hasExactPointKeys(value: unknown): boolean {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    && hasExactKeys(value as Record<string, unknown>, ["longitude", "latitude"]);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function isUuidV4(value: string): boolean {
