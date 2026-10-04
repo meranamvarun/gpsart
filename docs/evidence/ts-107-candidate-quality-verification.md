@@ -28,4 +28,4 @@
 - `node scripts/cargo.mjs run -p gpsart-routing --example ts107_benchmark`: regenerated both artifacts and the v2 benchmark report (2026-10-04).
 - `node scripts/cargo.mjs clippy -p gpsart-routing --all-targets -- -D warnings`: passed (2026-10-04).
 - `npm run factory:verify`: passed across Rust, TypeScript, factory, build, and packaging gates (2026-10-04).
-- Independent QA: pending.
+- Independent QA approved commit `da6c3e9`: the heart and HI are distinct, recognizable pilot traversals; the HI retains four identifiable artwork strokes, H crossbar/uprights, and separate I stem; the full canonical route remains visible and classified; the checksum/counts and residual-only advisory boundary were verified. Focused pilot, heart, and local-OSM tests passed 17/17, benchmark regeneration preserved geometry/metrics, and strict routing Clippy passed (2026-10-04).
