@@ -36,3 +36,14 @@ npm run factory:verify
 Developer result on 2026-10-04 before review: the focused suite passed 4/4, the complete routing suite passed 28/28, strict routing clippy passed, and the unchanged `npm run factory:verify` gate passed after a production build populated `dist`. The first factory run reproduced the documented pre-existing command-order issue: `test:sites` ran before `build` in the fresh worktree and returned nonzero; the same run then built successfully, and the unchanged canonical rerun passed every phase.
 
 Independent QA then found validation gaps despite the green gates: unverified provider access was accepted, orientation bounds were not enforced, fitting could outlive its deadline, via points were not reconciled with requested anchors, and provider `InvalidRequest` was misclassified as no-match. Regressions were added before each correction. The revised focused suite passes 7/7 and the complete routing suite passes 31/31; it now also exercises external and provider cancellation explicitly. The final independent rerun is recorded by QA below.
+
+## Final independent QA
+
+Reviewer `codex/qa-ts105` approved the revised implementation at `e2064a3` on 2026-10-04. The full story diff and rendered SVG evidence were inspected against every acceptance criterion and the routing guardrails. The review confirmed that the requested start and complete traversal remain explicit, repeated travel is retained and counted, illegal or structurally inconsistent routes are rejected, immutable orientation and bounded-search limits are enforced, provider-access uncertainty cannot be published as legal, cancellation and provider failures remain explicit, and unrealizable geometry returns `NoMatch` without a straight-line fallback.
+
+Independent commands and results:
+
+- `node scripts/cargo.mjs test -p gpsart-routing --test heart_candidate`: 7 passed.
+- `node scripts/cargo.mjs test -p gpsart-routing -- --test-threads=1`: 31 passed.
+- `node scripts/cargo.mjs clippy -p gpsart-routing --all-targets -- -D warnings`: passed with warnings denied.
+- `npm run factory:verify`: passed unchanged, including workspace formatting, clippy, tests, frontend checks, Sites checks, and production build.
