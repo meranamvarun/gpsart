@@ -1,0 +1,99 @@
+{
+  "schema_version": "gpsart-routing-benchmark-v1",
+  "cases": [
+    {
+      "case_id": "pilot-heart-001",
+      "pins": {
+        "map_version": "cubbon-park-osm-v1+c4a009bef6385175de8762d58ff604c42e7419c6795a2774466c6fcf49e0db48",
+        "profile_version": "walking-v1",
+        "template_id": "heart",
+        "template_version": 1,
+        "template_hash": "fd845f0c5a70b13347d99acf3d83801bb161684b474b6b4ac6d2815f4f251837",
+        "algorithm_version": "candidate-quality-v1"
+      },
+      "latency_millis": 15,
+      "provider_calls": 1,
+      "outcome": "match",
+      "valid": true,
+      "quality_band": "approximate_match",
+      "quality_metrics": {
+        "version": "candidate-quality-v1",
+        "full_trace_error_metres": 9,
+        "distance_error_metres": 120,
+        "repeated_ratio_basis_points": 8750,
+        "connector_ratio_basis_points": 0,
+        "manoeuvre_complexity": 143,
+        "identifying_feature_checks": [
+          {
+            "feature": "central indentation",
+            "present": false
+          },
+          {
+            "feature": "two upper lobes",
+            "present": false
+          },
+          {
+            "feature": "lower point",
+            "present": false
+          }
+        ],
+        "weights": {
+          "version": "candidate-quality-weights-v1",
+          "full_trace_error": 40,
+          "distance_error": 20,
+          "repeated_ratio": 15,
+          "connector_ratio": 15,
+          "manoeuvre_complexity": 10
+        }
+      },
+      "route_artifact": "docs/evidence/ts-107-pilot-heart.svg"
+    },
+    {
+      "case_id": "pilot-hi-001",
+      "pins": {
+        "map_version": "cubbon-park-osm-v1+c4a009bef6385175de8762d58ff604c42e7419c6795a2774466c6fcf49e0db48",
+        "profile_version": "walking-v1",
+        "template_id": "HI",
+        "template_version": 1,
+        "template_hash": "fb3de90a744cd704900c2d16f0172ed978a9f4ccfd2b02b4ab46f0584f4fcdec",
+        "algorithm_version": "candidate-quality-v1"
+      },
+      "latency_millis": 120,
+      "provider_calls": 1,
+      "outcome": "match",
+      "valid": true,
+      "quality_band": "approximate_match",
+      "quality_metrics": {
+        "version": "candidate-quality-v1",
+        "full_trace_error_metres": 12,
+        "distance_error_metres": 140,
+        "repeated_ratio_basis_points": 7500,
+        "connector_ratio_basis_points": 3961,
+        "manoeuvre_complexity": 71,
+        "identifying_feature_checks": [
+          {
+            "feature": "H crossbar",
+            "present": false
+          },
+          {
+            "feature": "parallel H uprights",
+            "present": false
+          },
+          {
+            "feature": "separate I stem",
+            "present": false
+          }
+        ],
+        "weights": {
+          "version": "candidate-quality-weights-v1",
+          "full_trace_error": 40,
+          "distance_error": 20,
+          "repeated_ratio": 15,
+          "connector_ratio": 15,
+          "manoeuvre_complexity": 10
+        }
+      },
+      "route_artifact": "docs/evidence/ts-107-pilot-hi.svg"
+    }
+  ]
+}
