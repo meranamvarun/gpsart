@@ -16,11 +16,18 @@ use thiserror::Error;
 use tokio::sync::Notify;
 
 mod heart;
+mod quality;
 
 pub use heart::{
     AnchorMatch, CandidateError, CandidatePart, CandidateSearch, CuratedTextCandidate,
     CuratedTextSearchConfig, CuratedTextSearchRequest, HeartCandidate, HeartSearchConfig,
     HeartSearchRequest, MatchOutcome, TraversalOccurrence,
+};
+pub use quality::{
+    BenchmarkError, BenchmarkHarness, BenchmarkOutcome, BenchmarkPins, BenchmarkRecord,
+    BenchmarkReport, CandidateQualityConfig, CandidateQualityMetrics, FeatureCheckOutcome,
+    IdentifyingFeatureCheck, QUALITY_VERSION, QualityBand, QualityError, QualityWeights,
+    ScoredCandidate, UserQuality, WEIGHTS_VERSION, rank_and_deduplicate, score_candidate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
