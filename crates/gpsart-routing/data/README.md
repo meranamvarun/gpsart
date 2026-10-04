@@ -10,4 +10,6 @@ The extraction script accepts only the exact v1 raw bytes, fails if a relation t
 node scripts/extract-osm-pilot-snapshot.mjs <raw-map.json> crates/gpsart-routing/data/cubbon-park-osm-v1.json crates/gpsart-routing/data/cubbon-park-osm-v1.sha256
 ```
 
+The repository `.gitattributes` forces these checksum-addressed artifacts to LF on every platform. A checkout that changes their line endings is a different byte sequence and must fail checksum validation.
+
 The original API permits bounding-box downloads and version-addressed element reads. Data is © OpenStreetMap contributors and licensed under ODbL 1.0. See the [OpenStreetMap API 0.6 documentation](https://wiki.openstreetmap.org/wiki/API_v0.6) and [copyright and licence page](https://www.openstreetmap.org/copyright).
