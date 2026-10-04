@@ -15,6 +15,13 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Notify;
 
+mod heart;
+
+pub use heart::{
+    AnchorMatch, CandidateError, CandidatePart, CandidateSearch, HeartCandidate, HeartSearchConfig,
+    HeartSearchRequest, MatchOutcome, TraversalOccurrence,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RouteQuery {
     pub profile: RouteRequestProfile,
@@ -489,6 +496,29 @@ impl ControlledGraph {
                 data_version: Some(self.data_version.clone()),
                 attribution: None,
             },
+        })
+    }
+
+    fn rewrite_point_query(&self, query: &RouteQuery) -> Result<RouteQuery, RoutingError> {
+        let ordered_anchors = query
+            .ordered_anchors
+            .iter()
+            .map(|anchor| match anchor {
+                RouteAnchor::NodeId(id) if self.nodes.contains_key(id) => {
+                    Ok(RouteAnchor::NodeId(id.clone()))
+                }
+                RouteAnchor::Point(point) => self
+                    .nodes
+                    .iter()
+                    .find_map(|(id, candidate)| (candidate == point).then(|| id.clone()))
+                    .map(RouteAnchor::NodeId)
+                    .ok_or(RoutingError::InvalidRequest),
+                RouteAnchor::NodeId(_) => Err(RoutingError::InvalidRequest),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(RouteQuery {
+            profile: query.profile,
+            ordered_anchors,
         })
     }
 
@@ -978,6 +1008,10 @@ impl AttemptControl {
         self.cancellation.notify.notify_waiters();
     }
 
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation.cancelled.load(Ordering::Acquire)
+    }
+
     async fn cancelled(&self) {
         loop {
             let notified = self.cancellation.notify.notified();
@@ -1318,7 +1352,8 @@ impl RouteProvider for ControlledGraph {
         query: &RouteQuery,
         control: &AttemptControl,
     ) -> Result<RoutePath, RoutingError> {
-        control.run(async { self.calculate(query) }).await
+        let query = self.rewrite_point_query(query)?;
+        control.run(async { self.calculate(&query) }).await
     }
 }
 

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 -3 34 24" width="680" height="480" role="img" aria-labelledby="title description">
+  <title id="title">TS-105 controlled legal heart-route preview</title>
+  <description id="description">The complete routed traversal starts at the confirmed point, follows a blue access leg, a red heart outline, and a dashed purple return leg over the same routed access edges.</description>
+  <rect x="-3" y="-3" width="34" height="24" fill="#fbfaf7"/>
+  <g transform="translate(0 18) scale(1 -1)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="0,0 10,0 20,1.6" stroke="#1677a7" stroke-width="0.8"/>
+    <polyline points="20,1.6 12.4,9 12.4,14.4 15.6,17.6 20,14 24.4,17.6 27.6,14.4 27.6,9 20,1.6" stroke="#d14256" stroke-width="0.8"/>
+    <polyline points="20,1.6 10,0 0,0" stroke="#713b91" stroke-width="0.35" stroke-dasharray="1.2 0.8"/>
+  </g>
+  <circle cx="0" cy="18" r="0.7" fill="#12212d"/>
+  <text x="0" y="20.4" font-family="sans-serif" font-size="1.4" fill="#12212d">confirmed start / finish</text>
+  <g transform="translate(0 22)">
+    <line x1="0" y1="0" x2="2" y2="0" stroke="#1677a7" stroke-width="0.8"/><text x="2.6" y="0.45" font-family="sans-serif" font-size="1.3">access</text>
+    <line x1="10" y1="0" x2="12" y2="0" stroke="#d14256" stroke-width="0.8"/><text x="12.6" y="0.45" font-family="sans-serif" font-size="1.3">artwork</text>
+    <line x1="20" y1="0" x2="22" y2="0" stroke="#713b91" stroke-width="0.5" stroke-dasharray="0.8 0.5"/><text x="22.6" y="0.45" font-family="sans-serif" font-size="1.3">return / retraced</text>
+  </g>
+</svg>
