@@ -4,7 +4,7 @@
     {
       "case_id": "pilot-heart-001",
       "pins": {
-        "map_version": "cubbon-park-osm-v2+49b985cef9e9ab9338c1a83a3a7d27cc9da2136743a5a968ffcd163bb7f58a37",
+        "map_version": "bengaluru-central-osm-v3+df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
         "profile_version": "walking-v1",
         "routing_policy_version": "osm-pedestrian-policy-v2",
         "template_id": "heart",
@@ -12,7 +12,7 @@
         "template_hash": "fd845f0c5a70b13347d99acf3d83801bb161684b474b6b4ac6d2815f4f251837",
         "algorithm_version": "candidate-quality-v1"
       },
-      "latency_millis": 190,
+      "latency_millis": 330,
       "provider_calls": 1,
       "outcome": "match",
       "valid": true,
@@ -52,7 +52,7 @@
     {
       "case_id": "pilot-hi-001",
       "pins": {
-        "map_version": "cubbon-park-osm-v2+49b985cef9e9ab9338c1a83a3a7d27cc9da2136743a5a968ffcd163bb7f58a37",
+        "map_version": "bengaluru-central-osm-v3+df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
         "profile_version": "walking-v1",
         "routing_policy_version": "osm-pedestrian-policy-v2",
         "template_id": "HI",
@@ -60,18 +60,18 @@
         "template_hash": "fb3de90a744cd704900c2d16f0172ed978a9f4ccfd2b02b4ab46f0584f4fcdec",
         "algorithm_version": "candidate-quality-v1"
       },
-      "latency_millis": 12,
+      "latency_millis": 1473,
       "provider_calls": 1,
       "outcome": "match",
       "valid": true,
       "quality_band": "approximate_match",
       "quality_metrics": {
         "version": "candidate-quality-v1",
-        "full_trace_error_metres": 11,
-        "distance_error_metres": 20,
-        "repeated_ratio_basis_points": 6473,
-        "connector_ratio_basis_points": 4157,
-        "manoeuvre_complexity": 33,
+        "full_trace_error_metres": 18,
+        "distance_error_metres": 6,
+        "repeated_ratio_basis_points": 2644,
+        "connector_ratio_basis_points": 3518,
+        "manoeuvre_complexity": 129,
         "identifying_feature_checks": [
           {
             "feature": "H crossbar",

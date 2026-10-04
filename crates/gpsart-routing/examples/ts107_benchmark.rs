@@ -14,8 +14,8 @@ use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-const SNAPSHOT: &[u8] = include_bytes!("../data/cubbon-park-osm-v2.json");
-const SNAPSHOT_HASH: &str = include_str!("../data/cubbon-park-osm-v2.sha256");
+const SNAPSHOT: &[u8] = include_bytes!("../data/bengaluru-central-osm-v3.json");
+const SNAPSHOT_HASH: &str = include_str!("../data/bengaluru-central-osm-v3.sha256");
 
 struct CountedGraph<'a> {
     graph: &'a LocalOsmGraph,
@@ -69,9 +69,9 @@ fn heart_config() -> HeartSearchConfig {
 
 fn text_config() -> HeartSearchConfig {
     HeartSearchConfig {
-        placement_offsets_metres: vec![(28, 10)],
-        scales_metres: vec![40],
-        rotations_degrees: vec![-15],
+        placement_offsets_metres: vec![(66, 24)],
+        scales_metres: vec![160],
+        rotations_degrees: vec![-3],
         max_placements: 1,
         max_scales: 1,
         max_rotations: 1,
@@ -79,13 +79,13 @@ fn text_config() -> HeartSearchConfig {
         max_provider_calls: 1,
         max_retained_points: 10_000,
         wall_time: Duration::from_secs(5),
-        anchor_tolerance_metres: 8,
+        anchor_tolerance_metres: 12,
     }
 }
 
 fn pins(template: &VersionedTemplate) -> BenchmarkPins {
     BenchmarkPins {
-        map_version: format!("cubbon-park-osm-v2+{}", SNAPSHOT_HASH.trim()),
+        map_version: format!("bengaluru-central-osm-v3+{}", SNAPSHOT_HASH.trim()),
         profile_version: "walking-v1".into(),
         routing_policy_version: "osm-pedestrian-policy-v2".into(),
         template_id: template.definition.id.clone(),
@@ -206,9 +206,9 @@ async fn main() {
         (
             "pilot-hi-001",
             "HI",
-            665_065_740,
-            -15,
-            400,
+            10_238_269_050,
+            -3,
+            1_000,
             text_config(),
             "docs/evidence/ts-107-pilot-hi.svg",
         ),

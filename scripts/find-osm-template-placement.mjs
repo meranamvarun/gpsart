@@ -1,9 +1,17 @@
 import { readFile } from "node:fs/promises";
 
-const [snapshotPath, templatePath, startIdText, toleranceText, minimumScaleText] = process.argv.slice(2);
+const [
+  snapshotPath,
+  templatePath,
+  startIdText,
+  toleranceText,
+  minimumScaleText,
+  searchRadiusText,
+  placementStepText,
+] = process.argv.slice(2);
 if (!snapshotPath || !templatePath || !startIdText || !toleranceText) {
   throw new Error(
-    "usage: node scripts/find-osm-template-placement.mjs <snapshot.json> <template.json> <start-node-id> <tolerance-metres>",
+    "usage: node scripts/find-osm-template-placement.mjs <snapshot.json> <template.json> <start-node-id> <tolerance-metres> [minimum-scale search-radius placement-step]",
   );
 }
 
@@ -12,9 +20,19 @@ const template = JSON.parse(await readFile(templatePath, "utf8"));
 const startId = Number(startIdText);
 const tolerance = Number(toleranceText);
 const minimumScale = minimumScaleText ? Number(minimumScaleText) : 40;
+const searchRadius = searchRadiusText ? Number(searchRadiusText) : 400;
+const placementStep = placementStepText ? Number(placementStepText) : 10;
 const nodesById = new Map(snapshot.nodes.map((node) => [node.id, node]));
 const start = nodesById.get(startId);
-if (!start || !Number.isFinite(tolerance) || tolerance <= 0) {
+if (
+  !start ||
+  !Number.isFinite(tolerance) ||
+  tolerance <= 0 ||
+  !Number.isSafeInteger(searchRadius) ||
+  searchRadius < 1 ||
+  !Number.isSafeInteger(placementStep) ||
+  placementStep < 1
+) {
   throw new Error("start node or tolerance is invalid");
 }
 
@@ -109,8 +127,8 @@ const rotations = template.id === "HI"
   ? Array.from({ length: 11 }, (_, index) => index * 3 - 15)
   : Array.from({ length: 25 }, (_, index) => index * 15 - 180);
 const matches = [];
-for (let east = -400; east <= 400; east += 10) {
-  for (let north = -400; north <= 400; north += 10) {
+for (let east = -searchRadius; east <= searchRadius; east += placementStep) {
+  for (let north = -searchRadius; north <= searchRadius; north += placementStep) {
     for (let scale = minimumScale; scale <= 400; scale += 10) {
       for (const rotation of rotations) {
         const radians = rotation * Math.PI / 180;
@@ -330,10 +348,22 @@ const routedMatches = matches
       left.maximumError / left.scale - right.maximumError / right.scale ||
       left.totalError / left.scale - right.totalError / right.scale,
   )
-  .slice(0, 2_000)
+  .slice(0, 20_000)
   .map(scoreRoute)
   .filter(Boolean)
-  .sort((left, right) => left.routeScore - right.routeScore || left.maximumError - right.maximumError);
+  .sort(
+    (left, right) =>
+      left.artworkError / left.scale - right.artworkError / right.scale ||
+      left.traceError / left.scale - right.traceError / right.scale ||
+      left.repeatedRatio - right.repeatedRatio ||
+      left.maximumError / left.scale - right.maximumError / right.scale ||
+      left.routeScore - right.routeScore,
+  );
 process.stdout.write(
-  `${JSON.stringify({ reachableNodes: reachable.size, matches: routedMatches.slice(0, 20) }, null, 2)}\n`,
+  `${JSON.stringify({
+    reachableNodes: reachable.size,
+    endpointMatches: matches.length,
+    routedMatches: routedMatches.length,
+    matches: routedMatches.slice(0, 20),
+  }, null, 2)}\n`,
 );

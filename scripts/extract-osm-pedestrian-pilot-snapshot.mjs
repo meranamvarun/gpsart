@@ -1,18 +1,36 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 
-const [inputPath, outputPath, checksumPath] = process.argv.slice(2);
+const [
+  inputPath,
+  outputPath,
+  checksumPath,
+  requestedSnapshotId,
+  requestedSourceUrl,
+  requestedRetrievedAt,
+  requestedRawSha256,
+] = process.argv.slice(2);
 if (!inputPath || !outputPath || !checksumPath) {
   throw new Error(
-    "usage: node scripts/extract-osm-pedestrian-pilot-snapshot.mjs <raw-map.json> <snapshot.json> <snapshot.sha256>",
+    "usage: node scripts/extract-osm-pedestrian-pilot-snapshot.mjs <raw-map.json> <snapshot.json> <snapshot.sha256> [snapshot-id source-url retrieved-at raw-sha256]",
   );
 }
 
-const SOURCE_URL =
+const SNAPSHOT_ID = requestedSnapshotId ?? "osm-cubbon-park-pedestrian-pilot-v2";
+const SOURCE_URL = requestedSourceUrl ??
   "https://api.openstreetmap.org/api/0.6/map.json?bbox=77.5885,12.9720,77.5980,12.9805";
-const RETRIEVED_AT = "2026-10-04T15:48:27.000Z";
-const EXPECTED_RAW_SHA256 =
+const RETRIEVED_AT = requestedRetrievedAt ?? "2026-10-04T15:48:27.000Z";
+const EXPECTED_RAW_SHA256 = requestedRawSha256 ??
   "e2fed0d29ef5f4536bd8e2abdbdc7888c5834e78582fdfe4ea403c466967a30f";
+if (!/^osm-[a-z0-9-]+$/.test(SNAPSHOT_ID)) {
+  throw new Error("snapshot id is invalid");
+}
+if (!SOURCE_URL.startsWith("https://api.openstreetmap.org/api/0.6/map.json?bbox=")) {
+  throw new Error("source URL must be an OpenStreetMap API 0.6 bounding-box request");
+}
+if (!RETRIEVED_AT.endsWith("Z") || !/^[0-9a-f]{64}$/.test(EXPECTED_RAW_SHA256)) {
+  throw new Error("capture timestamp or raw checksum is invalid");
+}
 const IMPLICIT_FOOT_HIGHWAYS = new Set(["footway", "pedestrian", "steps"]);
 const ALLOWED_ACCESS = new Set(["yes", "permissive", "designated"]);
 const DENIED_ACCESS = new Set(["no", "private"]);
@@ -123,7 +141,7 @@ nodes.forEach(requireVersioned);
 
 const snapshot = {
   schema_version: 1,
-  snapshot_id: "osm-cubbon-park-pedestrian-pilot-v2",
+  snapshot_id: SNAPSHOT_ID,
   source: {
     api: "OpenStreetMap API 0.6",
     url: SOURCE_URL,

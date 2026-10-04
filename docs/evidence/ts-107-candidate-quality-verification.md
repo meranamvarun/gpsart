@@ -8,15 +8,15 @@
 4. Ranking is deterministic, including equal-density representative selection and a zero limit. Traversal identity includes direction. Exact traversals and forward-collinear density variants collapse; reversals and distinct traversals remain eligible.
 5. The internal numeric penalty remains private. Serialized user quality contains only `strong_match` or `approximate_match`; tests assert no score or percentage field is exposed.
 6. `gpsart-routing-benchmark-v2` requires map, profile, routing-policy, template, and algorithm pins and records latency, provider calls, outcome, validity, quality metrics, and normalized route-artifact paths.
-7. The checksum-pinned Cubbon Park pedestrian snapshot produces distinct heart and HI end-to-end traversals. The heart has a visible indentation, two lobes, and lower point after a disclosed rigid orientation normalization. The HI case remains an honest `approximate_match`: ordered artwork/connector/access sections are visible, while all semantic feature checks stay unknown. Independent QA makes the final Stage-1 review decision.
+7. The checksum-pinned central-Bengaluru pedestrian snapshot produces distinct heart and HI end-to-end traversals. The heart has a visible indentation, two lobes, and lower point after a disclosed rigid orientation normalization. The HI pilot regression requires four artwork strokes, at most 10% scale deviation, parallel uprights and I stem, a perpendicular crossbar touching both H uprights, a separate I, and less than one-third retraced distance. It remains an honest `approximate_match`, and its general-purpose semantic feature checks stay unknown. Independent QA makes the final Stage-1 review decision.
 8. `route-use-advisory-v1` tells users to verify current legality, access, signs, closures, property restrictions, and changing conditions. The disclaimer is residual-risk disclosure, not a replacement for application validation.
 
 ## Benchmark evidence
 
 - Machine-readable results: `ts-107-benchmark-results.json`.
 - Reviewed normalized full traces: `ts-107-pilot-heart.svg` and `ts-107-pilot-hi.svg`.
-- Map pin: `cubbon-park-osm-v2+49b985cef9e9ab9338c1a83a3a7d27cc9da2136743a5a968ffcd163bb7f58a37`.
-- Raw OSM capture pin: `e2fed0d29ef5f4536bd8e2abdbdc7888c5834e78582fdfe4ea403c466967a30f`, retrieved `2026-10-04T15:48:27Z` from the source URL retained in the snapshot.
+- Map pin: `bengaluru-central-osm-v3+df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45`.
+- Raw OSM capture pin: `7c46353e917488745fb2de5cf24d0aadd89eeb2b53b4911b064225e36314be93`, retrieved `2026-10-04T18:08:15Z` from the source URL retained in the snapshot.
 - Profile and routing-policy pins: `walking-v1` and `osm-pedestrian-policy-v2`.
 - Template pins: immutable published `heart@1` and `HI@1` hashes.
 - Algorithm and weights: `candidate-quality-v1` and `candidate-quality-weights-v1`.
