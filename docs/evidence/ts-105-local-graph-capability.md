@@ -18,10 +18,12 @@ The checked-in extractor refuses any raw response other than the recorded bytes 
 2. Missing element versions invalidate the snapshot.
 3. Missing direction remains unknown and cannot be guessed as bidirectional.
 4. Explicit foot-only access accepts walking and rejects cycling; missing access stays visibly qualified as unknown.
-5. Coordinate anchors must exactly equal a retained graph node, including at E7 precision.
-6. Dateline distance calculation neither overflows integer arithmetic nor chooses the long arc.
-7. A real Bengaluru traversal succeeds for walking and cycling with 28 ordered segment occurrences, exact first/last nodes, per-edge distance reconciliation, immutable checksum provenance, and attribution.
-8. A four-anchor Bengaluru traversal repeats a real segment twice and counts both occurrences in the total.
+5. A one-profile explicit denial is enforced for that profile while the unspecified opposite profile remains qualified unknown.
+6. Profile-specific and general conditional access never becomes unconditional permission; conditional direction never becomes bidirectional.
+7. Coordinate anchors must exactly equal a retained graph node, including at E7 precision.
+8. Dateline distance calculation neither overflows integer arithmetic nor chooses the long arc.
+9. A real Bengaluru traversal succeeds for walking and cycling with 28 ordered segment occurrences, exact first/last nodes, per-edge distance reconciliation, immutable checksum provenance, and attribution.
+10. A four-anchor Bengaluru traversal repeats a real segment twice and counts both occurrences in the total.
 
 Existing controlled-graph tests independently cover forbidden turns, disconnected/grade-separated topology, profile exclusions, cancellation, deadlines, and the shared atomic attempt budget.
 
@@ -35,7 +37,7 @@ node scripts/cargo.mjs clippy -p gpsart-routing --all-targets -- -D warnings
 npm run factory:verify
 ```
 
-Before QA, the focused suite passed 7/7 and the full routing crate passed 23/23. The focused suite reported 0.01 seconds of test execution after compilation. The complete `factory:verify` gate passed, including Rust format/clippy/workspace tests/build, 8 factory tests, 48 TypeScript unit tests, 2 visual-shell tests, 4 Sites tests, typecheck, and production build.
+Before QA, the focused suite passed 8/8 and the full routing crate passed 24/24. The focused suite reported 0.02 seconds of test execution after compilation. The complete `factory:verify` gate passed, including Rust format/clippy/workspace tests/build, 8 factory tests, 48 TypeScript unit tests, 2 visual-shell tests, 4 Sites tests, typecheck, and production build.
 
 On the first fresh-worktree factory run, the existing command order executed `test:sites` before `build`, so its packaging assertion could not find an unbuilt `dist/client/index.html`; that same run then built the artifact successfully. An unchanged rerun of the canonical factory command passed every gate. No product assertion failed.
 

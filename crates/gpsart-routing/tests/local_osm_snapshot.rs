@@ -130,6 +130,159 @@ async fn preserves_explicit_unknowns_and_profile_access_instead_of_guessing() {
             .iter()
             .all(|edge| edge.qualifications.contains(&Qualification::AccessUnknown))
     );
+
+    for (explicit_denial, denied_profile, unknown_profile) in [
+        (
+            "\"bicycle\":\"no\",",
+            ActivityProfile::Cycling,
+            ActivityProfile::Walking,
+        ),
+        (
+            "\"foot\":\"no\",",
+            ActivityProfile::Walking,
+            ActivityProfile::Cycling,
+        ),
+    ] {
+        let tags = format!("{{\"highway\":\"unclassified\",{explicit_denial}\"oneway\":\"yes\"}}");
+        let bytes = inline_snapshot(&tags);
+        let graph = LocalOsmGraph::from_json(&bytes, &LocalOsmGraph::sha256_hex(&bytes)).unwrap();
+        assert_eq!(
+            graph
+                .route(
+                    &query(denied_profile, &["osm-node/1", "osm-node/3"]),
+                    &control(),
+                )
+                .await,
+            Err(RoutingError::NoPath)
+        );
+        let route = graph
+            .route(
+                &query(unknown_profile, &["osm-node/1", "osm-node/3"]),
+                &control(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            route
+                .edges
+                .iter()
+                .all(|edge| edge.qualifications.contains(&Qualification::AccessUnknown))
+        );
+    }
+
+    for (conditional_tag, affected_profile, unaffected_profile) in [
+        (
+            "\"foot:conditional\":\"no @ (sunset-sunrise)\",",
+            ActivityProfile::Walking,
+            ActivityProfile::Cycling,
+        ),
+        (
+            "\"bicycle:conditional\":\"no @ (sunset-sunrise)\",",
+            ActivityProfile::Cycling,
+            ActivityProfile::Walking,
+        ),
+    ] {
+        let tags = format!(
+            "{{\"highway\":\"unclassified\",\"foot\":\"yes\",\"bicycle\":\"yes\",{conditional_tag}\"oneway\":\"yes\"}}"
+        );
+        let bytes = inline_snapshot(&tags);
+        let graph = LocalOsmGraph::from_json(&bytes, &LocalOsmGraph::sha256_hex(&bytes)).unwrap();
+        let affected = graph
+            .route(
+                &query(affected_profile, &["osm-node/1", "osm-node/3"]),
+                &control(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            affected
+                .edges
+                .iter()
+                .all(|edge| edge.qualifications.contains(&Qualification::AccessUnknown))
+        );
+        let unaffected = graph
+            .route(
+                &query(unaffected_profile, &["osm-node/1", "osm-node/3"]),
+                &control(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            unaffected
+                .edges
+                .iter()
+                .all(|edge| !edge.qualifications.contains(&Qualification::AccessUnknown))
+        );
+    }
+
+    let general_conditional = inline_snapshot(
+        r#"{"highway":"unclassified","access":"yes","access:conditional":"no @ (sunset-sunrise)","oneway":"yes"}"#,
+    );
+    let graph = LocalOsmGraph::from_json(
+        &general_conditional,
+        &LocalOsmGraph::sha256_hex(&general_conditional),
+    )
+    .unwrap();
+    for profile in [ActivityProfile::Walking, ActivityProfile::Cycling] {
+        let route = graph
+            .route(&query(profile, &["osm-node/1", "osm-node/3"]), &control())
+            .await
+            .unwrap();
+        assert!(
+            route
+                .edges
+                .iter()
+                .all(|edge| edge.qualifications.contains(&Qualification::AccessUnknown))
+        );
+    }
+
+    let explicit_profile_denial = inline_snapshot(
+        r#"{"highway":"unclassified","access":"yes","access:conditional":"no @ (sunset-sunrise)","bicycle":"no","oneway":"yes"}"#,
+    );
+    let graph = LocalOsmGraph::from_json(
+        &explicit_profile_denial,
+        &LocalOsmGraph::sha256_hex(&explicit_profile_denial),
+    )
+    .unwrap();
+    assert_eq!(
+        graph
+            .route(
+                &query(ActivityProfile::Cycling, &["osm-node/1", "osm-node/3"]),
+                &control(),
+            )
+            .await,
+        Err(RoutingError::NoPath)
+    );
+    let walking = graph
+        .route(
+            &query(ActivityProfile::Walking, &["osm-node/1", "osm-node/3"]),
+            &control(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        walking
+            .edges
+            .iter()
+            .all(|edge| edge.qualifications.contains(&Qualification::AccessUnknown))
+    );
+}
+
+#[tokio::test]
+async fn conditional_oneway_is_unknown_and_never_treated_as_unconditionally_bidirectional() {
+    let bytes = inline_snapshot(
+        r#"{"highway":"unclassified","foot":"yes","bicycle":"yes","oneway":"no","oneway:conditional":"yes @ (sunset-sunrise)"}"#,
+    );
+    let graph = LocalOsmGraph::from_json(&bytes, &LocalOsmGraph::sha256_hex(&bytes)).unwrap();
+    assert_eq!(
+        graph
+            .route(
+                &query(ActivityProfile::Cycling, &["osm-node/3", "osm-node/1"]),
+                &control(),
+            )
+            .await,
+        Err(RoutingError::NoPath)
+    );
 }
 
 #[tokio::test]

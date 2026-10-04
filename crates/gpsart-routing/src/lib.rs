@@ -58,6 +58,10 @@ pub enum Access {
     Forbidden,
     FootOnly,
     BicycleOnly,
+    FootPermittedBicycleUnknown,
+    FootForbiddenBicycleUnknown,
+    FootUnknownBicyclePermitted,
+    FootUnknownBicycleForbidden,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -151,13 +155,9 @@ pub fn evaluate_edge(
         return Eligibility::Ineligible(IneligibleReason::Steps);
     }
 
-    match (profile.access_policy, edge.access) {
-        (_, Metadata::Known(Access::Forbidden))
-        | (AccessPolicy::Cycling, Metadata::Known(Access::FootOnly))
-        | (AccessPolicy::Foot, Metadata::Known(Access::BicycleOnly)) => {
-            return Eligibility::Ineligible(IneligibleReason::AccessForbidden);
-        }
-        _ => {}
+    let profile_access = access_for_profile(profile.access_policy, edge.access);
+    if profile_access == ProfileAccess::Forbidden {
+        return Eligibility::Ineligible(IneligibleReason::AccessForbidden);
     }
 
     match (edge.direction, traversal) {
@@ -172,7 +172,7 @@ pub fn evaluate_edge(
     }
 
     let mut qualifications = Vec::new();
-    if edge.access == Metadata::Unknown {
+    if profile_access == ProfileAccess::Unknown {
         qualifications.push(Qualification::AccessUnknown);
     }
     if edge.surface == Metadata::Unknown {
@@ -194,6 +194,45 @@ pub fn evaluate_edge(
         qualifications.push(Qualification::MotorroadUnknown);
     }
     Eligibility::Eligible { qualifications }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProfileAccess {
+    Permitted,
+    Forbidden,
+    Unknown,
+}
+
+fn access_for_profile(policy: AccessPolicy, access: Metadata<Access>) -> ProfileAccess {
+    match (policy, access) {
+        (_, Metadata::Unknown) => ProfileAccess::Unknown,
+        (_, Metadata::Known(Access::Permitted))
+        | (AccessPolicy::Foot, Metadata::Known(Access::FootOnly))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::BicycleOnly))
+        | (AccessPolicy::Foot, Metadata::Known(Access::FootPermittedBicycleUnknown))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::FootUnknownBicyclePermitted)) => {
+            ProfileAccess::Permitted
+        }
+        (_, Metadata::Known(Access::Forbidden))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::FootOnly))
+        | (AccessPolicy::Foot, Metadata::Known(Access::BicycleOnly))
+        | (AccessPolicy::Foot, Metadata::Known(Access::FootForbiddenBicycleUnknown))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::FootUnknownBicycleForbidden)) => {
+            ProfileAccess::Forbidden
+        }
+        (
+            AccessPolicy::Cycling,
+            Metadata::Known(
+                Access::FootPermittedBicycleUnknown | Access::FootForbiddenBicycleUnknown,
+            ),
+        )
+        | (
+            AccessPolicy::Foot,
+            Metadata::Known(
+                Access::FootUnknownBicyclePermitted | Access::FootUnknownBicycleForbidden,
+            ),
+        ) => ProfileAccess::Unknown,
+    }
 }
 
 pub const fn evaluate_turn(
@@ -793,15 +832,50 @@ fn osm_edge_metadata(tags: &HashMap<String, String>) -> EdgeMetadata {
 }
 
 fn osm_access(tags: &HashMap<String, String>) -> Metadata<Access> {
+    let has_general_conditional = tags.contains_key("access:conditional");
     let general = osm_permission(tags.get("access").map(String::as_str));
-    let foot = osm_permission(tags.get("foot").map(String::as_str)).or(general);
-    let bicycle = osm_permission(tags.get("bicycle").map(String::as_str)).or(general);
+    let foot = osm_profile_permission(
+        tags,
+        "foot",
+        "foot:conditional",
+        general,
+        has_general_conditional,
+    );
+    let bicycle = osm_profile_permission(
+        tags,
+        "bicycle",
+        "bicycle:conditional",
+        general,
+        has_general_conditional,
+    );
     match (foot, bicycle) {
         (Some(true), Some(true)) => Metadata::Known(Access::Permitted),
         (Some(true), Some(false)) => Metadata::Known(Access::FootOnly),
         (Some(false), Some(true)) => Metadata::Known(Access::BicycleOnly),
         (Some(false), Some(false)) => Metadata::Known(Access::Forbidden),
-        _ => Metadata::Unknown,
+        (Some(true), None) => Metadata::Known(Access::FootPermittedBicycleUnknown),
+        (Some(false), None) => Metadata::Known(Access::FootForbiddenBicycleUnknown),
+        (None, Some(true)) => Metadata::Known(Access::FootUnknownBicyclePermitted),
+        (None, Some(false)) => Metadata::Known(Access::FootUnknownBicycleForbidden),
+        (None, None) => Metadata::Unknown,
+    }
+}
+
+fn osm_profile_permission(
+    tags: &HashMap<String, String>,
+    profile_key: &str,
+    conditional_key: &str,
+    general: Option<bool>,
+    has_general_conditional: bool,
+) -> Option<bool> {
+    if tags.contains_key(conditional_key) {
+        None
+    } else if let Some(value) = tags.get(profile_key) {
+        osm_permission(Some(value))
+    } else if has_general_conditional {
+        None
+    } else {
+        general
     }
 }
 
@@ -814,7 +888,12 @@ fn osm_permission(value: Option<&str>) -> Option<bool> {
 }
 
 fn osm_direction(tags: &HashMap<String, String>) -> Metadata<Direction> {
-    if tags.contains_key("oneway:foot") || tags.contains_key("oneway:bicycle") {
+    if tags.contains_key("oneway:foot")
+        || tags.contains_key("oneway:bicycle")
+        || tags.contains_key("oneway:conditional")
+        || tags.contains_key("oneway:foot:conditional")
+        || tags.contains_key("oneway:bicycle:conditional")
+    {
         return Metadata::Unknown;
     }
     match tags.get("oneway").map(String::as_str) {

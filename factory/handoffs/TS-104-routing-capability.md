@@ -9,6 +9,7 @@
 
 - `RouteProvider::route` accepts a versioned profile, ordered anchors, and `AttemptControl`.
 - `RoutePath` returns ordered edge occurrences, canonical distance, ordered geometry, manoeuvres, and provider/data/attribution provenance. Repeated edge IDs remain repeated occurrences.
+- `Access` preserves profile-specific partial knowledge, so an explicit denial for one activity cannot be collapsed into shared unknown access or an invented denial for the other activity.
 - `ControlledGraph` is deterministic test infrastructure. It enforces direction, forbidden turns, activity access, component separation, and graph topology at grade-separated crossings.
 - `AttemptControl` propagates cancellation and a per-call deadline and atomically limits attempts. `route_with_retries` cannot exceed that shared budget.
 - `ValhallaAdapter` accepts coordinate anchors, maps walking/running to pedestrian and cycling to bicycle, requests exact `edge_walk` attribution, decodes polyline6 geometry, and rejects absent/malformed edges. Edge intervals must cover the geometry contiguously and in order, trace distances must reconcile with the summary within documented provider-rounding tolerance, and manoeuvres must be present, ordered, and bounded. It marks access as unverified.
@@ -17,7 +18,7 @@
 
 ADR `docs/adr-001-routing-provider-spike.md` records **replace/evaluate local graph**. The public Valhalla setup remains rejected because it did not provide exact edge attribution for returned multi-anchor routes on an immutable snapshot. Diagnostic `map_snap` output remains prohibited.
 
-ADR `docs/adr-002-adopt-local-osm-pilot-graph.md` now adopts `LocalOsmGraph` for Stage 1 feasibility. It loads a checksum-pinned, versioned OSM-derived artifact, requires exact retained-node anchors, returns ordered segment occurrences and checksum provenance, and exposes unknown access/direction rather than guessing. Real walking and cycling traversals plus repeated occurrences are covered on the pinned Bengaluru pilot bytes. This resolves the local-graph prerequisite and unblocks TS-105 within the documented pilot boundary; it is not city-wide production coverage.
+ADR `docs/adr-002-adopt-local-osm-pilot-graph.md` now adopts `LocalOsmGraph` for Stage 1 feasibility. It loads a checksum-pinned, versioned OSM-derived artifact, requires exact retained-node anchors, returns ordered segment occurrences and checksum provenance, and exposes unknown access/direction rather than guessing. Profile-specific partial access and unsupported conditional access remain unknown for only the affected profile; conditional direction is ineligible. Real walking and cycling traversals plus repeated occurrences are covered on the pinned Bengaluru pilot bytes. This resolves the local-graph prerequisite and unblocks TS-105 within the documented pilot boundary; it is not city-wide production coverage.
 
 ## Verification
 
