@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use gpsart_domain::{
     AccessPolicy, ActivityProfileDefinition, Metres, RouteRequestProfile, profile_for,
 };
+use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::{
@@ -56,6 +58,10 @@ pub enum Access {
     Forbidden,
     FootOnly,
     BicycleOnly,
+    FootPermittedBicycleUnknown,
+    FootForbiddenBicycleUnknown,
+    FootUnknownBicyclePermitted,
+    FootUnknownBicycleForbidden,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -149,13 +155,9 @@ pub fn evaluate_edge(
         return Eligibility::Ineligible(IneligibleReason::Steps);
     }
 
-    match (profile.access_policy, edge.access) {
-        (_, Metadata::Known(Access::Forbidden))
-        | (AccessPolicy::Cycling, Metadata::Known(Access::FootOnly))
-        | (AccessPolicy::Foot, Metadata::Known(Access::BicycleOnly)) => {
-            return Eligibility::Ineligible(IneligibleReason::AccessForbidden);
-        }
-        _ => {}
+    let profile_access = access_for_profile(profile.access_policy, edge.access);
+    if profile_access == ProfileAccess::Forbidden {
+        return Eligibility::Ineligible(IneligibleReason::AccessForbidden);
     }
 
     match (edge.direction, traversal) {
@@ -170,7 +172,7 @@ pub fn evaluate_edge(
     }
 
     let mut qualifications = Vec::new();
-    if edge.access == Metadata::Unknown {
+    if profile_access == ProfileAccess::Unknown {
         qualifications.push(Qualification::AccessUnknown);
     }
     if edge.surface == Metadata::Unknown {
@@ -192,6 +194,45 @@ pub fn evaluate_edge(
         qualifications.push(Qualification::MotorroadUnknown);
     }
     Eligibility::Eligible { qualifications }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProfileAccess {
+    Permitted,
+    Forbidden,
+    Unknown,
+}
+
+fn access_for_profile(policy: AccessPolicy, access: Metadata<Access>) -> ProfileAccess {
+    match (policy, access) {
+        (_, Metadata::Unknown) => ProfileAccess::Unknown,
+        (_, Metadata::Known(Access::Permitted))
+        | (AccessPolicy::Foot, Metadata::Known(Access::FootOnly))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::BicycleOnly))
+        | (AccessPolicy::Foot, Metadata::Known(Access::FootPermittedBicycleUnknown))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::FootUnknownBicyclePermitted)) => {
+            ProfileAccess::Permitted
+        }
+        (_, Metadata::Known(Access::Forbidden))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::FootOnly))
+        | (AccessPolicy::Foot, Metadata::Known(Access::BicycleOnly))
+        | (AccessPolicy::Foot, Metadata::Known(Access::FootForbiddenBicycleUnknown))
+        | (AccessPolicy::Cycling, Metadata::Known(Access::FootUnknownBicycleForbidden)) => {
+            ProfileAccess::Forbidden
+        }
+        (
+            AccessPolicy::Cycling,
+            Metadata::Known(
+                Access::FootPermittedBicycleUnknown | Access::FootForbiddenBicycleUnknown,
+            ),
+        )
+        | (
+            AccessPolicy::Foot,
+            Metadata::Known(
+                Access::FootUnknownBicyclePermitted | Access::FootUnknownBicycleForbidden,
+            ),
+        ) => ProfileAccess::Unknown,
+    }
 }
 
 pub const fn evaluate_turn(
@@ -536,6 +577,375 @@ impl ControlledGraph {
         path.reverse();
         Ok(path)
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalOsmGraph {
+    graph: ControlledGraph,
+    points_by_osm_id: HashMap<u64, GeoPointE7>,
+    node_ids_by_point: HashMap<GeoPointE7, String>,
+    data_version: String,
+    attribution: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OsmSnapshot {
+    schema_version: u32,
+    snapshot_id: String,
+    source: OsmSnapshotSource,
+    nodes: Vec<OsmSnapshotNode>,
+    ways: Vec<OsmSnapshotWay>,
+    forbidden_turns: Vec<OsmSnapshotTurn>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OsmSnapshotSource {
+    api: String,
+    url: String,
+    retrieved_at: String,
+    raw_sha256: String,
+    attribution: String,
+    license: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OsmSnapshotNode {
+    id: u64,
+    version: u32,
+    timestamp: String,
+    latitude_e7: i32,
+    longitude_e7: i32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OsmSnapshotWay {
+    id: u64,
+    version: u32,
+    timestamp: String,
+    nodes: Vec<u64>,
+    tags: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OsmSnapshotTurn {
+    relation_id: u64,
+    relation_version: u32,
+    incoming_edge: String,
+    outgoing_edge: String,
+}
+
+impl LocalOsmGraph {
+    pub fn from_json(bytes: &[u8], expected_sha256: &str) -> Result<Self, RoutingError> {
+        let actual_sha256 = Self::sha256_hex(bytes);
+        if !is_sha256(expected_sha256) || !actual_sha256.eq_ignore_ascii_case(expected_sha256) {
+            return Err(RoutingError::SnapshotChecksumMismatch);
+        }
+        let snapshot: OsmSnapshot =
+            serde_json::from_slice(bytes).map_err(|_| RoutingError::InvalidSnapshot)?;
+        validate_snapshot_header(&snapshot)?;
+
+        let mut nodes = Vec::with_capacity(snapshot.nodes.len());
+        let mut points_by_osm_id = HashMap::with_capacity(snapshot.nodes.len());
+        let mut node_ids_by_point = HashMap::with_capacity(snapshot.nodes.len());
+        for node in snapshot.nodes {
+            if node.id == 0
+                || node.version == 0
+                || !is_utc_timestamp(&node.timestamp)
+                || !(-900_000_000..=900_000_000).contains(&node.latitude_e7)
+                || !(-1_800_000_000..=1_800_000_000).contains(&node.longitude_e7)
+            {
+                return Err(RoutingError::InvalidSnapshot);
+            }
+            let point = GeoPointE7::new(node.latitude_e7, node.longitude_e7);
+            let id = osm_node_id(node.id);
+            if points_by_osm_id.insert(node.id, point).is_some()
+                || node_ids_by_point.insert(point, id.clone()).is_some()
+            {
+                return Err(RoutingError::InvalidSnapshot);
+            }
+            nodes.push(ControlledNode::new(id, point));
+        }
+        if nodes.len() < 2 {
+            return Err(RoutingError::InvalidSnapshot);
+        }
+
+        let mut seen_ways = HashSet::new();
+        let mut edges = Vec::new();
+        for way in snapshot.ways {
+            if way.id == 0
+                || way.version == 0
+                || !is_utc_timestamp(&way.timestamp)
+                || way.nodes.len() < 2
+                || !seen_ways.insert(way.id)
+            {
+                return Err(RoutingError::InvalidSnapshot);
+            }
+            let metadata = osm_edge_metadata(&way.tags);
+            for (segment_index, pair) in way.nodes.windows(2).enumerate() {
+                let from = points_by_osm_id
+                    .get(&pair[0])
+                    .ok_or(RoutingError::InvalidSnapshot)?;
+                let to = points_by_osm_id
+                    .get(&pair[1])
+                    .ok_or(RoutingError::InvalidSnapshot)?;
+                let distance =
+                    great_circle_metres(*from, *to).ok_or(RoutingError::InvalidSnapshot)?;
+                edges.push(ControlledEdge::new(
+                    osm_edge_id(way.id, way.version, segment_index),
+                    osm_node_id(pair[0]),
+                    osm_node_id(pair[1]),
+                    distance,
+                    metadata.clone(),
+                ));
+            }
+        }
+        if edges.is_empty() {
+            return Err(RoutingError::InvalidSnapshot);
+        }
+
+        let edge_ids: HashSet<_> = edges.iter().map(|edge| edge.id.as_str()).collect();
+        let mut relation_ids = HashSet::new();
+        let turns = snapshot
+            .forbidden_turns
+            .into_iter()
+            .map(|turn| {
+                if turn.relation_id == 0
+                    || turn.relation_version == 0
+                    || !relation_ids.insert(turn.relation_id)
+                    || !edge_ids.contains(turn.incoming_edge.as_str())
+                    || !edge_ids.contains(turn.outgoing_edge.as_str())
+                {
+                    return Err(RoutingError::InvalidSnapshot);
+                }
+                Ok(TurnRule::forbidden(turn.incoming_edge, turn.outgoing_edge))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let data_version = format!("{}:sha256:{}", snapshot.snapshot_id, actual_sha256);
+        let attribution = format!(
+            "{} ({})",
+            snapshot.source.attribution,
+            snapshot.source.license.replace('-', " ")
+        );
+        let graph = ControlledGraph::new(data_version.clone(), nodes, edges, turns)
+            .map_err(|_| RoutingError::InvalidSnapshot)?;
+        Ok(Self {
+            graph,
+            points_by_osm_id,
+            node_ids_by_point,
+            data_version,
+            attribution,
+        })
+    }
+
+    pub fn sha256_hex(bytes: &[u8]) -> String {
+        format!("{:x}", Sha256::digest(bytes))
+    }
+
+    pub fn point(&self, osm_node_id: u64) -> Option<GeoPointE7> {
+        self.points_by_osm_id.get(&osm_node_id).copied()
+    }
+
+    fn rewrite_query(&self, query: &RouteQuery) -> Result<RouteQuery, RoutingError> {
+        let ordered_anchors = query
+            .ordered_anchors
+            .iter()
+            .map(|anchor| match anchor {
+                RouteAnchor::NodeId(id) => Ok(RouteAnchor::NodeId(id.clone())),
+                RouteAnchor::Point(point) => self
+                    .node_ids_by_point
+                    .get(point)
+                    .cloned()
+                    .map(RouteAnchor::NodeId)
+                    .ok_or(RoutingError::InvalidRequest),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(RouteQuery {
+            profile: query.profile,
+            ordered_anchors,
+        })
+    }
+}
+
+fn validate_snapshot_header(snapshot: &OsmSnapshot) -> Result<(), RoutingError> {
+    if snapshot.schema_version != 1
+        || snapshot.snapshot_id.trim().is_empty()
+        || snapshot.source.api != "OpenStreetMap API 0.6"
+        || !snapshot
+            .source
+            .url
+            .starts_with("https://api.openstreetmap.org/api/0.6/")
+        || !is_utc_timestamp(&snapshot.source.retrieved_at)
+        || !is_sha256(&snapshot.source.raw_sha256)
+        || snapshot.source.attribution != "OpenStreetMap contributors"
+        || snapshot.source.license != "ODbL-1.0"
+    {
+        return Err(RoutingError::InvalidSnapshot);
+    }
+    Ok(())
+}
+
+fn is_utc_timestamp(value: &str) -> bool {
+    value.len() >= 20 && value.ends_with('Z') && value.contains('T')
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn osm_node_id(id: u64) -> String {
+    format!("osm-node/{id}")
+}
+
+fn osm_edge_id(way_id: u64, way_version: u32, segment_index: usize) -> String {
+    format!("osm-way/{way_id}/v{way_version}/segment/{segment_index}")
+}
+
+fn osm_edge_metadata(tags: &HashMap<String, String>) -> EdgeMetadata {
+    EdgeMetadata {
+        access: osm_access(tags),
+        direction: osm_direction(tags),
+        surface: osm_surface(tags),
+        elevation_metres: Metadata::Unknown,
+        steps: match tags.get("highway").map(String::as_str) {
+            Some("steps") => Metadata::Known(true),
+            Some(_) => Metadata::Known(false),
+            None => Metadata::Unknown,
+        },
+        ferry: match tags.get("route").map(String::as_str) {
+            Some("ferry") => Metadata::Known(true),
+            Some(_) => Metadata::Known(false),
+            None => Metadata::Unknown,
+        },
+        motorway: match tags.get("highway").map(String::as_str) {
+            Some("motorway" | "motorway_link") => Metadata::Known(true),
+            Some(_) => Metadata::Known(false),
+            None => Metadata::Unknown,
+        },
+        motorroad: osm_yes_no(tags.get("motorroad").map(String::as_str)),
+    }
+}
+
+fn osm_access(tags: &HashMap<String, String>) -> Metadata<Access> {
+    let has_general_conditional = tags.contains_key("access:conditional");
+    let general = osm_permission(tags.get("access").map(String::as_str));
+    let foot = osm_profile_permission(
+        tags,
+        "foot",
+        "foot:conditional",
+        general,
+        has_general_conditional,
+    );
+    let bicycle = osm_profile_permission(
+        tags,
+        "bicycle",
+        "bicycle:conditional",
+        general,
+        has_general_conditional,
+    );
+    match (foot, bicycle) {
+        (Some(true), Some(true)) => Metadata::Known(Access::Permitted),
+        (Some(true), Some(false)) => Metadata::Known(Access::FootOnly),
+        (Some(false), Some(true)) => Metadata::Known(Access::BicycleOnly),
+        (Some(false), Some(false)) => Metadata::Known(Access::Forbidden),
+        (Some(true), None) => Metadata::Known(Access::FootPermittedBicycleUnknown),
+        (Some(false), None) => Metadata::Known(Access::FootForbiddenBicycleUnknown),
+        (None, Some(true)) => Metadata::Known(Access::FootUnknownBicyclePermitted),
+        (None, Some(false)) => Metadata::Known(Access::FootUnknownBicycleForbidden),
+        (None, None) => Metadata::Unknown,
+    }
+}
+
+fn osm_profile_permission(
+    tags: &HashMap<String, String>,
+    profile_key: &str,
+    conditional_key: &str,
+    general: Option<bool>,
+    has_general_conditional: bool,
+) -> Option<bool> {
+    if tags.contains_key(conditional_key) {
+        None
+    } else if let Some(value) = tags.get(profile_key) {
+        osm_permission(Some(value))
+    } else if has_general_conditional {
+        None
+    } else {
+        general
+    }
+}
+
+fn osm_permission(value: Option<&str>) -> Option<bool> {
+    match value {
+        Some("yes" | "permissive" | "designated") => Some(true),
+        Some("no" | "private") => Some(false),
+        _ => None,
+    }
+}
+
+fn osm_direction(tags: &HashMap<String, String>) -> Metadata<Direction> {
+    if tags.contains_key("oneway:foot")
+        || tags.contains_key("oneway:bicycle")
+        || tags.contains_key("oneway:conditional")
+        || tags.contains_key("oneway:foot:conditional")
+        || tags.contains_key("oneway:bicycle:conditional")
+    {
+        return Metadata::Unknown;
+    }
+    match tags.get("oneway").map(String::as_str) {
+        Some("yes" | "1" | "true") => Metadata::Known(Direction::ForwardOnly),
+        Some("-1" | "reverse") => Metadata::Known(Direction::ReverseOnly),
+        Some("no" | "0" | "false") => Metadata::Known(Direction::Both),
+        _ => Metadata::Unknown,
+    }
+}
+
+fn osm_surface(tags: &HashMap<String, String>) -> Metadata<Surface> {
+    match tags.get("surface").map(String::as_str) {
+        Some("asphalt" | "concrete" | "concrete:plates" | "paving_stones" | "sett" | "paved") => {
+            Metadata::Known(Surface::Paved)
+        }
+        Some(
+            "compacted" | "dirt" | "earth" | "fine_gravel" | "grass" | "gravel" | "ground" | "mud"
+            | "sand" | "unpaved" | "woodchips",
+        ) => Metadata::Known(Surface::Unpaved),
+        _ => Metadata::Unknown,
+    }
+}
+
+fn osm_yes_no(value: Option<&str>) -> Metadata<bool> {
+    match value {
+        Some("yes" | "1" | "true") => Metadata::Known(true),
+        Some("no" | "0" | "false") => Metadata::Known(false),
+        _ => Metadata::Unknown,
+    }
+}
+
+fn great_circle_metres(from: GeoPointE7, to: GeoPointE7) -> Option<u32> {
+    const EARTH_MEAN_RADIUS_METRES: f64 = 6_371_008.8;
+    let latitude_1 = (from.latitude_e7 as f64 / 10_000_000.0).to_radians();
+    let latitude_2 = (to.latitude_e7 as f64 / 10_000_000.0).to_radians();
+    let delta_latitude = latitude_2 - latitude_1;
+    let mut delta_longitude_degrees =
+        (f64::from(to.longitude_e7) - f64::from(from.longitude_e7)) / 10_000_000.0;
+    if delta_longitude_degrees > 180.0 {
+        delta_longitude_degrees -= 360.0;
+    } else if delta_longitude_degrees < -180.0 {
+        delta_longitude_degrees += 360.0;
+    }
+    let delta_longitude = delta_longitude_degrees.to_radians();
+    let haversine = (delta_latitude / 2.0).sin().powi(2)
+        + latitude_1.cos() * latitude_2.cos() * (delta_longitude / 2.0).sin().powi(2);
+    let metres = 2.0 * EARTH_MEAN_RADIUS_METRES * haversine.clamp(0.0, 1.0).sqrt().asin();
+    let rounded = metres.round();
+    if !rounded.is_finite() || rounded < 1.0 || rounded > u32::MAX as f64 {
+        return None;
+    }
+    Some(rounded as u32)
 }
 
 #[derive(Debug)]
@@ -912,6 +1322,24 @@ impl RouteProvider for ControlledGraph {
     }
 }
 
+#[async_trait]
+impl RouteProvider for LocalOsmGraph {
+    async fn route(
+        &self,
+        query: &RouteQuery,
+        control: &AttemptControl,
+    ) -> Result<RoutePath, RoutingError> {
+        let query = self.rewrite_query(query)?;
+        let mut route = control.run(async { self.graph.calculate(&query) }).await?;
+        route.provenance = RouteProvenance {
+            provider: "local-osm-snapshot".into(),
+            data_version: Some(self.data_version.clone()),
+            attribution: Some(self.attribution.clone()),
+        };
+        Ok(route)
+    }
+}
+
 pub async fn route_with_retries<P: RouteProvider>(
     provider: &P,
     query: &RouteQuery,
@@ -944,6 +1372,10 @@ pub enum RoutingError {
     InvalidRequest,
     #[error("controlled graph fixture is invalid")]
     InvalidGraph,
+    #[error("routing snapshot checksum does not match its manifest")]
+    SnapshotChecksumMismatch,
+    #[error("routing snapshot is invalid or unsupported")]
+    InvalidSnapshot,
     #[error("routing was cancelled")]
     Cancelled,
     #[error("routing deadline was exceeded")]

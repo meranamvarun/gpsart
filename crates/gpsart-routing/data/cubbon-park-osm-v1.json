@@ -1,0 +1,447 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "osm-cubbon-park-pilot-v1",
+  "source": {
+    "api": "OpenStreetMap API 0.6",
+    "url": "https://api.openstreetmap.org/api/0.6/map.json?bbox=77.5885,12.9720,77.5980,12.9805",
+    "retrieved_at": "2026-10-04T03:11:34Z",
+    "raw_sha256": "3828e4099d571653e7cd1ee05caa73dadb5ec34ad99b80906cc24a0be3a5c5da",
+    "attribution": "OpenStreetMap contributors",
+    "license": "ODbL-1.0"
+  },
+  "nodes": [
+    {
+      "id": 249088221,
+      "version": 7,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129747710,
+      "longitude_e7": 775933630
+    },
+    {
+      "id": 249088235,
+      "version": 7,
+      "timestamp": "2024-09-26T13:48:28Z",
+      "latitude_e7": 129762574,
+      "longitude_e7": 775947156
+    },
+    {
+      "id": 249088237,
+      "version": 4,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129768799,
+      "longitude_e7": 775955512
+    },
+    {
+      "id": 249088238,
+      "version": 4,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129769009,
+      "longitude_e7": 775959584
+    },
+    {
+      "id": 249088239,
+      "version": 5,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129768514,
+      "longitude_e7": 775963422
+    },
+    {
+      "id": 249088240,
+      "version": 3,
+      "timestamp": "2010-03-07T06:47:33Z",
+      "latitude_e7": 129768334,
+      "longitude_e7": 775966933
+    },
+    {
+      "id": 249088241,
+      "version": 4,
+      "timestamp": "2010-03-09T16:39:49Z",
+      "latitude_e7": 129769476,
+      "longitude_e7": 775972669
+    },
+    {
+      "id": 249088242,
+      "version": 4,
+      "timestamp": "2010-03-09T16:39:49Z",
+      "latitude_e7": 129768882,
+      "longitude_e7": 775983075
+    },
+    {
+      "id": 456209067,
+      "version": 3,
+      "timestamp": "2010-03-09T16:39:49Z",
+      "latitude_e7": 129752121,
+      "longitude_e7": 775936983
+    },
+    {
+      "id": 663195397,
+      "version": 6,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129760338,
+      "longitude_e7": 775946273
+    },
+    {
+      "id": 663309920,
+      "version": 2,
+      "timestamp": "2015-09-05T20:19:51Z",
+      "latitude_e7": 129748670,
+      "longitude_e7": 775933983
+    },
+    {
+      "id": 663309953,
+      "version": 1,
+      "timestamp": "2010-03-09T16:39:44Z",
+      "latitude_e7": 129750727,
+      "longitude_e7": 775935395
+    },
+    {
+      "id": 663310002,
+      "version": 1,
+      "timestamp": "2010-03-09T16:39:45Z",
+      "latitude_e7": 129769506,
+      "longitude_e7": 775980681
+    },
+    {
+      "id": 663558098,
+      "version": 1,
+      "timestamp": "2010-03-10T08:52:25Z",
+      "latitude_e7": 129768340,
+      "longitude_e7": 775964815
+    },
+    {
+      "id": 663941112,
+      "version": 3,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129760452,
+      "longitude_e7": 775944963
+    },
+    {
+      "id": 663941113,
+      "version": 3,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761756,
+      "longitude_e7": 775946381
+    },
+    {
+      "id": 2190797657,
+      "version": 1,
+      "timestamp": "2013-03-08T06:14:25Z",
+      "latitude_e7": 129767325,
+      "longitude_e7": 775951999
+    },
+    {
+      "id": 3730964482,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129760153,
+      "longitude_e7": 775945653
+    },
+    {
+      "id": 3730964483,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129760219,
+      "longitude_e7": 775946032
+    },
+    {
+      "id": 3730964484,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129760235,
+      "longitude_e7": 775945277
+    },
+    {
+      "id": 3730964485,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129760726,
+      "longitude_e7": 775946569
+    },
+    {
+      "id": 3730964486,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129760766,
+      "longitude_e7": 775944762
+    },
+    {
+      "id": 3730964487,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761085,
+      "longitude_e7": 775946648
+    },
+    {
+      "id": 3730964488,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761131,
+      "longitude_e7": 775944700
+    },
+    {
+      "id": 3730964489,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761446,
+      "longitude_e7": 775946582
+    },
+    {
+      "id": 3730964490,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761491,
+      "longitude_e7": 775944785
+    },
+    {
+      "id": 3730964491,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761793,
+      "longitude_e7": 775945005
+    },
+    {
+      "id": 3730964492,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761970,
+      "longitude_e7": 775946070
+    },
+    {
+      "id": 3730964493,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761990,
+      "longitude_e7": 775945326
+    },
+    {
+      "id": 3730964494,
+      "version": 2,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129762052,
+      "longitude_e7": 775945700
+    },
+    {
+      "id": 4017403928,
+      "version": 3,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129750468,
+      "longitude_e7": 775930001
+    },
+    {
+      "id": 4017403929,
+      "version": 4,
+      "timestamp": "2024-12-30T05:40:21Z",
+      "latitude_e7": 129750670,
+      "longitude_e7": 775931584
+    },
+    {
+      "id": 4017403932,
+      "version": 1,
+      "timestamp": "2016-02-21T04:35:36Z",
+      "latitude_e7": 129751660,
+      "longitude_e7": 775935896
+    },
+    {
+      "id": 4017403934,
+      "version": 3,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129750314,
+      "longitude_e7": 775928600
+    },
+    {
+      "id": 4017403937,
+      "version": 3,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129751104,
+      "longitude_e7": 775933819
+    },
+    {
+      "id": 9162183608,
+      "version": 3,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129756206,
+      "longitude_e7": 775941057
+    },
+    {
+      "id": 10036422144,
+      "version": 3,
+      "timestamp": "2024-08-14T04:49:03Z",
+      "latitude_e7": 129761748,
+      "longitude_e7": 775944972
+    },
+    {
+      "id": 12190248444,
+      "version": 1,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129760352,
+      "longitude_e7": 775945108
+    },
+    {
+      "id": 12190248456,
+      "version": 1,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129769049,
+      "longitude_e7": 775957497
+    },
+    {
+      "id": 12190248472,
+      "version": 1,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "latitude_e7": 129751255,
+      "longitude_e7": 775935996
+    }
+  ],
+  "ways": [
+    {
+      "id": 46728546,
+      "version": 27,
+      "timestamp": "2024-09-26T13:48:28Z",
+      "nodes": [
+        249088242,
+        663310002,
+        249088241,
+        249088240,
+        663558098,
+        249088239,
+        249088238,
+        12190248456,
+        249088237,
+        2190797657,
+        249088235,
+        663941113
+      ],
+      "tags": {
+        "access": "permissive",
+        "bicycle": "yes",
+        "cycleway": "no",
+        "foot": "yes",
+        "highway": "unclassified",
+        "lanes": "2",
+        "maxspeed": "25",
+        "motor_vehicle:conditional": "yes @ (Mo-Sa 08:00-21:00)",
+        "note": "Vehicular Traffic Allowed only between - 8AM to 9PM from Monday to Saturday. Sunday Vehicles not permitted.",
+        "oneway": "yes",
+        "sidewalk": "both",
+        "sidewalk:both:kerb": "raised",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "id": 52032471,
+      "version": 12,
+      "timestamp": "2024-08-27T10:35:31Z",
+      "nodes": [
+        456209067,
+        4017403932,
+        4017403937,
+        4017403929,
+        4017403928,
+        4017403934
+      ],
+      "tags": {
+        "access": "permissive",
+        "bicycle": "yes",
+        "cycleway": "no",
+        "foot": "yes",
+        "highway": "unclassified",
+        "lanes": "2",
+        "maxspeed": "25",
+        "motor_vehicle:conditional": "yes @ (Mo-Sa 08:00-21:00)",
+        "note": "Vehicular Traffic Allowed only between - 8AM to 9PM from Monday to Saturday. Sunday Vehicles not permitted.",
+        "oneway": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "id": 369295564,
+      "version": 13,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "nodes": [
+        3730964484,
+        3730964482,
+        3730964483,
+        663195397,
+        3730964485,
+        3730964487,
+        3730964489,
+        663941113,
+        3730964492,
+        3730964494,
+        3730964493,
+        3730964491,
+        10036422144,
+        3730964490,
+        3730964488,
+        3730964486,
+        663941112,
+        12190248444,
+        3730964484
+      ],
+      "tags": {
+        "access": "permissive",
+        "bicycle": "yes",
+        "cycleway": "no",
+        "foot": "yes",
+        "highway": "unclassified",
+        "lanes": "2",
+        "lit": "yes",
+        "maxspeed": "25",
+        "motor_vehicle:conditional": "yes @ (Mo-Sa 08:00-21:00)",
+        "note": "Vehicular Traffic Allowed only between - 8AM to 9PM from Monday to Saturday. Sunday Vehicles not permitted.",
+        "oneway": "yes",
+        "smoothness": "good",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "id": 399001081,
+      "version": 9,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "nodes": [
+        456209067,
+        12190248472,
+        663309953,
+        663309920,
+        249088221
+      ],
+      "tags": {
+        "access": "permissive",
+        "bicycle": "yes",
+        "cycleway": "no",
+        "foot": "yes",
+        "highway": "unclassified",
+        "lanes": "2",
+        "motor_vehicle:conditional": "yes @ (Mo-Sa 08:00-21:00)",
+        "note": "Vehicular Traffic Allowed only between - 8AM to 9PM from Monday to Saturday. Sunday Vehicles not permitted.",
+        "oneway": "yes"
+      }
+    },
+    {
+      "id": 508197004,
+      "version": 12,
+      "timestamp": "2024-09-21T17:11:31Z",
+      "nodes": [
+        12190248444,
+        9162183608,
+        456209067
+      ],
+      "tags": {
+        "access": "permissive",
+        "bicycle": "yes",
+        "cycleway": "no",
+        "foot": "yes",
+        "highway": "unclassified",
+        "lanes": "2",
+        "maxspeed": "25",
+        "motor_vehicle:conditional": "yes @ (Mo-Sa 08:00-21:00)",
+        "note": "Vehicular Traffic Allowed only between - 8AM to 9PM from Monday to Saturday. Sunday Vehicles not permitted.",
+        "oneway": "yes",
+        "sidewalk": "both",
+        "sidewalk:both:kerb": "raised",
+        "smoothness": "good",
+        "surface": "asphalt"
+      }
+    }
+  ],
+  "forbidden_turns": []
+}
