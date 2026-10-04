@@ -1,6 +1,6 @@
 use crate::{
-    AttemptControl, ControlledGraph, GeoPointE7, LocalOsmGraph, ManoeuvreKind, RoutePath,
-    RouteProvenance, RouteProvider, RouteQuery, RoutingError, TraversalDirection,
+    AttemptControl, ControlledGraph, GeoPointE7, LocalOsmGraph, Manoeuvre, ManoeuvreKind,
+    RoutePath, RouteProvenance, RouteProvider, RouteQuery, RoutingError, TraversalDirection,
 };
 use gpsart_domain::templates::{
     Category, OrientationRule, TraversalPart, VersionedTemplate, embedded_catalogue,
@@ -108,6 +108,7 @@ pub struct HeartCandidate {
     pub geometry: Vec<GeoPointE7>,
     pub ordered_design_anchors: Vec<GeoPointE7>,
     pub occurrences: Vec<TraversalOccurrence>,
+    pub manoeuvres: Vec<Manoeuvre>,
     pub distance: Metres,
     pub connector_distance_metres: u32,
     pub repeated_distance_metres: u32,
@@ -658,6 +659,7 @@ fn validate_candidate(
         geometry: path.geometry,
         ordered_design_anchors: design_anchors,
         occurrences,
+        manoeuvres: path.manoeuvres,
         distance: path.distance,
         connector_distance_metres,
         repeated_distance_metres,

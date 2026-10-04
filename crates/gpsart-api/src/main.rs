@@ -4,6 +4,7 @@ use gpsart_domain::starts::{
     ConfiguredNetworkPoint, ConfiguredNetworkProvider, Coverage, StartResolver,
 };
 use gpsart_persistence::jobs::PostgresJobCoordinator;
+use gpsart_persistence::routes::PostgresRouteSnapshotStore;
 use gpsart_persistence::{DependencyProbe, PostgresProbe};
 use gpsart_persistence::{PostgresGuestSessionStore, PostgresResolvedStartStore};
 use std::{error::Error, sync::Arc, time::Duration};
@@ -38,6 +39,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let sessions =
         Arc::new(PostgresGuestSessionStore::connect(config.database_url.expose()).await?);
     let jobs = PostgresJobCoordinator::connect(config.database_url.expose()).await?;
+    let routes = PostgresRouteSnapshotStore::connect(config.database_url.expose()).await?;
     let public_origin = std::env::var("GPSART_PUBLIC_ORIGIN")?;
     let session_policy = SessionPolicy::new(
         public_origin,
@@ -47,19 +49,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?;
     let listener = tokio::net::TcpListener::bind(config.api_bind).await?;
     tracing::info!(bind = %config.api_bind, "API listening");
-    gpsart_api::serve_with_all_services(
-        listener,
+    let app = gpsart_api::app_with_all_services_and_routes(
         readiness,
         starts,
         sessions,
         session_policy,
         jobs,
-        async {
+        routes,
+    );
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
             tracing::info!("shutdown requested");
-        },
-    )
-    .await?;
+        })
+        .await?;
     Ok(())
 }
 

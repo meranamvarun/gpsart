@@ -1,6 +1,10 @@
 use gpsart_persistence::jobs::{
     Completion, JobError, JobOutcomeCode, JobStage, PostgresJobCoordinator, RouteJobSubmission,
 };
+use gpsart_persistence::routes::{
+    CandidateSnapshot, PostgresRouteSnapshotStore, RouteSnapshotError, RouteSnapshotStore,
+    SnapshotIdentity,
+};
 use gpsart_persistence::{
     MIGRATOR, MigrationStatus, PostgresResolvedStartStore, ResolvedStartRecord, ResolvedStartStore,
     migration_status,
@@ -13,6 +17,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 use uuid::Uuid;
+
+mod support;
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -147,12 +153,12 @@ async fn clean_postgis_database_applies_every_migration() {
     )
     .bind(vec![
         "guest_sessions", "resolved_starts", "planning_requests", "generation_jobs",
-        "job_attempts", "route_candidates", "cleanup_runs",
+        "job_attempts", "route_candidates", "route_candidate_snapshots", "cleanup_runs",
     ])
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(tables, 7);
+    assert_eq!(tables, 8);
 
     let srids: Vec<i32> = sqlx::query_scalar(
         "SELECT DISTINCT srid::integer FROM geometry_columns WHERE f_table_name = ANY($1)",
@@ -633,6 +639,74 @@ async fn candidate_publication_requires_request_versions_and_the_deadline() {
             .await
             .unwrap(),
         gpsart_persistence::jobs::JobState::TimedOut
+    );
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn complete_candidate_snapshot_round_trips_immutably_and_owner_scoped() {
+    let Some((admin, pool, database_name)) = isolated_database("route_snapshot").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let route_id = Uuid::parse_str("40000000-0000-4000-8000-000000000001").unwrap();
+    let now = SystemTime::now();
+    let source = support::scored_candidate("map-v1", 417).await;
+    let snapshot = CandidateSnapshot::from_scored(
+        &source,
+        SnapshotIdentity {
+            id: route_id,
+            generation_job_id: Uuid::parse_str("30000000-0000-0000-0000-000000000001").unwrap(),
+            candidate_version: 1,
+            request_revision: 1,
+            generated_at_epoch_seconds: now
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        },
+    )
+    .unwrap();
+    let store = PostgresRouteSnapshotStore::new(pool.clone());
+    let mut wrong_request_revision = snapshot.clone();
+    wrong_request_revision.request_revision = 2;
+    assert_eq!(
+        store
+            .publish(
+                owner,
+                &wrong_request_revision,
+                &source,
+                now + Duration::from_secs(86_400),
+            )
+            .await,
+        Err(RouteSnapshotError::InvalidSnapshot)
+    );
+    let unpublished: i64 = sqlx::query_scalar("SELECT count(*) FROM route_candidates WHERE id=$1")
+        .bind(route_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        unpublished, 0,
+        "a snapshot with stale request pins is not published"
+    );
+    store
+        .publish(owner, &snapshot, &source, now + Duration::from_secs(86_400))
+        .await
+        .unwrap();
+    assert_eq!(store.get(owner, route_id).await.unwrap(), snapshot);
+    assert_eq!(
+        store.get(Uuid::new_v4(), route_id).await,
+        Err(RouteSnapshotError::NotFound)
+    );
+    assert!(
+        sqlx::query(
+            "UPDATE route_candidate_snapshots SET snapshot_json = '{}' WHERE candidate_id=$1"
+        )
+        .bind(route_id)
+        .execute(&pool)
+        .await
+        .is_err()
     );
     drop_database(admin, pool, &database_name).await;
 }

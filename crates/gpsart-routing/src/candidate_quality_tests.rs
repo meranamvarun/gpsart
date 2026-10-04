@@ -1,7 +1,8 @@
 use crate::{
     CandidateLegalityEvidence, CandidatePart, CandidateQualityConfig, FeatureCheckOutcome,
-    GeoPointE7, HeartCandidate, QualityBand, QualityError, RouteProvenance, TraversalDirection,
-    TraversalOccurrence, ValidatedCandidate, rank_and_deduplicate, score_candidate,
+    GeoPointE7, HeartCandidate, Manoeuvre, ManoeuvreKind, QualityBand, QualityError,
+    RouteProvenance, TraversalDirection, TraversalOccurrence, ValidatedCandidate,
+    rank_and_deduplicate, score_candidate,
 };
 use gpsart_domain::{
     ActivityProfile, Metres, RouteCandidateProfile, RouteRequestProfile,
@@ -64,6 +65,16 @@ fn candidate() -> ValidatedCandidate {
             occurrence("access", CandidatePart::Access, false, 0, 1),
             occurrence("art", CandidatePart::Artwork, false, 1, 2),
             occurrence("access", CandidatePart::Return, true, 2, 3),
+        ],
+        manoeuvres: vec![
+            Manoeuvre {
+                kind: ManoeuvreKind::Depart,
+                geometry_index: 0,
+            },
+            Manoeuvre {
+                kind: ManoeuvreKind::Arrive,
+                geometry_index: 3,
+            },
         ],
         distance: Metres::new(300).unwrap(),
         connector_distance_metres: 0,

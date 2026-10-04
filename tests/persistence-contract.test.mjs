@@ -14,6 +14,7 @@ test("forward-only SQLx migrations encode the TS-002 persistence contract", asyn
     "0004_job_leases.sql",
     "0005_job_status.sql",
     "0006_planning_request_finish.sql",
+    "0007_route_candidate_snapshots.sql",
   ]);
   const sql = await Promise.all(files.map((file) => read(`migrations/${file}`)));
   const schema = sql.join("\n");
@@ -26,6 +27,7 @@ test("forward-only SQLx migrations encode the TS-002 persistence contract", asyn
     "generation_jobs",
     "job_attempts",
     "route_candidates",
+    "route_candidate_snapshots",
     "cleanup_runs",
   ]) assert.match(schema, new RegExp(`CREATE TABLE ${entity}`, "i"));
 
