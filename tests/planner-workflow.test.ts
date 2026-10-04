@@ -108,9 +108,10 @@ test("a job cannot start before explicit confirmation and duplicate submission s
   assert.equal(stored.expiresAtEpochSeconds, null, "start-resolution expiry is not the job expiry");
 });
 
-test("an uncertain creation retry replays the exact confirmed request and idempotency key", async () => {
+test("an uncertain creation retry recovers the exact confirmed request before newer work", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   let creations = 0;
+  let currentRevision = 1;
   const workflow = new PlannerWorkflow({
     fetcher: async (url, init) => {
       const target = String(url);
@@ -125,14 +126,16 @@ test("an uncertain creation retry replays the exact confirmed request and idempo
       throw new Error("unexpected request");
     },
     storage: new MemoryStorage(), csrfToken: () => "csrf",
-    currentRevision: () => 1, newIdempotencyKey: () => "one-logical-key",
+    currentRevision: () => currentRevision, newIdempotencyKey: () => "one-logical-key",
     schedule: () => 1, cancelSchedule: () => undefined,
     now: () => 1_800_000_000_000,
   });
   await workflow.submit(request, proposed);
   await workflow.confirmAndStart();
   assert.equal(workflow.snapshot.issue, "network_unavailable");
-  await workflow.submit(request, proposed);
+  currentRevision = 2;
+  const newerRequest = { ...request, start: "0.60000, -150.35000", revision: 2 };
+  await workflow.submit(newerRequest, parseManualCoordinates(newerRequest.start)!);
   const resolveCalls = calls.filter((call) => call.url.endsWith("/starts/resolve"));
   const confirmCalls = calls.filter((call) => call.url.includes("/confirm"));
   const creationCalls = calls.filter((call) => call.url.endsWith("/route-jobs"));
@@ -142,6 +145,8 @@ test("an uncertain creation retry replays the exact confirmed request and idempo
   assert.equal(creationCalls[0]?.init?.body, creationCalls[1]?.init?.body);
   assert.equal(JSON.parse(String(creationCalls[1]?.init?.body)).idempotency_key, "one-logical-key");
   assert.equal(workflow.snapshot.phase, "polling");
+  assert.equal(workflow.snapshot.request?.revision, 1);
+  assert.equal(workflow.snapshot.issue, "active_job");
 });
 
 test("invalid fields and unsupported coverage never create a job", async () => {

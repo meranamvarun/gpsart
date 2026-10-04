@@ -76,6 +76,14 @@ type ActiveJob = {
   statusPayload: unknown | null;
 };
 
+type PendingCreation = {
+  request: RouteRequest;
+  proposedStart: ProposedStart;
+  resolution: StartResolution;
+  key: string;
+  body: string;
+};
+
 const profileVersions: Readonly<Record<RouteRequest["activity"], ProfileVersion>> = {
   Walking: "walking-v1",
   Running: "running-v1",
@@ -106,6 +114,7 @@ export class PlannerWorkflow {
   private submissionKey: string | null = null;
   private submitting: Promise<void> | null = null;
   private confirming: Promise<void> | null = null;
+  private pendingCreation: PendingCreation | null = null;
 
   constructor(dependencies: Dependencies) {
     this.fetcher = dependencies.fetcher ?? globalThis.fetch;
@@ -122,6 +131,11 @@ export class PlannerWorkflow {
   get snapshot(): PlannerWorkflowSnapshot { return this.value; }
 
   submit(request: RouteRequest, proposedStart: ProposedStart): Promise<void> {
+    if (this.pendingCreation) {
+      if (this.confirming) return this.confirming;
+      if (this.submitting) return this.submitting;
+      return this.retryPendingCreation();
+    }
     const fingerprint = JSON.stringify({ request, proposedStart });
     if (this.submitting && this.submitFingerprint === fingerprint) return this.submitting;
     if (this.submitFingerprint === fingerprint
@@ -154,6 +168,10 @@ export class PlannerWorkflow {
 
   confirmAndStart(): Promise<void> {
     if (this.confirming) return this.confirming;
+    if (this.pendingCreation) {
+      if (this.submitting) return this.submitting;
+      return this.retryPendingCreation();
+    }
     if (this.value.phase === "polling" || this.value.phase === "terminal") return Promise.resolve();
     const { request, proposedStart, resolution } = this.value;
     if (!request || !proposedStart || !resolution || !this.submissionKey) {
@@ -312,10 +330,11 @@ export class PlannerWorkflow {
       }
       const requestedMetres = Math.round(request.distanceKm * 1_000);
       const toleranceMetres = Math.round(requestedMetres * request.tolerancePercent / 100);
-      const creation = await this.fetcher("/api/v1/route-jobs", {
-        method: "POST",
-        credentials: "include",
-        headers: jsonHeaders(csrf),
+      this.pendingCreation = {
+        request,
+        proposedStart,
+        resolution,
+        key,
         body: JSON.stringify({
           resolved_start_id: resolution.id,
           revision: request.revision,
@@ -330,53 +349,102 @@ export class PlannerWorkflow {
           map_data_version: resolution.data_version,
           algorithm_version: "algorithm-v1",
         }),
-      });
-      const creationPayload = await responseJson(creation);
-      if (!creation.ok) {
-        if (this.fenceAsyncStep(token, request.revision)) {
-          this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(creationPayload) ?? "invalid_response" });
-        }
-        return;
-      }
-      const accepted = decodeAcceptedRouteJob(creationPayload);
-      if (!accepted || accepted.requestRevision !== request.revision) {
-        if (this.fenceAsyncStep(token, request.revision)) {
-          this.update({ ...this.value, phase: "error", issue: "invalid_response" });
-        }
-        return;
-      }
-      const acceptedForCurrentRequest = token === this.generation
-        && request.revision === this.currentRevision();
-      const active: ActiveJob = {
-        version: 1,
-        jobId: accepted.jobId,
-        request,
-        proposedStart,
-        expiresAtEpochSeconds: null,
-        etag: null,
-        statusPayload: null,
       };
-      this.active = active;
-      this.submitFingerprint = JSON.stringify({ request, proposedStart });
-      this.submissionKey = key;
-      storeActive(this.storage, active);
-      const pollToken = ++this.generation;
-      this.update({
-        ...this.value,
-        phase: "polling",
-        request,
-        proposedStart,
-        resolution,
-        jobId: accepted.jobId,
-        status: null,
-        issue: acceptedForCurrentRequest ? null : "active_job",
-      });
-      this.schedulePoll(pollToken, MIN_POLL_MILLISECONDS);
+      await this.createPending(token);
     } catch {
       if (this.fenceAsyncStep(token, request.revision)) {
         this.update({ ...this.value, phase: "error", issue: "network_unavailable" });
       }
     }
+  }
+
+  private retryPendingCreation(): Promise<void> {
+    const pending = this.pendingCreation;
+    if (!pending) return Promise.resolve();
+    this.stopTimer();
+    const token = ++this.generation;
+    this.update({
+      ...emptySnapshot(),
+      phase: "submitting",
+      request: pending.request,
+      proposedStart: pending.proposedStart,
+      resolution: pending.resolution,
+    });
+    const operation = this.createPending(token)
+      .finally(() => {
+        if (this.submitting === operation) this.submitting = null;
+      });
+    this.submitting = operation;
+    return operation;
+  }
+
+  private async createPending(token: number): Promise<void> {
+    const pending = this.pendingCreation;
+    if (!pending) return;
+    const csrf = this.csrfToken();
+    if (!csrf) {
+      if (token === this.generation) {
+        this.update({ ...this.value, phase: "error", issue: "csrf_unavailable" });
+      }
+      return;
+    }
+    let creation: Response;
+    try {
+      creation = await this.fetcher("/api/v1/route-jobs", {
+        method: "POST",
+        credentials: "include",
+        headers: jsonHeaders(csrf),
+        body: pending.body,
+      });
+    } catch {
+      if (token === this.generation) {
+        this.update({ ...this.value, phase: "error", issue: "network_unavailable" });
+      }
+      return;
+    }
+    const creationPayload = await responseJson(creation);
+    if (!creation.ok) {
+      if (creation.status < 500) this.pendingCreation = null;
+      if (token === this.generation) {
+        this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(creationPayload) ?? "invalid_response" });
+      }
+      return;
+    }
+    const accepted = decodeAcceptedRouteJob(creationPayload);
+    if (!accepted || accepted.requestRevision !== pending.request.revision) {
+      if (token === this.generation) {
+        this.update({ ...this.value, phase: "error", issue: "invalid_response" });
+      }
+      return;
+    }
+    const acceptedForCurrentRequest = token === this.generation
+      && pending.request.revision === this.currentRevision();
+    const active: ActiveJob = {
+      version: 1,
+      jobId: accepted.jobId,
+      request: pending.request,
+      proposedStart: pending.proposedStart,
+      expiresAtEpochSeconds: null,
+      etag: null,
+      statusPayload: null,
+    };
+    this.pendingCreation = null;
+    this.active = active;
+    this.submitFingerprint = JSON.stringify({ request: pending.request, proposedStart: pending.proposedStart });
+    this.submissionKey = pending.key;
+    storeActive(this.storage, active);
+    const pollToken = ++this.generation;
+    this.update({
+      ...this.value,
+      phase: "polling",
+      request: pending.request,
+      proposedStart: pending.proposedStart,
+      resolution: pending.resolution,
+      jobId: accepted.jobId,
+      status: null,
+      issue: acceptedForCurrentRequest ? null : "active_job",
+    });
+    this.schedulePoll(pollToken, MIN_POLL_MILLISECONDS);
   }
 
   private async poll(token: number): Promise<void> {
@@ -467,6 +535,7 @@ export class PlannerWorkflow {
   private resetLogicalSubmission(): void {
     this.submitFingerprint = null;
     this.submissionKey = null;
+    this.pendingCreation = null;
   }
 
   private fenceAsyncStep(token: number, revision: number): boolean {
