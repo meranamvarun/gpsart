@@ -16,7 +16,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/CreateRouteJob' }
-            example: { resolved_start_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, revision: 1, idempotency_key: request-1, requested_distance_metres: 5000, distance_tolerance_metres: 250, profile: { activity: walking, profile_version: walking-v1 }, coverage_policy_version: coverage-v1, template_id: heart, template_version: '1', map_data_version: map-v1, algorithm_version: algorithm-v1 }
+            example: { resolved_start_id: 7bf80ccf-68e8-49ec-a3e8-cad667bb95a0, revision: 1, idempotency_key: request-1, requested_distance_metres: 5000, distance_tolerance_metres: 250, return_to_start: true, profile: { activity: walking, profile_version: walking-v1 }, coverage_policy_version: coverage-v1, template_id: heart, template_version: '1', map_data_version: map-v1, algorithm_version: algorithm-v1 }
       responses:
         '202':
           description: Job queued, or the original job for an identical retry.
@@ -407,13 +407,14 @@ components:
     CreateRouteJob:
       type: object
       additionalProperties: false
-      required: [resolved_start_id, revision, idempotency_key, requested_distance_metres, distance_tolerance_metres, profile, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version]
+      required: [resolved_start_id, revision, idempotency_key, requested_distance_metres, distance_tolerance_metres, return_to_start, profile, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version]
       properties:
         resolved_start_id: { type: string, format: uuid }
         revision: { type: integer, minimum: 1 }
         idempotency_key: { type: string, minLength: 1, maxLength: 200 }
         requested_distance_metres: { type: integer, minimum: 1000, maximum: 100000 }
         distance_tolerance_metres: { type: integer, minimum: 0 }
+        return_to_start: { type: boolean, description: Whether the generated route must finish at its confirmed start. }
         profile: { $ref: '#/components/schemas/RouteProfile' }
         coverage_policy_version: { type: string, minLength: 1 }
         template_id: { type: string, minLength: 1 }

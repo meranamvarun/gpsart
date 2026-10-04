@@ -3,6 +3,13 @@ import test from "node:test";
 import { decodeGuestSessionPolicy, scheduleGuestSessionRotation } from "../src/domain/guest-session.ts";
 import { startGuestSessionMaintenance } from "../src/client/guest-session.ts";
 
+class PolicyStorage {
+  value: string | null = null;
+  getItem(): string | null { return this.value; }
+  setItem(_key: string, value: string): void { this.value = value; }
+  removeItem(): void { this.value = null; }
+}
+
 test("guest session response exposes timing policy but no credential", () => {
   assert.deepEqual(decodeGuestSessionPolicy({ expires_at: 2_000_000_000, rotate_at: 1_999_956_800, rotate_after: 43_200 }), { expiresAt: 2_000_000_000, rotateAt: 1_999_956_800, rotateAfterSeconds: 43_200 });
   assert.equal(decodeGuestSessionPolicy({ expires_at: 0, rotate_after: 43_200 }), null);
@@ -47,4 +54,20 @@ test("browser maintenance issues a session and posts due rotation with CSRF", as
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(calls[1]?.url, "/api/v1/guest-sessions/current/rotate");
   assert.equal(new Headers(calls[1]?.init?.headers).get("x-csrf-token"), "csrf-value");
+});
+
+test("refresh reuses an unexpired cookie policy instead of replacing job ownership", async () => {
+  const storage = new PolicyStorage();
+  storage.value = JSON.stringify({ expires_at: 2_000_000_000, rotate_at: 1_999_956_800, rotate_after: 43_200 });
+  let requests = 0;
+  let scheduled = false;
+  await startGuestSessionMaintenance(
+    async () => { requests += 1; throw new Error("must not issue a replacement session"); },
+    () => "existing-csrf",
+    () => { scheduled = true; return () => undefined; },
+    storage,
+    () => 1_900_000_000_000,
+  );
+  assert.equal(requests, 0);
+  assert.equal(scheduled, true);
 });

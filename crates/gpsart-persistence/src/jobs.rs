@@ -438,6 +438,7 @@ pub struct RouteJobSubmission {
     pub input_hash: [u8; 32],
     pub requested_distance_metres: i32,
     pub distance_tolerance_metres: i32,
+    pub return_to_start: bool,
     pub activity_profile_json: String,
     pub activity_profile_version: String,
     pub coverage_policy_version: String,
@@ -521,12 +522,12 @@ impl PostgresJobCoordinator {
             return if hash == input.input_hash { Ok(id) } else { Err(JobError::IdempotencyConflict) };
         }
         let request_id = Uuid::new_v4();
-        let inserted = sqlx::query("INSERT INTO planning_requests (id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash, requested_pin, requested_distance_metres, distance_tolerance_metres, activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version, expires_at) SELECT $1, $2, rs.id, $3, $4, $5, rs.confirmed_start, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15 FROM resolved_starts rs WHERE rs.id = $16 AND rs.guest_session_id = $2 AND rs.expires_at > now() AND rs.profile_version = $9 AND rs.coverage_policy_version = $10 AND rs.map_data_version = $13 RETURNING id")
+        let inserted = sqlx::query("INSERT INTO planning_requests (id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash, requested_pin, requested_distance_metres, distance_tolerance_metres, activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version, return_to_start, expires_at) SELECT $1, $2, rs.id, $3, $4, $5, rs.confirmed_start, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16 FROM resolved_starts rs WHERE rs.id = $17 AND rs.guest_session_id = $2 AND rs.expires_at > now() AND rs.profile_version = $9 AND rs.coverage_policy_version = $10 AND rs.map_data_version = $13 RETURNING id")
             .bind(request_id).bind(owner).bind(input.revision).bind(&input.idempotency_key)
             .bind(input.input_hash.as_slice()).bind(input.requested_distance_metres).bind(input.distance_tolerance_metres)
             .bind(&input.activity_profile_json).bind(&input.activity_profile_version).bind(&input.coverage_policy_version)
             .bind(&input.template_id).bind(&input.template_version).bind(&input.map_data_version)
-            .bind(&input.algorithm_version).bind(OffsetDateTime::from(input.expires_at)).bind(input.resolved_start_id)
+            .bind(&input.algorithm_version).bind(input.return_to_start).bind(OffsetDateTime::from(input.expires_at)).bind(input.resolved_start_id)
             .fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         if inserted.is_none() {
             return Err(JobError::StartNotFound);
