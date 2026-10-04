@@ -160,6 +160,11 @@ async fn feasible_fixture_is_closed_legal_recognisable_and_complete() {
         "controlled-graph-policy-v1"
     );
     assert_eq!(candidate.legality_evidence().profile_version, "walking-v1");
+    assert_eq!(
+        candidate.legality_evidence().advisory_version,
+        "route-use-advisory-v1"
+    );
+    assert!(gpsart_routing::ROUTE_USE_ADVISORY.contains("currently open and lawful"));
     assert!(candidate.legality_evidence().access_verified);
     assert!(candidate.legality_evidence().direction_verified);
     assert!(candidate.legality_evidence().turns_verified);

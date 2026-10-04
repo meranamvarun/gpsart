@@ -1,6 +1,6 @@
 # ADR-002: Adopt a checksum-pinned local OSM graph for pilot generation
 
-**Status:** Accepted
+**Status:** Accepted; pedestrian-policy amendment accepted for TS-107
 **Date:** 2026-10-04
 **Decision owners:** local-graph prerequisite development and independent QA
 
@@ -19,6 +19,16 @@ Only explicit `foot`, `bicycle`, `access`, `oneway`, surface, and exclusion tags
 The v1 Cubbon Park artifact contains only five connected ways chosen because both `foot=yes` and `bicycle=yes` and `oneway=yes` are present. Walking and cycling proof routes traverse 28 ordered segments across four source ways. A repeated-anchor proof preserves repeated segment occurrences and counts their distance each time. Provenance returns the snapshot ID, derived-artifact SHA-256, and OpenStreetMap/ODbL attribution.
 
 This capability unblocks TS-105 and TS-106 pilot feasibility work. It does not establish Bengaluru-wide coverage or production map-update operations.
+
+## TS-107 pedestrian-policy amendment
+
+The five-way v1 graph was sufficient to prove the adapter but not to benchmark recognizable shape and text traversal. TS-107 therefore adds the append-only `cubbon-park-osm-v2` artifact and `osm-pedestrian-policy-v2`; v1 remains pinned for its original tests.
+
+The v2 policy distinguishes documented OSM pedestrian semantics from guesses. `highway=footway`, `pedestrian`, and `steps` imply pedestrian access unless an explicit or conditional restriction overrides it. A general road `oneway` is a vehicle restriction for the foot profile; pedestrian direction uses `oneway:foot`. A general `oneway` on a path-like way remains ambiguous without `oneway:foot`, and any applicable conditional direction remains unknown and ineligible. Untagged ordinary-road access is still unknown. These rules are pinned separately from `walking-v1` so a mapping-policy change cannot silently reinterpret an immutable route request.
+
+The v2 extractor retains only known-walking-access ways, removes ways participating in turn-restriction relations that the snapshot would otherwise omit, and rejects duplicate coordinates, sub-metre segments, ambiguous path direction, and conditional path direction. It retains 305 ways and 1,767 nodes at derived SHA-256 `49b985cef9e9ab9338c1a83a3a7d27cc9da2136743a5a968ffcd163bb7f58a37`. Candidate acceptance additionally requires a sealed `ValidatedCandidate` with positive access, direction, and turn evidence; unknown access can no longer pass from routing into scoring.
+
+Because map tags and real-world conditions can still be stale or incomplete, `route-use-advisory-v1` requires the route-detail surface to tell users to verify current access and legality and obey signs, closures, property restrictions, and applicable law. That residual-risk advisory does not weaken any application-side hard gate.
 
 ## Operating boundary
 

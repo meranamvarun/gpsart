@@ -82,6 +82,7 @@ fn candidate() -> ValidatedCandidate {
             routing_policy_version: "controlled-graph-policy-v1".into(),
             routing_data_version: "quality-fixture-v1".into(),
             profile_version: "walking-v1".into(),
+            advisory_version: "route-use-advisory-v1".into(),
             access_verified: true,
             direction_verified: true,
             turns_verified: true,

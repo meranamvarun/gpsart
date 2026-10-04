@@ -327,6 +327,20 @@ async fn conditional_oneway_is_unknown_and_never_treated_as_unconditionally_bidi
             .await,
         Err(RoutingError::NoPath)
     );
+
+    let path_bytes =
+        inline_snapshot(r#"{"highway":"footway","oneway:conditional":"yes @ (sunset-sunrise)"}"#);
+    let graph =
+        LocalOsmGraph::from_json(&path_bytes, &LocalOsmGraph::sha256_hex(&path_bytes)).unwrap();
+    assert_eq!(
+        graph
+            .route(
+                &query(ActivityProfile::Walking, &["osm-node/1", "osm-node/3"]),
+                &control(),
+            )
+            .await,
+        Err(RoutingError::NoPath)
+    );
 }
 
 #[tokio::test]

@@ -11,6 +11,7 @@ use thiserror::Error;
 
 pub const QUALITY_VERSION: &str = "candidate-quality-v1";
 pub const WEIGHTS_VERSION: &str = "candidate-quality-weights-v1";
+pub const BENCHMARK_SCHEMA_VERSION: &str = "gpsart-routing-benchmark-v2";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct QualityWeights {
@@ -577,7 +578,7 @@ impl BenchmarkHarness {
     }
 
     pub fn finish(mut self) -> Result<BenchmarkReport, BenchmarkError> {
-        if self.schema_version.is_empty() {
+        if self.schema_version != BENCHMARK_SCHEMA_VERSION {
             return Err(BenchmarkError::MissingVersionPin);
         }
         self.cases

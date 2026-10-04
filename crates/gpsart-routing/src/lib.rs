@@ -24,13 +24,14 @@ pub use heart::{
     AnchorMatch, CANDIDATE_LEGALITY_VERSION, CandidateError, CandidateLegalityEvidence,
     CandidatePart, CandidateSearch, CuratedTextCandidate, CuratedTextSearchConfig,
     CuratedTextSearchRequest, HeartCandidate, HeartSearchConfig, HeartSearchRequest, MatchOutcome,
-    TraversalOccurrence, ValidatedCandidate,
+    ROUTE_USE_ADVISORY, ROUTE_USE_ADVISORY_VERSION, TraversalOccurrence, ValidatedCandidate,
 };
 pub use quality::{
-    BenchmarkError, BenchmarkHarness, BenchmarkOutcome, BenchmarkPins, BenchmarkRecord,
-    BenchmarkReport, CandidateQualityConfig, CandidateQualityMetrics, FeatureCheckOutcome,
-    IdentifyingFeatureCheck, QUALITY_VERSION, QualityBand, QualityError, QualityWeights,
-    ScoredCandidate, UserQuality, WEIGHTS_VERSION, rank_and_deduplicate, score_candidate,
+    BENCHMARK_SCHEMA_VERSION, BenchmarkError, BenchmarkHarness, BenchmarkOutcome, BenchmarkPins,
+    BenchmarkRecord, BenchmarkReport, CandidateQualityConfig, CandidateQualityMetrics,
+    FeatureCheckOutcome, IdentifyingFeatureCheck, QUALITY_VERSION, QualityBand, QualityError,
+    QualityWeights, ScoredCandidate, UserQuality, WEIGHTS_VERSION, rank_and_deduplicate,
+    score_candidate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -983,20 +984,22 @@ fn osm_permission(value: Option<&str>) -> Option<bool> {
 }
 
 fn osm_direction(tags: &HashMap<String, String>) -> Metadata<Direction> {
+    let path_like = matches!(
+        tags.get("highway").map(String::as_str),
+        Some("footway" | "path" | "pedestrian" | "steps")
+    );
     let general = if tags.contains_key("oneway:conditional") {
         DirectionRule::Unknown
     } else {
         osm_direction_rule(tags.get("oneway").map(String::as_str)).unwrap_or(DirectionRule::Both)
     };
-    let foot = if tags.contains_key("oneway:foot:conditional") {
+    let foot = if tags.contains_key("oneway:foot:conditional")
+        || (path_like && tags.contains_key("oneway:conditional"))
+    {
         DirectionRule::Unknown
     } else if let Some(rule) = osm_direction_rule(tags.get("oneway:foot").map(String::as_str)) {
         rule
-    } else if matches!(
-        tags.get("highway").map(String::as_str),
-        Some("footway" | "path" | "pedestrian" | "steps")
-    ) && tags.contains_key("oneway")
-    {
+    } else if path_like && tags.contains_key("oneway") {
         // General `oneway` on path-like ways is used inconsistently. Require
         // `oneway:foot` before claiming a pedestrian direction.
         DirectionRule::Unknown

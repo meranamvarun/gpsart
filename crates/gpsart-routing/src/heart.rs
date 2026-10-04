@@ -122,6 +122,8 @@ impl HeartCandidate {
 }
 
 pub const CANDIDATE_LEGALITY_VERSION: &str = "candidate-legality-v1";
+pub const ROUTE_USE_ADVISORY_VERSION: &str = "route-use-advisory-v1";
+pub const ROUTE_USE_ADVISORY: &str = "Routing and map data can be incomplete or change. Before and during the activity, verify that every segment is currently open and lawful for your activity; obey posted signs, closures, property restrictions, and applicable laws; and choose a safe alternative or stop when conditions differ.";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateLegalityEvidence {
@@ -129,6 +131,7 @@ pub struct CandidateLegalityEvidence {
     pub routing_policy_version: String,
     pub routing_data_version: String,
     pub profile_version: String,
+    pub advisory_version: String,
     pub access_verified: bool,
     pub direction_verified: bool,
     pub turns_verified: bool,
@@ -668,6 +671,7 @@ fn validate_candidate(
             routing_policy_version: path.legality.policy_version,
             routing_data_version,
             profile_version: request.profile.version().as_str().into(),
+            advisory_version: ROUTE_USE_ADVISORY_VERSION.into(),
             access_verified: true,
             direction_verified: true,
             turns_verified: true,
