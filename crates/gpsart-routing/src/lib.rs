@@ -18,7 +18,8 @@ use tokio::sync::Notify;
 mod heart;
 
 pub use heart::{
-    AnchorMatch, CandidateError, CandidatePart, CandidateSearch, HeartCandidate, HeartSearchConfig,
+    AnchorMatch, CandidateError, CandidatePart, CandidateSearch, CuratedTextCandidate,
+    CuratedTextSearchConfig, CuratedTextSearchRequest, HeartCandidate, HeartSearchConfig,
     HeartSearchRequest, MatchOutcome, TraversalOccurrence,
 };
 
