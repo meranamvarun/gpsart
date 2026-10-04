@@ -151,6 +151,23 @@ async fn feasible_fixture_is_closed_legal_recognisable_and_complete() {
         candidate.provenance.data_version.as_deref(),
         Some("heart-fixture-v1")
     );
+    assert_eq!(
+        candidate.legality_evidence().validation_version,
+        "candidate-legality-v1"
+    );
+    assert_eq!(
+        candidate.legality_evidence().routing_policy_version,
+        "controlled-graph-policy-v1"
+    );
+    assert_eq!(candidate.legality_evidence().profile_version, "walking-v1");
+    assert_eq!(
+        candidate.legality_evidence().advisory_version,
+        "route-use-advisory-v1"
+    );
+    assert!(gpsart_routing::ROUTE_USE_ADVISORY.contains("currently open and lawful"));
+    assert!(candidate.legality_evidence().access_verified);
+    assert!(candidate.legality_evidence().direction_verified);
+    assert!(candidate.legality_evidence().turns_verified);
 }
 
 #[tokio::test]
@@ -254,7 +271,7 @@ async fn rejects_invalid_or_incomplete_paths_before_returning_a_candidate() {
         .unwrap();
     let anchors = FixedAnchors;
 
-    for mutate in 0..6 {
+    for mutate in 0..8 {
         let mut invalid = valid.clone();
         match mutate {
             0 => {
@@ -266,6 +283,10 @@ async fn rejects_invalid_or_incomplete_paths_before_returning_a_candidate() {
             4 => invalid.edges[0]
                 .qualifications
                 .push(Qualification::ProviderAccessUnverified),
+            5 => invalid.edges[0]
+                .qualifications
+                .push(Qualification::AccessUnknown),
+            6 => invalid.legality.access_verified = false,
             _ => {
                 let first_via = invalid.manoeuvres[1].geometry_index;
                 invalid.geometry[first_via] = point(99, 99);

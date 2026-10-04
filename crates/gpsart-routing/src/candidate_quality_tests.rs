@@ -1,11 +1,11 @@
+use crate::{
+    CandidateLegalityEvidence, CandidatePart, CandidateQualityConfig, FeatureCheckOutcome,
+    GeoPointE7, HeartCandidate, QualityBand, QualityError, RouteProvenance, TraversalDirection,
+    TraversalOccurrence, ValidatedCandidate, rank_and_deduplicate, score_candidate,
+};
 use gpsart_domain::{
     ActivityProfile, Metres, RouteCandidateProfile, RouteRequestProfile,
     templates::embedded_catalogue,
-};
-use gpsart_routing::{
-    CandidatePart, CandidateQualityConfig, FeatureCheckOutcome, GeoPointE7, HeartCandidate,
-    QualityBand, QualityError, RouteProvenance, TraversalDirection, TraversalOccurrence,
-    rank_and_deduplicate, score_candidate,
 };
 
 fn point(x: i32, y: i32) -> GeoPointE7 {
@@ -30,13 +30,13 @@ fn occurrence(
     }
 }
 
-fn candidate() -> HeartCandidate {
+fn candidate() -> ValidatedCandidate {
     let template = embedded_catalogue()
         .unwrap()
         .get("heart", 1)
         .unwrap()
         .clone();
-    HeartCandidate {
+    let candidate = HeartCandidate {
         template_id: "heart".into(),
         template_version: 1,
         template_hash: template.definition_hash,
@@ -74,7 +74,20 @@ fn candidate() -> HeartCandidate {
             data_version: Some("quality-fixture-v1".into()),
             attribution: None,
         },
-    }
+    };
+    ValidatedCandidate::test_fixture(
+        candidate,
+        CandidateLegalityEvidence {
+            validation_version: "candidate-legality-v1".into(),
+            routing_policy_version: "controlled-graph-policy-v1".into(),
+            routing_data_version: "quality-fixture-v1".into(),
+            profile_version: "walking-v1".into(),
+            advisory_version: "route-use-advisory-v1".into(),
+            access_verified: true,
+            direction_verified: true,
+            turns_verified: true,
+        },
+    )
 }
 
 fn config() -> CandidateQualityConfig {
@@ -267,7 +280,7 @@ fn exact_traversal_identity_includes_occurrence_direction() {
         .clone();
     let forward = score_candidate(candidate(), &template, &config()).unwrap();
     let mut reverse = candidate();
-    reverse.geometry = reverse.geometry.into_iter().rev().collect();
+    reverse.geometry.reverse();
     reverse.occurrences.reverse();
     for (index, occurrence) in reverse.occurrences.iter_mut().enumerate() {
         occurrence.direction = TraversalDirection::Reverse;

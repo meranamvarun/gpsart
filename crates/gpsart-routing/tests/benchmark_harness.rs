@@ -1,10 +1,13 @@
-use gpsart_routing::{BenchmarkHarness, BenchmarkOutcome, BenchmarkPins, QualityBand};
+use gpsart_routing::{
+    BENCHMARK_SCHEMA_VERSION, BenchmarkHarness, BenchmarkOutcome, BenchmarkPins, QualityBand,
+};
 use std::time::Duration;
 
 fn pins(template_id: &str) -> BenchmarkPins {
     BenchmarkPins {
         map_version: "cubbon-park-osm-v1+c4a009be".into(),
         profile_version: "walking-v1".into(),
+        routing_policy_version: "osm-pedestrian-policy-v2".into(),
         template_id: template_id.into(),
         template_version: 1,
         template_hash: "immutable-template-hash".into(),
@@ -14,7 +17,7 @@ fn pins(template_id: &str) -> BenchmarkPins {
 
 #[test]
 fn harness_records_pinned_inputs_runtime_calls_outcome_validity_and_artifacts() {
-    let mut harness = BenchmarkHarness::new("gpsart-routing-benchmark-v1");
+    let mut harness = BenchmarkHarness::new(BENCHMARK_SCHEMA_VERSION);
     harness
         .record(
             "pilot-heart-001",
@@ -41,6 +44,7 @@ fn harness_records_pinned_inputs_runtime_calls_outcome_validity_and_artifacts() 
         .unwrap();
 
     let report = harness.finish().unwrap();
+    assert_eq!(report.schema_version, "gpsart-routing-benchmark-v2");
     assert_eq!(report.cases.len(), 2);
     assert_eq!(report.cases[0].latency_millis, 14);
     assert_eq!(report.cases[0].provider_calls, 3);
@@ -50,13 +54,18 @@ fn harness_records_pinned_inputs_runtime_calls_outcome_validity_and_artifacts() 
     );
     let json = serde_json::to_string_pretty(&report).unwrap();
     assert!(json.contains("\"algorithm_version\": \"candidate-quality-v1\""));
+    assert!(json.contains("\"routing_policy_version\": \"osm-pedestrian-policy-v2\""));
     assert!(!json.contains("latitude"));
     assert!(!json.contains("longitude"));
 }
 
 #[test]
 fn harness_rejects_unpinned_or_inconsistent_results() {
-    let mut harness = BenchmarkHarness::new("gpsart-routing-benchmark-v1");
+    assert_eq!(
+        BenchmarkHarness::new("gpsart-routing-benchmark-v1").finish(),
+        Err(gpsart_routing::BenchmarkError::MissingVersionPin)
+    );
+    let mut harness = BenchmarkHarness::new(BENCHMARK_SCHEMA_VERSION);
     let mut missing_map = pins("heart");
     missing_map.map_version.clear();
     assert!(
@@ -69,6 +78,22 @@ fn harness_rejects_unpinned_or_inconsistent_results() {
                 BenchmarkOutcome::Match,
                 true,
                 Some(QualityBand::StrongMatch),
+                None,
+            )
+            .is_err()
+    );
+    let mut missing_policy = pins("heart");
+    missing_policy.routing_policy_version.clear();
+    assert!(
+        harness
+            .record(
+                "missing-policy",
+                missing_policy,
+                Duration::ZERO,
+                0,
+                BenchmarkOutcome::NoMatch,
+                true,
+                None,
                 None,
             )
             .is_err()

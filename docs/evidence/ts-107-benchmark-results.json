@@ -1,28 +1,29 @@
 {
-  "schema_version": "gpsart-routing-benchmark-v1",
+  "schema_version": "gpsart-routing-benchmark-v2",
   "cases": [
     {
       "case_id": "pilot-heart-001",
       "pins": {
-        "map_version": "cubbon-park-osm-v1+c4a009bef6385175de8762d58ff604c42e7419c6795a2774466c6fcf49e0db48",
+        "map_version": "bengaluru-central-osm-v3+df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
         "profile_version": "walking-v1",
+        "routing_policy_version": "osm-pedestrian-policy-v2",
         "template_id": "heart",
         "template_version": 1,
         "template_hash": "fd845f0c5a70b13347d99acf3d83801bb161684b474b6b4ac6d2815f4f251837",
         "algorithm_version": "candidate-quality-v1"
       },
-      "latency_millis": 15,
+      "latency_millis": 330,
       "provider_calls": 1,
       "outcome": "match",
       "valid": true,
       "quality_band": "approximate_match",
       "quality_metrics": {
         "version": "candidate-quality-v1",
-        "full_trace_error_metres": 9,
-        "distance_error_metres": 120,
-        "repeated_ratio_basis_points": 8750,
+        "full_trace_error_metres": 61,
+        "distance_error_metres": 30,
+        "repeated_ratio_basis_points": 82,
         "connector_ratio_basis_points": 0,
-        "manoeuvre_complexity": 143,
+        "manoeuvre_complexity": 61,
         "identifying_feature_checks": [
           {
             "feature": "central indentation",
@@ -51,25 +52,26 @@
     {
       "case_id": "pilot-hi-001",
       "pins": {
-        "map_version": "cubbon-park-osm-v1+c4a009bef6385175de8762d58ff604c42e7419c6795a2774466c6fcf49e0db48",
+        "map_version": "bengaluru-central-osm-v3+df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
         "profile_version": "walking-v1",
+        "routing_policy_version": "osm-pedestrian-policy-v2",
         "template_id": "HI",
         "template_version": 1,
         "template_hash": "fb3de90a744cd704900c2d16f0172ed978a9f4ccfd2b02b4ab46f0584f4fcdec",
         "algorithm_version": "candidate-quality-v1"
       },
-      "latency_millis": 121,
+      "latency_millis": 1473,
       "provider_calls": 1,
       "outcome": "match",
       "valid": true,
       "quality_band": "approximate_match",
       "quality_metrics": {
         "version": "candidate-quality-v1",
-        "full_trace_error_metres": 12,
-        "distance_error_metres": 140,
-        "repeated_ratio_basis_points": 7500,
-        "connector_ratio_basis_points": 3961,
-        "manoeuvre_complexity": 71,
+        "full_trace_error_metres": 18,
+        "distance_error_metres": 6,
+        "repeated_ratio_basis_points": 2644,
+        "connector_ratio_basis_points": 3518,
+        "manoeuvre_complexity": 129,
         "identifying_feature_checks": [
           {
             "feature": "H crossbar",

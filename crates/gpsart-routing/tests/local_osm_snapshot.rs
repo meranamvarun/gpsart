@@ -71,7 +71,7 @@ fn rejects_malformed_or_unversioned_snapshot_elements() {
 }
 
 #[tokio::test]
-async fn preserves_explicit_unknowns_and_profile_access_instead_of_guessing() {
+async fn applies_profile_specific_osm_defaults_without_guessing_unknown_access() {
     let missing_direction =
         inline_snapshot(r#"{"highway":"unclassified","foot":"yes","bicycle":"yes"}"#);
     let graph = LocalOsmGraph::from_json(
@@ -79,14 +79,14 @@ async fn preserves_explicit_unknowns_and_profile_access_instead_of_guessing() {
         &LocalOsmGraph::sha256_hex(&missing_direction),
     )
     .unwrap();
-    assert_eq!(
+    assert!(
         graph
             .route(
-                &query(ActivityProfile::Walking, &["osm-node/1", "osm-node/3"]),
+                &query(ActivityProfile::Walking, &["osm-node/3", "osm-node/1"]),
                 &control(),
             )
-            .await,
-        Err(RoutingError::NoPath)
+            .await
+            .is_ok()
     );
 
     let foot_only =
@@ -96,7 +96,7 @@ async fn preserves_explicit_unknowns_and_profile_access_instead_of_guessing() {
     assert!(
         graph
             .route(
-                &query(ActivityProfile::Walking, &["osm-node/1", "osm-node/3"]),
+                &query(ActivityProfile::Walking, &["osm-node/3", "osm-node/1"]),
                 &control(),
             )
             .await
@@ -269,6 +269,50 @@ async fn preserves_explicit_unknowns_and_profile_access_instead_of_guessing() {
 }
 
 #[tokio::test]
+async fn footway_defaults_are_walkable_but_explicit_foot_direction_is_enforced() {
+    let implicit = inline_snapshot(r#"{"highway":"footway"}"#);
+    let graph = LocalOsmGraph::from_json(&implicit, &LocalOsmGraph::sha256_hex(&implicit)).unwrap();
+    let route = graph
+        .route(
+            &query(ActivityProfile::Walking, &["osm-node/3", "osm-node/1"]),
+            &control(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        route
+            .edges
+            .iter()
+            .all(|edge| { !edge.qualifications.contains(&Qualification::AccessUnknown) })
+    );
+    assert_eq!(route.legality.policy_version, "osm-pedestrian-policy-v2");
+    assert!(route.legality.access_verified);
+    assert!(route.legality.direction_verified);
+    assert!(route.legality.turns_verified);
+
+    let explicit = inline_snapshot(r#"{"highway":"footway","oneway:foot":"yes"}"#);
+    let graph = LocalOsmGraph::from_json(&explicit, &LocalOsmGraph::sha256_hex(&explicit)).unwrap();
+    assert!(
+        graph
+            .route(
+                &query(ActivityProfile::Walking, &["osm-node/1", "osm-node/3"]),
+                &control(),
+            )
+            .await
+            .is_ok()
+    );
+    assert_eq!(
+        graph
+            .route(
+                &query(ActivityProfile::Walking, &["osm-node/3", "osm-node/1"]),
+                &control(),
+            )
+            .await,
+        Err(RoutingError::NoPath)
+    );
+}
+
+#[tokio::test]
 async fn conditional_oneway_is_unknown_and_never_treated_as_unconditionally_bidirectional() {
     let bytes = inline_snapshot(
         r#"{"highway":"unclassified","foot":"yes","bicycle":"yes","oneway":"no","oneway:conditional":"yes @ (sunset-sunrise)"}"#,
@@ -278,6 +322,20 @@ async fn conditional_oneway_is_unknown_and_never_treated_as_unconditionally_bidi
         graph
             .route(
                 &query(ActivityProfile::Cycling, &["osm-node/3", "osm-node/1"]),
+                &control(),
+            )
+            .await,
+        Err(RoutingError::NoPath)
+    );
+
+    let path_bytes =
+        inline_snapshot(r#"{"highway":"footway","oneway:conditional":"yes @ (sunset-sunrise)"}"#);
+    let graph =
+        LocalOsmGraph::from_json(&path_bytes, &LocalOsmGraph::sha256_hex(&path_bytes)).unwrap();
+    assert_eq!(
+        graph
+            .route(
+                &query(ActivityProfile::Walking, &["osm-node/1", "osm-node/3"]),
                 &control(),
             )
             .await,
@@ -346,7 +404,14 @@ async fn pinned_bengaluru_snapshot_returns_auditable_walking_and_cycling_paths()
             .unwrap();
         assert_eq!(route.geometry.first(), graph.point(249088242).as_ref());
         assert_eq!(route.geometry.last(), graph.point(4017403934).as_ref());
-        assert_eq!(route.edges.len(), 28);
+        assert_eq!(
+            route.edges.len(),
+            match activity {
+                ActivityProfile::Walking => 26,
+                ActivityProfile::Cycling => 28,
+                ActivityProfile::Running => unreachable!(),
+            }
+        );
         assert_eq!(
             route.edges.first().unwrap().edge_id,
             "osm-way/46728546/v27/segment/0"
@@ -376,6 +441,7 @@ async fn pinned_bengaluru_snapshot_returns_auditable_walking_and_cycling_paths()
             route.provenance.attribution.as_deref(),
             Some("OpenStreetMap contributors (ODbL 1.0)")
         );
+        assert_eq!(route.legality.policy_version, "osm-pedestrian-policy-v2");
     }
 }
 

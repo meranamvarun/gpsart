@@ -15,19 +15,23 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Notify;
 
+#[cfg(test)]
+mod candidate_quality_tests;
 mod heart;
 mod quality;
 
 pub use heart::{
-    AnchorMatch, CandidateError, CandidatePart, CandidateSearch, CuratedTextCandidate,
-    CuratedTextSearchConfig, CuratedTextSearchRequest, HeartCandidate, HeartSearchConfig,
-    HeartSearchRequest, MatchOutcome, TraversalOccurrence,
+    AnchorMatch, CANDIDATE_LEGALITY_VERSION, CandidateError, CandidateLegalityEvidence,
+    CandidatePart, CandidateSearch, CuratedTextCandidate, CuratedTextSearchConfig,
+    CuratedTextSearchRequest, HeartCandidate, HeartSearchConfig, HeartSearchRequest, MatchOutcome,
+    ROUTE_USE_ADVISORY, ROUTE_USE_ADVISORY_VERSION, TraversalOccurrence, ValidatedCandidate,
 };
 pub use quality::{
-    BenchmarkError, BenchmarkHarness, BenchmarkOutcome, BenchmarkPins, BenchmarkRecord,
-    BenchmarkReport, CandidateQualityConfig, CandidateQualityMetrics, FeatureCheckOutcome,
-    IdentifyingFeatureCheck, QUALITY_VERSION, QualityBand, QualityError, QualityWeights,
-    ScoredCandidate, UserQuality, WEIGHTS_VERSION, rank_and_deduplicate, score_candidate,
+    BENCHMARK_SCHEMA_VERSION, BenchmarkError, BenchmarkHarness, BenchmarkOutcome, BenchmarkPins,
+    BenchmarkRecord, BenchmarkReport, CandidateQualityConfig, CandidateQualityMetrics,
+    FeatureCheckOutcome, IdentifyingFeatureCheck, QUALITY_VERSION, QualityBand, QualityError,
+    QualityWeights, ScoredCandidate, UserQuality, WEIGHTS_VERSION, rank_and_deduplicate,
+    score_candidate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -84,6 +88,18 @@ pub enum Direction {
     Both,
     ForwardOnly,
     ReverseOnly,
+    Profiled {
+        foot: DirectionRule,
+        bicycle: DirectionRule,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DirectionRule {
+    Both,
+    ForwardOnly,
+    ReverseOnly,
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -175,12 +191,15 @@ pub fn evaluate_edge(
         return Eligibility::Ineligible(IneligibleReason::AccessForbidden);
     }
 
-    match (edge.direction, traversal) {
-        (Metadata::Unknown, _) => {
+    match (
+        direction_for_profile(profile.access_policy, edge.direction),
+        traversal,
+    ) {
+        (DirectionRule::Unknown, _) => {
             return Eligibility::Ineligible(IneligibleReason::DirectionUnknown);
         }
-        (Metadata::Known(Direction::ForwardOnly), TraversalDirection::Reverse)
-        | (Metadata::Known(Direction::ReverseOnly), TraversalDirection::Forward) => {
+        (DirectionRule::ForwardOnly, TraversalDirection::Reverse)
+        | (DirectionRule::ReverseOnly, TraversalDirection::Forward) => {
             return Eligibility::Ineligible(IneligibleReason::DirectionForbidden);
         }
         _ => {}
@@ -209,6 +228,22 @@ pub fn evaluate_edge(
         qualifications.push(Qualification::MotorroadUnknown);
     }
     Eligibility::Eligible { qualifications }
+}
+
+const fn direction_for_profile(
+    policy: AccessPolicy,
+    direction: Metadata<Direction>,
+) -> DirectionRule {
+    match direction {
+        Metadata::Unknown => DirectionRule::Unknown,
+        Metadata::Known(Direction::Both) => DirectionRule::Both,
+        Metadata::Known(Direction::ForwardOnly) => DirectionRule::ForwardOnly,
+        Metadata::Known(Direction::ReverseOnly) => DirectionRule::ReverseOnly,
+        Metadata::Known(Direction::Profiled { foot, bicycle }) => match policy {
+            AccessPolicy::Foot => foot,
+            AccessPolicy::Cycling => bicycle,
+        },
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -317,6 +352,18 @@ pub struct RouteProvenance {
     pub attribution: Option<String>,
 }
 
+pub const CONTROLLED_GRAPH_POLICY_VERSION: &str = "controlled-graph-policy-v1";
+pub const OSM_PEDESTRIAN_POLICY_VERSION: &str = "osm-pedestrian-policy-v2";
+pub const VALHALLA_UNVERIFIED_POLICY_VERSION: &str = "valhalla-unverified-policy-v1";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RouteLegalityEvidence {
+    pub policy_version: String,
+    pub access_verified: bool,
+    pub direction_verified: bool,
+    pub turns_verified: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RoutePath {
     pub edges: Vec<RouteEdge>,
@@ -324,6 +371,7 @@ pub struct RoutePath {
     pub distance: Metres,
     pub manoeuvres: Vec<Manoeuvre>,
     pub provenance: RouteProvenance,
+    pub legality: RouteLegalityEvidence,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -503,6 +551,12 @@ impl ControlledGraph {
                 provider: "controlled-graph".into(),
                 data_version: Some(self.data_version.clone()),
                 attribution: None,
+            },
+            legality: RouteLegalityEvidence {
+                policy_version: CONTROLLED_GRAPH_POLICY_VERSION.into(),
+                access_verified: true,
+                direction_verified: true,
+                turns_verified: true,
             },
         })
     }
@@ -872,11 +926,15 @@ fn osm_edge_metadata(tags: &HashMap<String, String>) -> EdgeMetadata {
 fn osm_access(tags: &HashMap<String, String>) -> Metadata<Access> {
     let has_general_conditional = tags.contains_key("access:conditional");
     let general = osm_permission(tags.get("access").map(String::as_str));
+    let foot_default = match tags.get("highway").map(String::as_str) {
+        Some("footway" | "pedestrian" | "steps") => Some(true),
+        _ => general,
+    };
     let foot = osm_profile_permission(
         tags,
         "foot",
         "foot:conditional",
-        general,
+        foot_default,
         has_general_conditional,
     );
     let bicycle = osm_profile_permission(
@@ -926,19 +984,44 @@ fn osm_permission(value: Option<&str>) -> Option<bool> {
 }
 
 fn osm_direction(tags: &HashMap<String, String>) -> Metadata<Direction> {
-    if tags.contains_key("oneway:foot")
-        || tags.contains_key("oneway:bicycle")
-        || tags.contains_key("oneway:conditional")
-        || tags.contains_key("oneway:foot:conditional")
-        || tags.contains_key("oneway:bicycle:conditional")
+    let path_like = matches!(
+        tags.get("highway").map(String::as_str),
+        Some("footway" | "path" | "pedestrian" | "steps")
+    );
+    let general = if tags.contains_key("oneway:conditional") {
+        DirectionRule::Unknown
+    } else {
+        osm_direction_rule(tags.get("oneway").map(String::as_str)).unwrap_or(DirectionRule::Both)
+    };
+    let foot = if tags.contains_key("oneway:foot:conditional")
+        || (path_like && tags.contains_key("oneway:conditional"))
     {
-        return Metadata::Unknown;
-    }
-    match tags.get("oneway").map(String::as_str) {
-        Some("yes" | "1" | "true") => Metadata::Known(Direction::ForwardOnly),
-        Some("-1" | "reverse") => Metadata::Known(Direction::ReverseOnly),
-        Some("no" | "0" | "false") => Metadata::Known(Direction::Both),
-        _ => Metadata::Unknown,
+        DirectionRule::Unknown
+    } else if let Some(rule) = osm_direction_rule(tags.get("oneway:foot").map(String::as_str)) {
+        rule
+    } else if path_like && tags.contains_key("oneway") {
+        // General `oneway` on path-like ways is used inconsistently. Require
+        // `oneway:foot` before claiming a pedestrian direction.
+        DirectionRule::Unknown
+    } else {
+        // A road's general `oneway` is a vehicle restriction. Pedestrian
+        // direction is bidirectional unless a foot-specific tag says otherwise.
+        DirectionRule::Both
+    };
+    let bicycle = if tags.contains_key("oneway:bicycle:conditional") {
+        DirectionRule::Unknown
+    } else {
+        osm_direction_rule(tags.get("oneway:bicycle").map(String::as_str)).unwrap_or(general)
+    };
+    Metadata::Known(Direction::Profiled { foot, bicycle })
+}
+
+fn osm_direction_rule(value: Option<&str>) -> Option<DirectionRule> {
+    match value {
+        Some("yes" | "1" | "true") => Some(DirectionRule::ForwardOnly),
+        Some("-1" | "reverse") => Some(DirectionRule::ReverseOnly),
+        Some("no" | "0" | "false") => Some(DirectionRule::Both),
+        _ => None,
     }
 }
 
@@ -1258,6 +1341,12 @@ impl<T: ValhallaTransport> RouteProvider for ValhallaAdapter<T> {
                         data_version: self.data_version.clone(),
                         attribution: Some(self.attribution.clone()),
                     },
+                    legality: RouteLegalityEvidence {
+                        policy_version: VALHALLA_UNVERIFIED_POLICY_VERSION.into(),
+                        access_verified: false,
+                        direction_verified: false,
+                        turns_verified: false,
+                    },
                 })
             })
             .await
@@ -1378,6 +1467,12 @@ impl RouteProvider for LocalOsmGraph {
             provider: "local-osm-snapshot".into(),
             data_version: Some(self.data_version.clone()),
             attribution: Some(self.attribution.clone()),
+        };
+        route.legality = RouteLegalityEvidence {
+            policy_version: OSM_PEDESTRIAN_POLICY_VERSION.into(),
+            access_verified: true,
+            direction_verified: true,
+            turns_verified: true,
         };
         Ok(route)
     }

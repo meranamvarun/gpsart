@@ -8,6 +8,9 @@ use gpsart_domain::templates::{
 use gpsart_domain::{Metres, RouteCandidateProfile, RouteRequestProfile};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use std::ops::Deref;
+#[cfg(test)]
+use std::ops::DerefMut;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -118,11 +121,75 @@ impl HeartCandidate {
     }
 }
 
-pub type CuratedTextCandidate = HeartCandidate;
+pub const CANDIDATE_LEGALITY_VERSION: &str = "candidate-legality-v1";
+pub const ROUTE_USE_ADVISORY_VERSION: &str = "route-use-advisory-v1";
+pub const ROUTE_USE_ADVISORY: &str = "Routing and map data can be incomplete or change. Before and during the activity, verify that every segment is currently open and lawful for your activity; obey posted signs, closures, property restrictions, and applicable laws; and choose a safe alternative or stop when conditions differ.";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CandidateLegalityEvidence {
+    pub validation_version: String,
+    pub routing_policy_version: String,
+    pub routing_data_version: String,
+    pub profile_version: String,
+    pub advisory_version: String,
+    pub access_verified: bool,
+    pub direction_verified: bool,
+    pub turns_verified: bool,
+}
+
+/// A route candidate that passed the routing-provider evidence checks and the
+/// occurrence-level legality validation in `CandidateSearch`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatedCandidate {
+    candidate: HeartCandidate,
+    legality: CandidateLegalityEvidence,
+}
+
+impl ValidatedCandidate {
+    pub const fn candidate(&self) -> &HeartCandidate {
+        &self.candidate
+    }
+
+    pub const fn legality_evidence(&self) -> &CandidateLegalityEvidence {
+        &self.legality
+    }
+
+    pub fn into_candidate(self) -> HeartCandidate {
+        self.candidate
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_fixture(
+        candidate: HeartCandidate,
+        legality: CandidateLegalityEvidence,
+    ) -> Self {
+        Self {
+            candidate,
+            legality,
+        }
+    }
+}
+
+impl Deref for ValidatedCandidate {
+    type Target = HeartCandidate;
+
+    fn deref(&self) -> &Self::Target {
+        &self.candidate
+    }
+}
+
+#[cfg(test)]
+impl DerefMut for ValidatedCandidate {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.candidate
+    }
+}
+
+pub type CuratedTextCandidate = ValidatedCandidate;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MatchOutcome {
-    Match(Box<HeartCandidate>),
+    Match(Box<ValidatedCandidate>),
     NoMatch,
 }
 
@@ -480,11 +547,17 @@ fn validate_candidate(
     design_anchors: Vec<GeoPointE7>,
     design_leg_parts: Vec<CandidatePart>,
     path: RoutePath,
-) -> Option<HeartCandidate> {
+) -> Option<ValidatedCandidate> {
+    let routing_data_version = path.provenance.data_version.as_ref()?.clone();
     if path.geometry.len() < 2
         || path.edges.is_empty()
         || path.geometry.len().checked_add(path.edges.len())? > config.max_retained_points
         || path.geometry.first() != Some(&request.confirmed_start)
+        || path.legality.policy_version.trim().is_empty()
+        || routing_data_version.trim().is_empty()
+        || !path.legality.access_verified
+        || !path.legality.direction_verified
+        || !path.legality.turns_verified
     {
         return None;
     }
@@ -506,9 +579,13 @@ fn validate_candidate(
         if edge.begin_geometry_index != expected_geometry_index
             || edge.begin_geometry_index >= edge.end_geometry_index
             || edge.end_geometry_index >= path.geometry.len()
-            || edge
-                .qualifications
-                .contains(&crate::Qualification::ProviderAccessUnverified)
+            || edge.qualifications.iter().any(|qualification| {
+                matches!(
+                    qualification,
+                    crate::Qualification::ProviderAccessUnverified
+                        | crate::Qualification::AccessUnknown
+                )
+            })
         {
             return None;
         }
@@ -573,7 +650,7 @@ fn validate_candidate(
             distance,
         });
     }
-    Some(HeartCandidate {
+    let candidate = HeartCandidate {
         template_id: template.definition.id.clone(),
         template_version: template.definition.version,
         template_hash: template.definition_hash.clone(),
@@ -586,5 +663,18 @@ fn validate_candidate(
         repeated_distance_metres,
         closure_distance_metres: closure,
         provenance: path.provenance,
+    };
+    Some(ValidatedCandidate {
+        candidate,
+        legality: CandidateLegalityEvidence {
+            validation_version: CANDIDATE_LEGALITY_VERSION.into(),
+            routing_policy_version: path.legality.policy_version,
+            routing_data_version,
+            profile_version: request.profile.version().as_str().into(),
+            advisory_version: ROUTE_USE_ADVISORY_VERSION.into(),
+            access_verified: true,
+            direction_verified: true,
+            turns_verified: true,
+        },
     })
 }
