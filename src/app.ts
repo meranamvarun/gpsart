@@ -14,8 +14,9 @@ import {
 import { loadRouteSnapshots } from "./client/storage.ts";
 import { renderMap } from "./app/map.ts";
 import { currentScreen, navigate, type Screen } from "./app/router.ts";
+import { screenForWorkflow } from "./app/outcome-flow.ts";
 import { isStandaloneScreen, renderScreen } from "./app/screen-controller.ts";
-import { initialState, updateRequest, updateUi } from "./app/state.ts";
+import { initialState, recordCompletedAttempt, retryCompletedAttempt, updateRequest, updateUi } from "./app/state.ts";
 import type { DesignCategory } from "./app/catalogue.ts";
 import type { RouteRequest } from "./domain/planner.ts";
 import {
@@ -135,24 +136,13 @@ function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
     state = { ...state, request: snapshot.request, outcome: "pending", routeResult: null };
     proposedStart = snapshot.proposedStart;
   }
-  if (snapshot.phase === "polling") {
-    showScreen("generating");
-    return;
+  const completed = snapshot.phase === "terminal" ? snapshot.status
+    : snapshot.phase === "stale" ? snapshot.previousStatus
+      : null;
+  if (snapshot.request && completed) {
+    state = recordCompletedAttempt(state, snapshot.request, completed);
   }
-  if (snapshot.phase === "cancelled") {
-    showScreen("planner");
-    return;
-  }
-  if (snapshot.phase === "terminal" && snapshot.status) {
-    const code = snapshot.status.outcome?.code;
-    if (snapshot.status.state === "succeeded") showScreen("results");
-    else if (code === "unsupported_coverage") showScreen("coverage");
-    else if (snapshot.status.state === "no_match") showScreen("no-match");
-    else if (snapshot.status.state === "cancelled") showScreen("planner");
-    else showScreen("error");
-    return;
-  }
-  showScreen("planner");
+  showScreen(screenForWorkflow(snapshot));
 }
 
 function submitPlan(): void {
@@ -173,6 +163,22 @@ function submitPlan(): void {
   if (state.request.start !== start || state.request.distanceKm !== distanceKm) {
     state = updateRequest(state, { start, distanceKm });
   }
+  void workflow.submit(state.request, selected);
+}
+
+function retryDependency(): void {
+  const retried = retryCompletedAttempt(state);
+  if (!retried) return;
+  const selected = proposedStart?.label === retried.request.start
+    ? proposedStart
+    : parseManualCoordinates(retried.request.start);
+  if (!selected) {
+    locationMessage = "Re-select the original start before retrying this request.";
+    showScreen("planner");
+    return;
+  }
+  state = retried;
+  proposedStart = selected;
   void workflow.submit(state.request, selected);
 }
 
@@ -206,6 +212,7 @@ function bind(): void {
     if (button.dataset.action === "location") void useBrowserLocation();
     if (button.dataset.action === "confirm-start") void workflow.confirmAndStart();
     if (button.dataset.action === "cancel-job") void workflow.cancel();
+    if (button.dataset.action === "retry-job") retryDependency();
     if (button.dataset.action === "edit-start") document.querySelector<HTMLInputElement>("#start")?.select();
     if (button.dataset.action === "google") navigate("auth-pending");
   }));
