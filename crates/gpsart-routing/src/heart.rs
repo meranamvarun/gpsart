@@ -5,7 +5,7 @@ use crate::{
 use gpsart_domain::templates::{TraversalPart, VersionedTemplate};
 use gpsart_domain::{Metres, RouteCandidateProfile, RouteRequestProfile};
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 const EARTH_METRES_PER_DEGREE: f64 = 111_320.0;
@@ -140,14 +140,48 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
             return Ok(MatchOutcome::NoMatch);
         }
         let control = AttemptControl::with_timeout(config.wall_time, config.max_provider_calls);
+        self.heart_with_control(template, request, config, &control)
+            .await
+    }
+
+    pub async fn heart_with_control(
+        &self,
+        template: &VersionedTemplate,
+        request: &HeartSearchRequest,
+        config: &HeartSearchConfig,
+        control: &AttemptControl,
+    ) -> Result<MatchOutcome, CandidateError> {
+        validate_inputs(template, request, config)?;
+        if control.is_cancelled() {
+            return Err(CandidateError::Cancelled);
+        }
+        if config.max_provider_calls == 0 || config.wall_time.is_zero() {
+            return Ok(MatchOutcome::NoMatch);
+        }
+        let deadline = Instant::now()
+            .checked_add(config.wall_time)
+            .ok_or(CandidateError::InvalidRequest)?;
         let mut anchor_matches = 0_usize;
+        let mut provider_calls = 0_usize;
         for &(east, north) in config
             .placement_offsets_metres
             .iter()
             .take(config.max_placements)
         {
+            if control.is_cancelled() {
+                return Err(CandidateError::Cancelled);
+            }
+            if Instant::now() >= deadline {
+                return Ok(MatchOutcome::NoMatch);
+            }
             for &scale in config.scales_metres.iter().take(config.max_scales) {
                 for &rotation in config.rotations_degrees.iter().take(config.max_rotations) {
+                    if control.is_cancelled() {
+                        return Err(CandidateError::Cancelled);
+                    }
+                    if Instant::now() >= deadline || provider_calls >= config.max_provider_calls {
+                        return Ok(MatchOutcome::NoMatch);
+                    }
                     let Some(design_anchors) = project_and_match(
                         template,
                         request.confirmed_start,
@@ -158,9 +192,18 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
                         self.anchors,
                         config,
                         &mut anchor_matches,
-                    ) else {
+                        deadline,
+                        control,
+                    )?
+                    else {
                         continue;
                     };
+                    if control.is_cancelled() {
+                        return Err(CandidateError::Cancelled);
+                    }
+                    if Instant::now() >= deadline {
+                        return Ok(MatchOutcome::NoMatch);
+                    }
                     let mut ordered = Vec::with_capacity(design_anchors.len() + 2);
                     ordered.push(request.confirmed_start);
                     ordered.extend(design_anchors.iter().copied());
@@ -169,9 +212,10 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
                         continue;
                     }
                     let query = RouteQuery::from_points(request.profile, ordered);
-                    let path = match self.provider.route(&query, &control).await {
+                    provider_calls += 1;
+                    let path = match self.provider.route(&query, control).await {
                         Ok(path) => path,
-                        Err(RoutingError::NoPath | RoutingError::InvalidRequest) => continue,
+                        Err(RoutingError::NoPath) => continue,
                         Err(RoutingError::DeadlineExceeded | RoutingError::BudgetExhausted) => {
                             return Ok(MatchOutcome::NoMatch);
                         }
@@ -206,6 +250,10 @@ fn validate_inputs(
         || config.max_scales > config.scales_metres.len()
         || config.max_rotations > config.rotations_degrees.len()
         || config.scales_metres.contains(&0)
+        || config.rotations_degrees.iter().any(|rotation| {
+            f64::from(*rotation) < template.definition.orientation.min_degrees
+                || f64::from(*rotation) > template.definition.orientation.max_degrees
+        })
         || config.anchor_tolerance_metres == 0
     {
         return Err(CandidateError::InvalidRequest);
@@ -224,7 +272,9 @@ fn project_and_match<A: AnchorMatch>(
     anchors: &A,
     config: &HeartSearchConfig,
     anchor_matches: &mut usize,
-) -> Option<Vec<GeoPointE7>> {
+    deadline: Instant,
+    control: &AttemptControl,
+) -> Result<Option<Vec<GeoPointE7>>, CandidateError> {
     let radians = f64::from(rotation).to_radians();
     let (sin, cos) = radians.sin_cos();
     let mut matched = Vec::new();
@@ -234,20 +284,40 @@ fn project_and_match<A: AnchorMatch>(
             TraversalPart::Transition(transition) => &transition.points,
         };
         for point in points {
-            *anchor_matches = anchor_matches.checked_add(1)?;
+            if control.is_cancelled() {
+                return Err(CandidateError::Cancelled);
+            }
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+            *anchor_matches = match anchor_matches.checked_add(1) {
+                Some(value) => value,
+                None => return Ok(None),
+            };
             if *anchor_matches > config.max_anchor_matches {
-                return None;
+                return Ok(None);
             }
             let local_east = (point.x - 0.5) * f64::from(scale);
             let local_north = (0.5 - point.y) * f64::from(scale);
             let rotated_east = local_east * cos - local_north * sin + f64::from(east);
             let rotated_north = local_east * sin + local_north * cos + f64::from(north);
-            let target = offset_point(origin, rotated_east, rotated_north)?;
-            let anchor = anchors.nearest_anchor(target, config.anchor_tolerance_metres)?;
+            let Some(target) = offset_point(origin, rotated_east, rotated_north) else {
+                return Ok(None);
+            };
+            let Some(anchor) = anchors.nearest_anchor(target, config.anchor_tolerance_metres)
+            else {
+                return Ok(None);
+            };
             matched.push(anchor);
         }
     }
-    (matched.len() >= 4 && matched.first() == matched.last()).then_some(matched)
+    if control.is_cancelled() {
+        return Err(CandidateError::Cancelled);
+    }
+    if Instant::now() >= deadline {
+        return Ok(None);
+    }
+    Ok((matched.len() >= 4 && matched.first() == matched.last()).then_some(matched))
 }
 
 fn offset_point(origin: GeoPointE7, east: f64, north: f64) -> Option<GeoPointE7> {
@@ -307,6 +377,9 @@ fn validate_candidate(
         if edge.begin_geometry_index != expected_geometry_index
             || edge.begin_geometry_index >= edge.end_geometry_index
             || edge.end_geometry_index >= path.geometry.len()
+            || edge
+                .qualifications
+                .contains(&crate::Qualification::ProviderAccessUnverified)
         {
             return None;
         }
@@ -330,6 +403,10 @@ fn validate_candidate(
         || boundaries
             .iter()
             .any(|index| *index == 0 || *index >= path.geometry.len() - 1)
+        || boundaries
+            .iter()
+            .zip(&design_anchors)
+            .any(|(index, anchor)| path.geometry[*index] != *anchor)
     {
         return None;
     }

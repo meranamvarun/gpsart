@@ -7,8 +7,8 @@ The focused `heart_candidate` suite translates the story criteria into determini
 1. The successful route geometry begins and ends at the exact confirmed network point. Closure is measured from routed geometry and must be at most five metres; no closing coordinate is appended.
 2. Every returned edge occurrence is retained in order and labelled as access, artwork, connector, or return. Repeated edge identities are marked `retraced`; the fixture's return repeats both access edges.
 3. Candidate distance is the checked sum of every routed edge occurrence, including repeated travel, and is compared directly with the inclusive, unrounded metre interval.
-4. Empty, truncated, discontinuous, distance-inconsistent, out-of-range, over-memory, deadline-exhausted, and provider-rejected paths cannot become candidates. Provider unavailability remains an error rather than a false no-match.
-5. Placement, scale, rotation, anchor-match, provider-call, retained-point, and wall-time limits are explicit configuration and are enforced during the sequential search.
+4. Empty, truncated, discontinuous, distance-inconsistent, out-of-range, over-memory, deadline-exhausted, provider-access-unverified, and provider-rejected paths cannot become candidates. Every provider via point must equal its requested network anchor. Provider contract failures remain errors rather than false no-matches.
+5. Placement, scale, rotation, anchor-match, provider-call, retained-point, and wall-time limits are explicit configuration and are enforced during both fitting and routing. Rotations outside the immutable template bounds are rejected. An externally supplied `AttemptControl` supports cancellation throughout fitting and routing.
 6. The controlled legal fixture returns a recognisable heart while the out-of-tolerance fixture returns `NoMatch`, with no direct-line fallback.
 
 ## Deterministic result and validation trace
@@ -33,4 +33,6 @@ node scripts/cargo.mjs clippy -p gpsart-routing --all-targets -- -D warnings
 npm run factory:verify
 ```
 
-Developer result on 2026-10-04: the focused suite passed 4/4, the complete routing suite passed 28/28, strict routing clippy passed, and the unchanged `npm run factory:verify` gate passed after a production build populated `dist`. The first factory run reproduced the documented pre-existing command-order issue: `test:sites` ran before `build` in the fresh worktree and returned nonzero; the same run then built successfully, and the unchanged canonical rerun passed every phase.
+Developer result on 2026-10-04 before review: the focused suite passed 4/4, the complete routing suite passed 28/28, strict routing clippy passed, and the unchanged `npm run factory:verify` gate passed after a production build populated `dist`. The first factory run reproduced the documented pre-existing command-order issue: `test:sites` ran before `build` in the fresh worktree and returned nonzero; the same run then built successfully, and the unchanged canonical rerun passed every phase.
+
+Independent QA then found validation gaps despite the green gates: unverified provider access was accepted, orientation bounds were not enforced, fitting could outlive its deadline, via points were not reconciled with requested anchors, and provider `InvalidRequest` was misclassified as no-match. Regressions were added before each correction. The revised focused suite passes 7/7 and the complete routing suite passes 31/31; it now also exercises external and provider cancellation explicitly. The final independent rerun is recorded by QA below.

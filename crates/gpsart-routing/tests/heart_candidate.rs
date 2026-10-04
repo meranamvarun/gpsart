@@ -3,8 +3,8 @@ use gpsart_domain::{ActivityProfile, Metres, RouteRequestProfile, templates::emb
 use gpsart_routing::{
     Access, AnchorMatch, AttemptControl, CandidatePart, CandidateSearch, ControlledEdge,
     ControlledGraph, ControlledNode, Direction, EdgeMetadata, GeoPointE7, HeartSearchConfig,
-    HeartSearchRequest, MatchOutcome, Metadata, RoutePath, RouteProvider, RouteQuery, RoutingError,
-    Surface,
+    HeartSearchRequest, MatchOutcome, Metadata, Qualification, RoutePath, RouteProvider,
+    RouteQuery, RoutingError, Surface,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -189,6 +189,27 @@ struct RecordingProvider {
     calls: Arc<Mutex<usize>>,
 }
 
+enum FailureKind {
+    InvalidRequest,
+    Cancelled,
+}
+
+struct FailingProvider(FailureKind);
+
+#[async_trait]
+impl RouteProvider for FailingProvider {
+    async fn route(
+        &self,
+        _query: &RouteQuery,
+        _control: &AttemptControl,
+    ) -> Result<RoutePath, RoutingError> {
+        Err(match self.0 {
+            FailureKind::InvalidRequest => RoutingError::InvalidRequest,
+            FailureKind::Cancelled => RoutingError::Cancelled,
+        })
+    }
+}
+
 #[async_trait]
 impl RouteProvider for RecordingProvider {
     async fn route(
@@ -233,7 +254,7 @@ async fn rejects_invalid_or_incomplete_paths_before_returning_a_candidate() {
         .unwrap();
     let anchors = FixedAnchors;
 
-    for mutate in 0..4 {
+    for mutate in 0..6 {
         let mut invalid = valid.clone();
         match mutate {
             0 => {
@@ -241,7 +262,14 @@ async fn rejects_invalid_or_incomplete_paths_before_returning_a_candidate() {
             }
             1 => invalid.edges[1].begin_geometry_index += 1,
             2 => invalid.edges[0].distance = None,
-            _ => invalid.distance = Metres::new(valid.distance.value() + 1).unwrap(),
+            3 => invalid.distance = Metres::new(valid.distance.value() + 1).unwrap(),
+            4 => invalid.edges[0]
+                .qualifications
+                .push(Qualification::ProviderAccessUnverified),
+            _ => {
+                let first_via = invalid.manoeuvres[1].geometry_index;
+                invalid.geometry[first_via] = point(99, 99);
+            }
         };
         let provider = RecordingProvider {
             response: invalid,
@@ -256,6 +284,104 @@ async fn rejects_invalid_or_incomplete_paths_before_returning_a_candidate() {
         );
         assert_eq!(*provider.calls.lock().unwrap(), 1);
     }
+}
+
+#[test]
+fn rotations_outside_the_immutable_template_bounds_are_rejected() {
+    let graph = graph();
+    let template = embedded_catalogue()
+        .unwrap()
+        .get("heart", 1)
+        .unwrap()
+        .clone();
+    let mut invalid = config();
+    invalid.rotations_degrees = vec![181];
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    assert_eq!(
+        runtime.block_on(CandidateSearch::new(&graph, &graph).heart(
+            &template,
+            &request(),
+            &invalid
+        )),
+        Err(gpsart_routing::CandidateError::InvalidRequest)
+    );
+}
+
+struct SlowAnchors;
+
+impl AnchorMatch for SlowAnchors {
+    fn nearest_anchor(&self, target: GeoPointE7, _tolerance_metres: u32) -> Option<GeoPointE7> {
+        std::thread::sleep(Duration::from_millis(5));
+        Some(target)
+    }
+}
+
+#[tokio::test]
+async fn positive_wall_deadline_applies_during_anchor_fitting_before_provider_work() {
+    let graph = graph();
+    let template = embedded_catalogue()
+        .unwrap()
+        .get("heart", 1)
+        .unwrap()
+        .clone();
+    let calls = Arc::new(Mutex::new(0));
+    let valid = graph
+        .route(
+            &RouteQuery::new(
+                RouteRequestProfile::new(ActivityProfile::Walking),
+                ["start", "access"],
+            ),
+            &AttemptControl::with_timeout(Duration::from_secs(1), 1),
+        )
+        .await
+        .unwrap();
+    let provider = RecordingProvider {
+        response: valid,
+        calls: calls.clone(),
+    };
+    let mut limited = config();
+    limited.wall_time = Duration::from_millis(1);
+
+    assert_eq!(
+        CandidateSearch::new(&provider, &SlowAnchors)
+            .heart(&template, &request(), &limited)
+            .await
+            .unwrap(),
+        MatchOutcome::NoMatch
+    );
+    assert_eq!(*calls.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn provider_contract_errors_and_cancellation_are_not_reported_as_no_match() {
+    let template = embedded_catalogue()
+        .unwrap()
+        .get("heart", 1)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        CandidateSearch::new(&FailingProvider(FailureKind::InvalidRequest), &FixedAnchors)
+            .heart(&template, &request(), &config())
+            .await,
+        Err(gpsart_routing::CandidateError::Routing(
+            RoutingError::InvalidRequest
+        ))
+    );
+    assert_eq!(
+        CandidateSearch::new(&FailingProvider(FailureKind::Cancelled), &FixedAnchors)
+            .heart(&template, &request(), &config())
+            .await,
+        Err(gpsart_routing::CandidateError::Cancelled)
+    );
+
+    let control = AttemptControl::with_timeout(Duration::from_secs(1), 1);
+    control.cancel();
+    assert_eq!(
+        CandidateSearch::new(&FailingProvider(FailureKind::InvalidRequest), &FixedAnchors)
+            .heart_with_control(&template, &request(), &config(), &control)
+            .await,
+        Err(gpsart_routing::CandidateError::Cancelled)
+    );
 }
 
 #[tokio::test]

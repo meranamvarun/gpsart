@@ -1008,6 +1008,10 @@ impl AttemptControl {
         self.cancellation.notify.notify_waiters();
     }
 
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation.cancelled.load(Ordering::Acquire)
+    }
+
     async fn cancelled(&self) {
         loop {
             let notified = self.cancellation.notify.notified();
