@@ -114,8 +114,20 @@ function failure(screen: "no-match" | "coverage" | "error", state: AppState, wor
     : null;
   const attempt = state.lastAttempt;
   const retainedCode = workflow?.phase === "error" ? undefined : attempt?.status.outcome?.code;
-  const code = (workflowCode ?? issueCode ?? retainedCode) as RouteJobOutcomeCode | undefined;
-  const request = workflow?.request ?? attempt?.request ?? state.request;
+  let code: RouteJobOutcomeCode | undefined;
+  let request = state.request;
+  if (workflowCode && workflow?.request) {
+    code = workflowCode;
+    request = workflow.request;
+  } else if (issueCode && workflow?.request) {
+    code = issueCode;
+    request = workflow.request;
+  } else if (retainedCode && attempt) {
+    code = retainedCode;
+    request = attempt.request;
+  } else {
+    request = workflow?.request ?? attempt?.request ?? state.request;
+  }
   const fallback: OutcomePresentation = screen === "coverage" ? {
     title: "Coverage or road access was not verified.",
     explanation: "The service did not accept this exact start for route generation.",

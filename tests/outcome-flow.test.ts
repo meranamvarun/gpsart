@@ -151,6 +151,33 @@ test("refinement retains the completed request and result while advancing only t
   assert.match(plannerMarkup, /15\.0 km/);
 });
 
+test("a retained outcome is always rendered with its own request while newer work is active", () => {
+  const completed = recordCompletedAttempt(
+    { ...initialState(), request: originalRequest },
+    originalRequest,
+    terminalStatus("outside_distance"),
+  );
+  const newerRequest = { ...originalRequest, distanceKm: 18, revision: 4 };
+  const newerWorkflow: PlannerWorkflowSnapshot = {
+    ...terminalWorkflow("outside_distance"),
+    phase: "polling",
+    request: newerRequest,
+    status: {
+      ...terminalStatus("outside_distance"),
+      requestRevision: 4,
+      state: "running",
+      completedAtEpochSeconds: null,
+      outcome: null,
+      resultIds: [],
+      pollAfterSeconds: 1,
+    },
+  };
+  const markup = renderScreen("no-match", completed, { kind: "available", snapshots: [] }, newerWorkflow);
+  assert.match(markup, /15\.0 km/);
+  assert.doesNotMatch(markup, /18\.0 km/);
+  assert.match(markup, /No result was inside your distance interval/i);
+});
+
 test("retrying a retryable completed dependency failure creates one new revision and preserves evidence", () => {
   const completed = recordCompletedAttempt(
     { ...initialState(), request: originalRequest },

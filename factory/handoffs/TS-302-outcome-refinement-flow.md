@@ -9,6 +9,7 @@
 - `screenForWorkflow` is the single mapping from a validated planner-workflow snapshot to the planner, generating, results, coverage, no-match, or dependency-error screen.
 - `outcomePresentation` supplies outcome-specific copy and suggestions for every TS-203 terminal classification. Suggestions carry `feasibility: not_evaluated`; the UI says that only a new service search can evaluate them.
 - `AppState.lastAttempt` retains the immutable request and validated terminal status for the most recent completed attempt. A refinement changes only the current request, increments its revision, and leaves the prior request and observed result visible in the same browser session.
+- Failure rendering treats a classification and its immutable request as one evidence pair; newer active-work inputs are never shown under an older outcome.
 - Only `provider_unavailable` exposes dependency retry. Retry is a user action, retains the completed job as evidence, copies the unchanged route inputs to a new request revision, and delegates duplicate-click/idempotency handling to `PlannerWorkflow`.
 - A newer user refinement disables retry of the older attempt, so retry never overwrites edited inputs. Later stale terminal responses cannot replace a retained higher revision.
 
