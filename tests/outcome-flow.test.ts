@@ -177,6 +177,11 @@ test("retrying a retryable completed dependency failure creates one new revision
 
   const edited = updateRequest(completed, { design: "HI" });
   assert.equal(retryCompletedAttempt(edited), null, "retry never overwrites a newer user refinement");
+  assert.doesNotMatch(
+    renderScreen("error", edited, { kind: "available", snapshots: [] }),
+    /data-action="retry-job"/,
+    "a newer edit visibly disables retry of the retained attempt",
+  );
 });
 
 test("refining after success keeps the successful request and observed result reference visible", () => {

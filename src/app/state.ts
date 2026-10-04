@@ -66,13 +66,18 @@ export function recordCompletedAttempt(state: AppState, request: RouteRequest, s
 
 export function retryCompletedAttempt(state: AppState): AppState | null {
   const attempt = state.lastAttempt;
-  if (!attempt?.status.outcome?.retryable || !sameRequest(state.request, attempt.request)) return null;
+  if (!attempt || !canRetryCompletedAttempt(state)) return null;
   return {
     ...state,
     request: reviseRequest(attempt.request, {}),
     outcome: "pending",
     routeResult: null,
   };
+}
+
+export function canRetryCompletedAttempt(state: AppState): boolean {
+  const attempt = state.lastAttempt;
+  return !!attempt?.status.outcome?.retryable && sameRequest(state.request, attempt.request);
 }
 
 export function updateUi(state: AppState, changes: Partial<Pick<AppState, "signedIn" | "category" | "mapExpanded">>): AppState {

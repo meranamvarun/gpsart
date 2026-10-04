@@ -1,7 +1,7 @@
 import { distanceBounds } from "../domain/planner.ts";
 import type { LoadedSnapshots } from "../client/storage.ts";
 import { previewsFor } from "./catalogue.ts";
-import type { AppState } from "./state.ts";
+import { canRetryCompletedAttempt, type AppState } from "./state.ts";
 import { screens, type Screen } from "./router.ts";
 import type { PlannerWorkflowSnapshot, WorkflowIssue } from "../client/planner-workflow.ts";
 import type { RouteJobOutcomeCode } from "../domain/job-status.ts";
@@ -134,7 +134,7 @@ function failure(screen: "no-match" | "coverage" | "error", state: AppState, wor
   const suggestions = presentation.suggestions.length
     ? `<h3>Options to review</h3><ul class="rows">${presentation.suggestions.map((suggestion) => `<li>${escapeHtml(suggestion)}</li>`).join("")}</ul><p class="notice">These options have not been checked for local feasibility. Only a new service search can evaluate them.</p>`
     : "";
-  const retry = presentation.retryable && attempt?.status.outcome?.code === code
+  const retry = presentation.retryable && attempt?.status.outcome?.code === code && canRetryCompletedAttempt(state)
     ? `<button type="button" class="primary full" data-action="retry-job">Retry as a new request revision</button><p class="helper">The service advises waiting ${attempt?.status.outcome?.retryAfterSeconds ?? 0} seconds. The completed job is retained; repeated clicks share the new logical request.</p>`
     : "";
   return `${top(presentation.title, presentation.explanation)}<span class="hero-icon">${icon(iconName)}</span>${requestSummary(request)}${suggestions}${retry}${link("planner", "Review or edit the original request")}`;
