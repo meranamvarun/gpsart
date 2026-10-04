@@ -19,6 +19,10 @@ use gpsart_persistence::jobs::{
     JobError, JobOutcomeCode, JobState, JobStatusSnapshot, PostgresJobCoordinator,
     RouteJobSubmission, SUPPORTED_ALGORITHM_VERSION,
 };
+use gpsart_persistence::routes::{
+    CandidateSnapshot, DirectionMarker, PostgresRouteSnapshotStore, RouteSnapshotError,
+    RouteSnapshotStore,
+};
 use gpsart_persistence::{
     DependencyProbe, GuestSessionStore, PostgresProbe, ResolvedStartRecord, ResolvedStartStore,
 };
@@ -58,6 +62,7 @@ struct AppState {
     session_policy: SessionPolicy,
     authenticate_starts: bool,
     jobs: Arc<dyn RouteJobService>,
+    routes: Arc<dyn RouteSnapshotService>,
 }
 
 #[derive(Serialize)]
@@ -96,6 +101,7 @@ pub fn app(readiness: impl Readiness) -> Router {
         default_session_policy(),
         false,
         UnavailableRouteJobService,
+        UnavailableRouteSnapshotService,
     )
 }
 
@@ -107,6 +113,7 @@ pub fn app_with_starts(readiness: impl Readiness, starts: impl StartService) -> 
         default_session_policy(),
         false,
         UnavailableRouteJobService,
+        UnavailableRouteSnapshotService,
     )
 }
 
@@ -122,6 +129,7 @@ pub fn app_with_auth(
         session_policy,
         true,
         UnavailableRouteJobService,
+        UnavailableRouteSnapshotService,
     )
 }
 
@@ -138,6 +146,7 @@ pub fn app_with_services(
         session_policy,
         true,
         UnavailableRouteJobService,
+        UnavailableRouteSnapshotService,
     )
 }
 
@@ -148,7 +157,51 @@ pub fn app_with_all_services(
     session_policy: SessionPolicy,
     jobs: impl RouteJobService,
 ) -> Router {
-    build_app(readiness, starts, sessions, session_policy, true, jobs)
+    build_app(
+        readiness,
+        starts,
+        sessions,
+        session_policy,
+        true,
+        jobs,
+        UnavailableRouteSnapshotService,
+    )
+}
+
+pub fn app_with_routes(
+    readiness: impl Readiness,
+    sessions: Arc<impl GuestSessionStore>,
+    session_policy: SessionPolicy,
+    routes: impl RouteSnapshotService,
+) -> Router {
+    build_app(
+        readiness,
+        UnavailableStartService,
+        sessions,
+        session_policy,
+        true,
+        UnavailableRouteJobService,
+        routes,
+    )
+}
+
+pub fn app_with_all_services_and_routes(
+    readiness: impl Readiness,
+    starts: impl StartService,
+    sessions: Arc<impl GuestSessionStore>,
+    session_policy: SessionPolicy,
+    jobs: impl RouteJobService,
+    routes: impl RouteSnapshotService,
+) -> Router {
+    build_app(
+        readiness,
+        starts,
+        sessions,
+        session_policy,
+        true,
+        jobs,
+        routes,
+    )
 }
 
 fn build_app(
@@ -158,6 +211,7 @@ fn build_app(
     session_policy: SessionPolicy,
     authenticate_starts: bool,
     jobs: impl RouteJobService,
+    routes: impl RouteSnapshotService,
 ) -> Router {
     Router::new()
         .route("/health/live", get(live))
@@ -171,6 +225,7 @@ fn build_app(
             "/api/v1/route-jobs/{id}",
             get(get_route_job).delete(cancel_route_job),
         )
+        .route("/api/v1/routes/{id}", get(get_route_snapshot))
         .route(
             "/api/v1/guest-sessions",
             axum::routing::post(create_guest_session),
@@ -190,6 +245,7 @@ fn build_app(
             session_policy,
             authenticate_starts,
             jobs: Arc::new(jobs),
+            routes: Arc::new(routes),
         })
 }
 
@@ -260,6 +316,39 @@ impl RouteJobService for PostgresJobCoordinator {
         job_id: uuid::Uuid,
     ) -> Result<JobStatusSnapshot, JobError> {
         self.status(owner, job_id).await
+    }
+}
+
+#[async_trait]
+pub trait RouteSnapshotService: Send + Sync + 'static {
+    async fn get(
+        &self,
+        owner: uuid::Uuid,
+        route_id: uuid::Uuid,
+    ) -> Result<CandidateSnapshot, RouteSnapshotError>;
+}
+
+#[async_trait]
+impl RouteSnapshotService for PostgresRouteSnapshotStore {
+    async fn get(
+        &self,
+        owner: uuid::Uuid,
+        route_id: uuid::Uuid,
+    ) -> Result<CandidateSnapshot, RouteSnapshotError> {
+        RouteSnapshotStore::get(self, owner, route_id).await
+    }
+}
+
+struct UnavailableRouteSnapshotService;
+
+#[async_trait]
+impl RouteSnapshotService for UnavailableRouteSnapshotService {
+    async fn get(
+        &self,
+        _: uuid::Uuid,
+        _: uuid::Uuid,
+    ) -> Result<CandidateSnapshot, RouteSnapshotError> {
+        Err(RouteSnapshotError::Unavailable)
     }
 }
 
@@ -745,6 +834,55 @@ fn set_job_poll_headers(headers: &mut HeaderMap, etag: &str) {
         header::CACHE_CONTROL,
         HeaderValue::from_static("private, no-cache"),
     );
+}
+
+#[derive(Serialize)]
+struct RouteSnapshotBody {
+    #[serde(flatten)]
+    snapshot: CandidateSnapshot,
+    start: [f64; 2],
+    finish: [f64; 2],
+    direction_markers: Vec<DirectionMarker>,
+}
+
+async fn get_route_snapshot(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
+        Ok(value) => value,
+        Err(error) => return auth_error(error),
+    };
+    let snapshot = match state.routes.get(session.id, id).await {
+        Ok(value) => value,
+        Err(error) => return route_snapshot_error_response(error),
+    };
+    if snapshot.validate().is_err() {
+        return route_snapshot_error_response(RouteSnapshotError::InvalidSnapshot);
+    }
+    let body = RouteSnapshotBody {
+        start: snapshot.start(),
+        finish: snapshot.finish(),
+        direction_markers: snapshot.direction_markers(),
+        snapshot,
+    };
+    let mut response = (StatusCode::OK, Json(body)).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    response
+}
+
+fn route_snapshot_error_response(error: RouteSnapshotError) -> axum::response::Response {
+    let (status, code) = match error {
+        RouteSnapshotError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+        RouteSnapshotError::Unavailable | RouteSnapshotError::InvalidSnapshot => {
+            (StatusCode::SERVICE_UNAVAILABLE, "route_storage_unavailable")
+        }
+    };
+    (status, Json(serde_json::json!({ "code": code }))).into_response()
 }
 
 fn status_body(snapshot: JobStatusSnapshot) -> Result<RouteJobStatusBody, JobError> {

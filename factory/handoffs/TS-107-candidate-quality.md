@@ -1,11 +1,13 @@
 # TS-107 candidate-quality handoff
 
-**Version:** 3
+**Version:** 4
 **Producer:** `codex/root`
 **Consumers:** TS-205, TS-206, TS-301, TS-403
-**Compatibility:** replaces version 2; changing legality evidence, advisory version, metric semantics, hard gates, quality-band rules, deduplication identity, or benchmark schema requires another coordinated versioned handoff
+**Compatibility:** replaces version 3; additive retention of provider-validated manoeuvres supports TS-205 immutable instructions; changing legality evidence, manoeuvres, advisory version, metric semantics, hard gates, quality-band rules, deduplication identity, or benchmark schema requires another coordinated versioned handoff
 
 `CandidateSearch` is the only production constructor of `ValidatedCandidate`. `score_candidate` accepts that sealed type rather than the freely constructible `HeartCandidate`. A validated candidate retains `candidate-legality-v1` evidence containing the routing-policy version, immutable routing-data version, activity-profile version, `route-use-advisory-v1`, and positive access, direction, and turn checks. Search rejects missing or false provider evidence and every edge with `AccessUnknown` or `ProviderAccessUnverified`; callers cannot convert a raw candidate back into a scoreable value.
+
+The sealed candidate also retains the provider-validated ordered `Manoeuvre` list from its exact `RoutePath`. TS-205 serializes these structured instructions rather than accepting caller-authored instruction text.
 
 `osm-pedestrian-policy-v2` is the pinned local-OSM interpretation. `highway=footway`, `pedestrian`, and `steps` provide the documented implicit pedestrian access unless an explicit or conditional restriction makes access unknown or forbidden. A general road `oneway` is treated as a vehicle direction for the foot profile; pedestrian restrictions require `oneway:foot`. General one-way tags on path-like ways remain unknown without foot-specific evidence, and conditional path directions remain hard exclusions. The policy follows the documented OSM meanings for [`highway=footway`](https://wiki.openstreetmap.org/wiki/Tag%3Ahighway%3Dfootway) and [`oneway:foot`](https://wiki.openstreetmap.org/wiki/Key%3Aoneway%3Afoot); it does not infer access for an untagged ordinary road.
 

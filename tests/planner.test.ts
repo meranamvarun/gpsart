@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { distanceBounds, isCurrentResult, reviseRequest, type RouteRequest } from "../src/domain/planner.ts";
 import { decodeRouteSnapshot } from "../src/domain/route-snapshot.ts";
+import { routeSnapshotPayload } from "./fixtures/route-snapshot.ts";
 
 const request: RouteRequest = { start: "Example start", activity: "Walking", design: "Heart", distanceKm: 10, tolerancePercent: 10, returnsToStart: true, revision: 3 };
 
@@ -23,8 +24,8 @@ test("results from an older request revision are rejected", () => {
 });
 
 test("route snapshots are decoded only when every field is valid", () => {
-  const valid = { id: "route-1", version: 1, requestRevision: 3, totalMetres: 10000, trace: [{ latitude: 12.9, longitude: 77.6 }] };
-  assert.deepEqual(decodeRouteSnapshot(valid), valid);
-  assert.equal(decodeRouteSnapshot({ ...valid, trace: [{ latitude: 91, longitude: 77.6 }] }), null);
-  assert.equal(decodeRouteSnapshot({ ...valid, totalMetres: -1 }), null);
+  const valid = routeSnapshotPayload();
+  assert.ok(decodeRouteSnapshot(valid));
+  assert.equal(decodeRouteSnapshot({ ...valid, geometry: { ...valid.geometry, coordinates: [[77.6, 91], ...valid.geometry.coordinates.slice(1)] } }), null);
+  assert.equal(decodeRouteSnapshot({ ...valid, distances: { ...valid.distances, total_metres: -1 } }), null);
 });

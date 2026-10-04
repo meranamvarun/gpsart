@@ -508,6 +508,9 @@ name = "gpsart-persistence"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "gpsart-domain",
+ "gpsart-routing",
+ "serde",
  "serde_json",
  "sqlx",
  "thiserror",

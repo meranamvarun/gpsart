@@ -11,6 +11,7 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 pub mod jobs;
+pub mod routes;
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 

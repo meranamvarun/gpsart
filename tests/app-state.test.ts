@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { acceptApiResult, initialState, updateRequest } from "../src/app/state.ts";
+import { routeSnapshot } from "./fixtures/route-snapshot.ts";
 
-const snapshot = { id: "route-1", version: 1, requestRevision: 0, totalMetres: 1_000, trace: [{ latitude: 10, longitude: 20 }] } as const;
+const snapshot = routeSnapshot();
 
 test("route-affecting input has one revisioned model", () => {
   const state = initialState();
@@ -23,9 +24,9 @@ test("route-affecting input has one revisioned model", () => {
 });
 
 test("decoded results enter state only when their request revision is current", () => {
-  const state = initialState();
+  const state = updateRequest(initialState(), { distanceKm: 10 });
   const accepted = acceptApiResult(state, { kind: "route", snapshot });
-  assert.equal(accepted.routeResult?.id, "route-1");
+  assert.equal(accepted.routeResult?.id, snapshot.id);
   const revised = updateRequest(accepted, { distanceKm: 11 });
   assert.equal(acceptApiResult(revised, { kind: "route", snapshot }).routeResult, null);
 });

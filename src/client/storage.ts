@@ -1,4 +1,4 @@
-import { decodeRouteSnapshot, type RouteSnapshot } from "../domain/route-snapshot.ts";
+import { decodeRouteSnapshot, encodeRouteSnapshot, type RouteSnapshot } from "../domain/route-snapshot.ts";
 
 export const ROUTE_SNAPSHOT_STORAGE_KEY = "gpsart.route-snapshots.v1";
 
@@ -26,5 +26,5 @@ export function loadRouteSnapshots(storage: StorageLike): LoadedSnapshots {
 }
 
 export function saveRouteSnapshots(storage: StorageLike, snapshots: readonly RouteSnapshot[]): boolean {
-  try { storage.setItem(ROUTE_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots)); return true; } catch { return false; }
+  try { storage.setItem(ROUTE_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots.map(encodeRouteSnapshot))); return true; } catch { return false; }
 }
