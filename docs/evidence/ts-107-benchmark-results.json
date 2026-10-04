@@ -26,15 +26,15 @@
         "identifying_feature_checks": [
           {
             "feature": "central indentation",
-            "present": false
+            "outcome": "unknown"
           },
           {
             "feature": "two upper lobes",
-            "present": false
+            "outcome": "unknown"
           },
           {
             "feature": "lower point",
-            "present": false
+            "outcome": "unknown"
           }
         ],
         "weights": {
@@ -58,7 +58,7 @@
         "template_hash": "fb3de90a744cd704900c2d16f0172ed978a9f4ccfd2b02b4ab46f0584f4fcdec",
         "algorithm_version": "candidate-quality-v1"
       },
-      "latency_millis": 120,
+      "latency_millis": 121,
       "provider_calls": 1,
       "outcome": "match",
       "valid": true,
@@ -73,15 +73,15 @@
         "identifying_feature_checks": [
           {
             "feature": "H crossbar",
-            "present": false
+            "outcome": "unknown"
           },
           {
             "feature": "parallel H uprights",
-            "present": false
+            "outcome": "unknown"
           },
           {
             "feature": "separate I stem",
-            "present": false
+            "outcome": "unknown"
           }
         ],
         "weights": {

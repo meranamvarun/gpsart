@@ -1,6 +1,6 @@
 use crate::{
     AttemptControl, ControlledGraph, GeoPointE7, LocalOsmGraph, ManoeuvreKind, RoutePath,
-    RouteProvenance, RouteProvider, RouteQuery, RoutingError,
+    RouteProvenance, RouteProvider, RouteQuery, RoutingError, TraversalDirection,
 };
 use gpsart_domain::templates::{
     Category, OrientationRule, TraversalPart, VersionedTemplate, embedded_catalogue,
@@ -88,6 +88,7 @@ pub enum CandidatePart {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TraversalOccurrence {
     pub edge_id: String,
+    pub direction: TraversalDirection,
     pub part: CandidatePart,
     pub retraced: bool,
     pub begin_geometry_index: usize,
@@ -564,6 +565,7 @@ fn validate_candidate(
         }
         occurrences.push(TraversalOccurrence {
             edge_id: edge.edge_id.clone(),
+            direction: edge.direction,
             part,
             retraced,
             begin_geometry_index: edge.begin_geometry_index,

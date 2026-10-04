@@ -59,7 +59,15 @@ impl CandidateQualityConfig {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct IdentifyingFeatureCheck {
     pub feature: String,
-    pub present: bool,
+    pub outcome: FeatureCheckOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureCheckOutcome {
+    Passed,
+    Failed,
+    Unknown,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -112,6 +120,9 @@ pub enum QualityError {
     InvalidConfiguration,
 }
 
+/// Scores a candidate only after the routing provider and `CandidateSearch` have completed
+/// network-legality validation. This layer rechecks retained structural and distance invariants;
+/// it cannot reconstruct access or turn evidence that is absent from `HeartCandidate`.
 pub fn score_candidate(
     candidate: HeartCandidate,
     template: &VersionedTemplate,
@@ -152,19 +163,15 @@ pub fn score_candidate(
         candidate.distance.value(),
     );
     let manoeuvre_complexity = bend_count(candidate.resemblance_trace());
-    let feature_geometry_is_distinct = repeated_ratio_basis_points <= 5_000
-        && connector_ratio_basis_points <= 5_000
-        && full_trace_error_metres <= trace_span_metres(candidate.resemblance_trace()) / 3;
     let identifying_feature_checks = template
         .definition
         .identifying_features
         .iter()
         .map(|feature| IdentifyingFeatureCheck {
             feature: feature.clone(),
-            // Each published feature depends on the validated ordered anchors remaining
-            // distinguishable in the complete route. Heavy retracing, connecting travel,
-            // or full-trace deviation fails the check instead of claiming recognisability.
-            present: feature_geometry_is_distinct,
+            // No calibrated feature-specific detector exists yet. Explicit unknown is
+            // truthful; a shared geometric heuristic cannot prove distinct semantics.
+            outcome: FeatureCheckOutcome::Unknown,
         })
         .collect();
     let metrics = CandidateQualityMetrics {
@@ -182,7 +189,7 @@ pub fn score_candidate(
         && metrics
             .identifying_feature_checks
             .iter()
-            .all(|check| check.present)
+            .all(|check| check.outcome == FeatureCheckOutcome::Passed)
     {
         QualityBand::StrongMatch
     } else {
@@ -308,36 +315,6 @@ fn point_to_polyline_metres(point: GeoPointE7, polyline: &[GeoPointE7]) -> Optio
     (distance.is_finite() && distance <= f64::from(u32::MAX)).then_some(distance.round() as u32)
 }
 
-fn trace_span_metres(trace: &[GeoPointE7]) -> u32 {
-    let Some((&first, rest)) = trace.split_first() else {
-        return 0;
-    };
-    let (min_lat, max_lat, min_lon, max_lon) = rest.iter().fold(
-        (
-            first.latitude_e7,
-            first.latitude_e7,
-            first.longitude_e7,
-            first.longitude_e7,
-        ),
-        |(min_lat, max_lat, min_lon, max_lon), point| {
-            (
-                min_lat.min(point.latitude_e7),
-                max_lat.max(point.latitude_e7),
-                min_lon.min(point.longitude_e7),
-                max_lon.max(point.longitude_e7),
-            )
-        },
-    );
-    point_to_polyline_metres(
-        GeoPointE7::new(min_lat, min_lon),
-        &[
-            GeoPointE7::new(max_lat, max_lon),
-            GeoPointE7::new(max_lat, max_lon),
-        ],
-    )
-    .unwrap_or(0)
-}
-
 fn ratio_basis_points(part: u32, total: u32) -> u32 {
     u32::try_from((u64::from(part) * 10_000) / u64::from(total)).unwrap_or(10_000)
 }
@@ -360,6 +337,9 @@ pub fn rank_and_deduplicate(
     mut candidates: Vec<ScoredCandidate>,
     limit: usize,
 ) -> Vec<ScoredCandidate> {
+    if limit == 0 {
+        return Vec::new();
+    }
     candidates.sort_by(compare_candidates);
     let mut selected: Vec<ScoredCandidate> = Vec::new();
     for candidate in candidates {
@@ -398,6 +378,7 @@ fn compare_candidates(left: &ScoredCandidate, right: &ScoredCandidate) -> Orderi
         })
         .then_with(|| traversal_key(left).cmp(&traversal_key(right)))
         .then_with(|| geometry_key(left).cmp(&geometry_key(right)))
+        .then_with(|| raw_geometry_key(left).cmp(&raw_geometry_key(right)))
 }
 
 fn duplicates(left: &ScoredCandidate, right: &ScoredCandidate) -> bool {
@@ -406,18 +387,35 @@ fn duplicates(left: &ScoredCandidate, right: &ScoredCandidate) -> bool {
             == simplify_collinear(&right.candidate.geometry)
 }
 
-fn traversal_key(candidate: &ScoredCandidate) -> Vec<&str> {
+fn traversal_key(candidate: &ScoredCandidate) -> Vec<(&str, u8)> {
     candidate
         .candidate
         .occurrences
         .iter()
-        .map(|item| item.edge_id.as_str())
+        .map(|item| {
+            (
+                item.edge_id.as_str(),
+                match item.direction {
+                    crate::TraversalDirection::Forward => 0,
+                    crate::TraversalDirection::Reverse => 1,
+                },
+            )
+        })
         .collect()
 }
 
 fn geometry_key(candidate: &ScoredCandidate) -> Vec<(i32, i32)> {
     simplify_collinear(&candidate.candidate.geometry)
         .into_iter()
+        .map(|point| (point.latitude_e7, point.longitude_e7))
+        .collect()
+}
+
+fn raw_geometry_key(candidate: &ScoredCandidate) -> Vec<(i32, i32)> {
+    candidate
+        .candidate
+        .geometry
+        .iter()
         .map(|point| (point.latitude_e7, point.longitude_e7))
         .collect()
 }
@@ -432,7 +430,8 @@ fn simplify_collinear(points: &[GeoPointE7]) -> Vec<GeoPointE7> {
             let ab_lon = i128::from(b.longitude_e7) - i128::from(a.longitude_e7);
             let bc_lat = i128::from(point.latitude_e7) - i128::from(b.latitude_e7);
             let bc_lon = i128::from(point.longitude_e7) - i128::from(b.longitude_e7);
-            if ab_lat * bc_lon != ab_lon * bc_lat {
+            let continues_forward = ab_lat * bc_lat + ab_lon * bc_lon > 0;
+            if ab_lat * bc_lon != ab_lon * bc_lat || !continues_forward {
                 break;
             }
             simplified.pop();

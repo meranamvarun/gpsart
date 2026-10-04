@@ -25,9 +25,9 @@ pub use heart::{
 };
 pub use quality::{
     BenchmarkError, BenchmarkHarness, BenchmarkOutcome, BenchmarkPins, BenchmarkRecord,
-    BenchmarkReport, CandidateQualityConfig, CandidateQualityMetrics, IdentifyingFeatureCheck,
-    QUALITY_VERSION, QualityBand, QualityError, QualityWeights, ScoredCandidate, UserQuality,
-    WEIGHTS_VERSION, rank_and_deduplicate, score_candidate,
+    BenchmarkReport, CandidateQualityConfig, CandidateQualityMetrics, FeatureCheckOutcome,
+    IdentifyingFeatureCheck, QUALITY_VERSION, QualityBand, QualityError, QualityWeights,
+    ScoredCandidate, UserQuality, WEIGHTS_VERSION, rank_and_deduplicate, score_candidate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
