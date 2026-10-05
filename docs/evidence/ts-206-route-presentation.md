@@ -24,5 +24,9 @@ npm run build
 # passed
 
 npm run factory:verify
-# passed (Rust fmt/clippy/test/build, factory, 60 unit, visual-shell, Sites, and production build)
+# passed (Rust fmt/clippy/test/build, factory, 63 unit, visual-shell, Sites, and production build)
 ```
+
+## Independent QA result
+
+Independent QA passed on 2026-10-05. The 12 focused tests and full factory verification passed, incidents INC-031 through INC-034 have targeted regressions, and the production tile-error handler is the exact callback under test. Combined with decoded snapshot-to-screen/map journey coverage, this verifies that a base-map failure leaves routed geometry and text facts available. No unresolved TS-206 acceptance or product-guardrail blocker remains.
