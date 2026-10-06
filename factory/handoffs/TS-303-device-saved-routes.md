@@ -1,9 +1,9 @@
 # TS-303 on-device saved-route handoff
 
-**Version:** `saved-route-record-v1`  
-**Producer:** TS-303  
-**Consumers:** TS-304, TS-305  
-**Status:** implementation complete; pending independent QA  
+**Version:** `saved-route-record-v1`
+**Producer:** TS-303
+**Consumers:** TS-304, TS-305
+**Status:** independently QA-approved
 **Compatibility:** schema changes, request/snapshot validation changes, or account-coupled behavior require a coordinated versioned handoff
 
 `IndexedDbSavedRouteRepository` in `src/client/saved-routes.ts` owns the `gpsart-saved-routes` IndexedDB database and its `routes` object store. Each independently keyed record contains the user-visible name, save timestamp, complete immutable `RouteRequest`, and complete encoded TS-205 `RouteSnapshot`. A record is accepted only when both contracts decode strictly and their request revisions and route IDs agree.

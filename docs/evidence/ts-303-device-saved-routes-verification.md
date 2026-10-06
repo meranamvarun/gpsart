@@ -23,3 +23,12 @@ No route geometry, distance, access, instructions, or success data is generated 
 - `npm run factory:verify` — passed, including Rust format, clippy, workspace tests/build, factory tests, 77 TypeScript tests, visual-shell tests, Sites tests, and production build.
 
 The first `factory:verify` invocation was terminated only by a two-minute shell timeout. The immediately repeated run with an extended command timeout completed successfully.
+
+## Independent QA
+
+Reviewed 2026-10-06 by `codex/qa_ts303` against all six TS-303 acceptance criteria.
+
+- `npm exec -- tsx --test tests/saved-routes.test.ts tests/gpx-export.test.ts tests/route-candidate-journey.test.ts` — 18 passed.
+- `npm run typecheck` — passed.
+- `npm run factory:verify` — passed, including the complete Rust, TypeScript, visual-shell, Sites, and production-build gates.
+- IndexedDB request/transaction sequencing, exact request and snapshot preservation, offline state hydration and GPX serialization, per-record corruption/version isolation, quota and denial recovery, selected-server-route preservation, device-only copy, and authentication independence were independently inspected and approved.
