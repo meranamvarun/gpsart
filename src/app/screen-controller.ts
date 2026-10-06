@@ -1,5 +1,5 @@
 import { distanceBounds } from "../domain/planner.ts";
-import type { LoadedSnapshots } from "../client/storage.ts";
+import type { SavedRouteList } from "../client/saved-routes.ts";
 import { isDesignEnabled, previewsFor } from "./catalogue.ts";
 import { canRetryCompletedAttempt, type AppState } from "./state.ts";
 import { screens, type Screen } from "./router.ts";
@@ -117,17 +117,22 @@ function candidateResult(state: AppState, details: boolean): string {
   }
   const comparison = buildCandidateComparison(state.routeResults, request.distanceKm * 1000);
   const selectedId = state.selectedCandidateId ?? comparison.candidates[0]!.snapshot.id;
-  if (details) return `${heading}${requestSummary(request)}${renderCandidateDetails(comparison, selectedId)}<div class="actions"><button type="button" class="primary" data-action="export-gpx" data-route-id="${escapeHtml(selectedId)}">Export exact planned route (GPX)</button>${link("results", "Compare routes")}</div><p class="helper">Export uses this immutable route without rerouting or adding activity timestamps.</p>`;
+  if (details) return `${heading}${requestSummary(request)}${renderCandidateDetails(comparison, selectedId)}<div class="actions"><button type="button" class="primary" data-action="save-route" data-route-id="${escapeHtml(selectedId)}">Save on this device</button><button type="button" class="secondary" data-action="export-gpx" data-route-id="${escapeHtml(selectedId)}">Export exact planned route (GPX)</button>${link("results", "Compare routes")}</div><p class="helper">Saving and export use this immutable route without rerouting or requiring the server job to remain available.</p>`;
   return `${heading}${requestSummary(request)}${renderCandidateResults(comparison, selectedId)}<div class="notice">${escapeHtml(ROUTE_USE_ADVISORY)}</div><div class="actions"><a class="primary" href="#/details">View selected route details ${icon("arrow-right")}</a>${link("planner", "Refine your plan")}</div>`;
 }
 
-function saved(loaded: LoadedSnapshots): string {
-  let content: string;
-  if (loaded.kind === "unsupported_snapshot") content = `<div class="notice">A saved route uses an older, malformed, or unsupported format. It has not been loaded or changed.</div>`;
-  else if (loaded.kind === "unavailable") content = `<div class="notice">Browser storage is unavailable. No route data has been changed.</div>`;
-  else if (!loaded.snapshots.length) content = `<div class="empty-space">${icon("bookmark-simple")}<h2 style="margin:18px 0 12px">A little inspiration for later.</h2><p class="muted small">Save a validated route and it will be waiting here for your next outing.</p><a class="primary full" style="margin-top:28px" href="#/planner">Plan your first route ${icon("arrow-right")}</a></div>`;
-  else content = loaded.snapshots.map((snapshot) => `<article class="saved-row"><span class="eyebrow">Validated route snapshot v${snapshot.version}</span><h3 style="margin-top:10px">${escapeHtml(snapshot.id)}</h3><p class="small muted">${(snapshot.totalMetres / 1000).toFixed(1)} km · ${snapshot.trace.length} recorded points</p><p class="helper">Full route details become available with the route-detail service.</p></article>`).join("");
-  return `${top("Your next adventures.", "Saved on this device. No account needed.")}<div class="notice">These routes stay in this browser. Clearing site data removes them.</div>${content}`;
+function saved(loaded: SavedRouteList): string {
+  if (loaded.kind === "unavailable" && "reason" in loaded) {
+    return `${top("Your next adventures.", "Saved on this device. No account or live route job is needed.")}<div class="notice">Clearing this site data removes these device-only saves. Signing in or out does not upload, erase, or relabel them.</div><div class="notice" role="alert">Saved routes are temporarily unavailable because browser storage is ${loaded.reason === "denied" ? "blocked" : "not available"}. Your open server route is unchanged and can still be exported.</div>`;
+  }
+  if (loaded.kind === "available" && "routes" in loaded) {
+    const errors = loaded.errors.map(({ id, kind }) => `<div class="notice" role="alert"><strong>${escapeHtml(id)}</strong> could not be opened: ${kind === "unsupported_schema" ? "unsupported version" : "malformed saved data"}. Other saved routes are unchanged.</div>`).join("");
+    const routes = loaded.routes.length
+      ? loaded.routes.map(({ id, name, snapshot }) => `<article class="saved-row"><span class="eyebrow">Saved on this device</span><h3 style="margin-top:10px">${escapeHtml(name)}</h3><p class="small muted">${(snapshot.totalMetres / 1000).toFixed(1)} km · ${snapshot.trace.length} route points</p><div class="actions"><button type="button" class="primary" data-action="open-saved" data-route-id="${escapeHtml(id)}">Open route</button><button type="button" class="secondary" data-action="export-saved-gpx" data-route-id="${escapeHtml(id)}">Export GPX</button><button type="button" class="textbutton" data-action="rename-saved" data-route-id="${escapeHtml(id)}">Rename</button><button type="button" class="textbutton" data-action="delete-saved" data-route-id="${escapeHtml(id)}">Delete</button></div></article>`).join("")
+      : `<div class="empty-space">${icon("bookmark-simple")}<h2 style="margin:18px 0 12px">A little inspiration for later.</h2><p class="muted small">Save a validated route and it will be waiting here for your next outing.</p><a class="primary full" style="margin-top:28px" href="#/planner">Plan your first route ${icon("arrow-right")}</a></div>`;
+    return `${top("Your next adventures.", "Saved on this device. No account or live route job is needed.")}<div class="notice">Clearing this site data removes these device-only saves. Signing in or out does not upload, erase, or relabel them.</div>${errors}${routes}`;
+  }
+  throw new Error("unreachable saved-route state");
 }
 
 function failure(screen: "no-match" | "coverage" | "error", state: AppState, workflow: PlannerWorkflowSnapshot | null): string {
@@ -193,7 +198,7 @@ export function isStandaloneScreen(screen: Screen): boolean {
   return ["login", "auth-pending", "auth-error", "welcome", "account", "screens"].includes(screen);
 }
 
-export function renderScreen(screen: Screen, state: AppState, loaded: LoadedSnapshots, workflow: PlannerWorkflowSnapshot | null = null): string {
+export function renderScreen(screen: Screen, state: AppState, loaded: SavedRouteList, workflow: PlannerWorkflowSnapshot | null = null): string {
   if (screen === "planner") return planner(state, workflow);
   if (screen === "catalogue") return catalogue(state);
   if (screen === "generating") return generating(state, workflow);

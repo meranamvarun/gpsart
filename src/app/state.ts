@@ -5,6 +5,7 @@ import type { RouteSnapshot } from "../domain/route-snapshot.ts";
 import type { RouteJobStatus } from "../domain/job-status.ts";
 import type { DesignCategory } from "./catalogue.ts";
 import type { DesignCatalogueLoad, DesignCatalogueState } from "../domain/design-template.ts";
+import type { SavedRoute } from "../client/saved-routes.ts";
 
 export type RouteOutcome = "idle" | "pending" | "route" | "no_match" | "unavailable" | "invalid_response" | "stale";
 
@@ -81,6 +82,20 @@ export function acceptCandidateLoad(state: AppState, requestRevision: number, re
 export function selectCandidate(state: AppState, candidateId: string): AppState {
   const selected = state.routeResults.find(({ id }) => id === candidateId);
   return selected ? { ...state, selectedCandidateId: selected.id, routeResult: selected } : state;
+}
+
+export function openSavedRoute(state: AppState, saved: SavedRoute): AppState {
+  return {
+    ...state,
+    request: saved.request,
+    outcome: "route",
+    routeResult: saved.snapshot,
+    routeResults: Object.freeze([saved.snapshot]),
+    candidateLoad: "available",
+    candidateRequestRevision: saved.request.revision,
+    selectedCandidateId: saved.snapshot.id,
+    lastAttempt: null,
+  };
 }
 
 export function recordCompletedAttempt(state: AppState, request: RouteRequest, status: RouteJobStatus): AppState {

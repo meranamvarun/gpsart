@@ -98,7 +98,7 @@ test("every classified terminal outcome selects a truthful destination and advic
         originalRequest,
         terminalStatus(code),
       );
-      const markup = renderScreen(screen as "coverage" | "no-match" | "error", completed, { kind: "available", snapshots: [] });
+      const markup = renderScreen(screen as "coverage" | "no-match" | "error", completed, { kind: "available", routes: [], errors: [] });
       assert.match(markup, new RegExp(presentation.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), code);
       assert.match(markup, /not been checked for local feasibility/i, code);
     }
@@ -126,7 +126,7 @@ test("start-resolution and dependency errors select coverage or error without hi
     request: { ...originalRequest, revision: 4 },
     issue: "network_unavailable" as const,
   };
-  const markup = renderScreen("error", prior, { kind: "available", snapshots: [] }, currentFailure);
+  const markup = renderScreen("error", prior, { kind: "available", routes: [], errors: [] }, currentFailure);
   assert.match(markup, /could not complete this request/i);
   assert.doesNotMatch(markup, /data-action="retry-job"/);
 });
@@ -140,12 +140,12 @@ test("refinement retains the completed request and result while advancing only t
   assert.equal(refined.lastAttempt?.request.distanceKm, 15);
   assert.equal(refined.lastAttempt?.status.outcome?.code, "outside_distance");
 
-  const failureMarkup = renderScreen("no-match", refined, { kind: "available", snapshots: [] });
+  const failureMarkup = renderScreen("no-match", refined, { kind: "available", routes: [], errors: [] });
   assert.match(failureMarkup, /15\.0 km/);
   assert.match(failureMarkup, /12\.97160, 77\.59460/);
   assert.doesNotMatch(failureMarkup, /18\.0 km/);
 
-  const plannerMarkup = renderScreen("planner", refined, { kind: "available", snapshots: [] });
+  const plannerMarkup = renderScreen("planner", refined, { kind: "available", routes: [], errors: [] });
   assert.match(plannerMarkup, /18/);
   assert.match(plannerMarkup, /Previous search/i);
   assert.match(plannerMarkup, /15\.0 km/);
@@ -172,7 +172,7 @@ test("a retained outcome is always rendered with its own request while newer wor
       pollAfterSeconds: 1,
     },
   };
-  const markup = renderScreen("no-match", completed, { kind: "available", snapshots: [] }, newerWorkflow);
+  const markup = renderScreen("no-match", completed, { kind: "available", routes: [], errors: [] }, newerWorkflow);
   assert.match(markup, /15\.0 km/);
   assert.doesNotMatch(markup, /18\.0 km/);
   assert.match(markup, /No result was inside your distance interval/i);
@@ -190,7 +190,7 @@ test("retrying a retryable completed dependency failure creates one new revision
   assert.deepEqual({ ...retried.request, revision: 3 }, originalRequest);
   assert.equal(retried.lastAttempt?.status.jobId, terminalStatus("provider_unavailable").jobId);
 
-  const errorMarkup = renderScreen("error", completed, { kind: "available", snapshots: [] });
+  const errorMarkup = renderScreen("error", completed, { kind: "available", routes: [], errors: [] });
   assert.match(errorMarkup, /data-action="retry-job"/);
   assert.match(errorMarkup, /new request revision/i);
 
@@ -200,12 +200,12 @@ test("retrying a retryable completed dependency failure creates one new revision
     terminalStatus("attempts_exhausted"),
   );
   assert.equal(retryCompletedAttempt(nonRetryable), null);
-  assert.doesNotMatch(renderScreen("error", nonRetryable, { kind: "available", snapshots: [] }), /data-action="retry-job"/);
+  assert.doesNotMatch(renderScreen("error", nonRetryable, { kind: "available", routes: [], errors: [] }), /data-action="retry-job"/);
 
   const edited = updateRequest(completed, { design: "HI" });
   assert.equal(retryCompletedAttempt(edited), null, "retry never overwrites a newer user refinement");
   assert.doesNotMatch(
-    renderScreen("error", edited, { kind: "available", snapshots: [] }),
+    renderScreen("error", edited, { kind: "available", routes: [], errors: [] }),
     /data-action="retry-job"/,
     "a newer edit visibly disables retry of the retained attempt",
   );
@@ -218,9 +218,9 @@ test("refining after success keeps the successful request and observed result re
     terminalStatus("succeeded"),
   );
   const refined = updateRequest(completed, { design: "HI" });
-  const resultMarkup = renderScreen("results", refined, { kind: "available", snapshots: [] });
+  const resultMarkup = renderScreen("results", refined, { kind: "available", routes: [], errors: [] });
   assert.match(resultMarkup, /Heart · Cycling · 15\.0 km/);
   assert.doesNotMatch(resultMarkup, /HI · Cycling/);
   assert.match(resultMarkup, /1 validated route reference was returned/i);
-  assert.match(renderScreen("planner", refined, { kind: "available", snapshots: [] }), /Previous search · revision 3/i);
+  assert.match(renderScreen("planner", refined, { kind: "available", routes: [], errors: [] }), /Previous search · revision 3/i);
 });

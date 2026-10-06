@@ -12,5 +12,6 @@ test("the visual shell is bootstrapped by native TypeScript only", async () => {
 test("the active TypeScript controller cannot fabricate route candidates or timed success", async () => {
   const controller = await readFile(new URL("../src/app.ts", import.meta.url), "utf8");
   assert.doesNotMatch(controller, /shapeGeometry|baseHeart|exportGpx|setTimeout\([^)]*results/);
-  assert.match(controller, /loadRouteSnapshots/);
+  assert.match(controller, /IndexedDbSavedRouteRepository/);
+  assert.doesNotMatch(controller, /localStorage/);
 });

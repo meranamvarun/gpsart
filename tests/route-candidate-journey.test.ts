@@ -54,9 +54,9 @@ test("loaded candidates drive result cards, details, and selected route map", ()
   const loaded = acceptCandidateLoad(loading, snapshot.requestRevision, { kind: "available", snapshots: [snapshot] });
   assert.equal(loaded.candidateLoad, "available");
   assert.equal(loaded.selectedCandidateId, snapshot.id);
-  assert.match(renderScreen("results", loaded, { kind: "available", snapshots: [] }), new RegExp(snapshot.id));
-  assert.match(renderScreen("details", loaded, { kind: "available", snapshots: [] }), /Route facts/);
-  assert.match(renderScreen("details", loaded, { kind: "available", snapshots: [] }), /data-action="export-gpx"/);
+  assert.match(renderScreen("results", loaded, { kind: "available", routes: [], errors: [] }), new RegExp(snapshot.id));
+  assert.match(renderScreen("details", loaded, { kind: "available", routes: [], errors: [] }), /Route facts/);
+  assert.match(renderScreen("details", loaded, { kind: "available", routes: [], errors: [] }), /data-action="export-gpx"/);
   assert.match(renderMap("results", loaded), /id="route-map"/);
   assert.match(renderMap("results", loaded), /North-up comparison/);
   assert.equal(selectCandidate(loaded, "not-owned"), loaded);

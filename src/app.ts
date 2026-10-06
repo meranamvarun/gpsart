@@ -12,12 +12,12 @@ import {
   PlannerWorkflow,
   type PlannerWorkflowSnapshot,
 } from "./client/planner-workflow.ts";
-import { loadRouteSnapshots } from "./client/storage.ts";
+import { IndexedDbSavedRouteRepository, type SavedRouteList, type StorageFailure } from "./client/saved-routes.ts";
 import { baseMapTileErrorHandler, renderMap } from "./app/map.ts";
 import { currentScreen, navigate, type Screen } from "./app/router.ts";
 import { screenForWorkflow } from "./app/outcome-flow.ts";
 import { isStandaloneScreen, renderScreen } from "./app/screen-controller.ts";
-import { acceptCandidateLoad, acceptCatalogueLoad, beginCandidateLoad, initialState, recordCompletedAttempt, retryCompletedAttempt, selectCandidate, updateRequest, updateUi } from "./app/state.ts";
+import { acceptCandidateLoad, acceptCatalogueLoad, beginCandidateLoad, initialState, openSavedRoute, recordCompletedAttempt, retryCompletedAttempt, selectCandidate, updateRequest, updateUi } from "./app/state.ts";
 import { isDesignEnabled } from "./app/catalogue.ts";
 import { buildCandidateComparison, routeMapModel } from "./app/route-presentation.ts";
 import type { DesignCategory } from "./app/catalogue.ts";
@@ -38,6 +38,8 @@ let workflowSnapshot: PlannerWorkflowSnapshot | null = null;
 let locationMessage = "Location is requested only when you choose. You can always enter coordinates or click the map.";
 let leafletMap: L.Map | null = null;
 let resuming = false;
+const savedRoutes = new IndexedDbSavedRouteRepository();
+let savedRouteList: SavedRouteList = { kind: "available", routes: Object.freeze([]), errors: Object.freeze([]) };
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("GPSART requires an #app element");
@@ -58,10 +60,9 @@ function render(): void {
   leafletMap?.remove();
   leafletMap = null;
   const screen = currentScreen(window.location.hash, document.body.dataset.screen);
-  const loaded = loadRouteSnapshots(window.localStorage);
   const body = isStandaloneScreen(screen)
-    ? renderScreen(screen, state, loaded, workflowSnapshot)
-    : `<main id="content" class="workspace ${state.mapExpanded ? "expanded" : ""}"><section class="panel" aria-label="${screen}"><button class="mobile-expand" type="button" data-action="expand"><i class="ph ph-arrows-out-simple" aria-hidden="true"></i> ${state.mapExpanded ? "Reduce map" : "Expand map"}</button>${renderScreen(screen, state, loaded, workflowSnapshot)}</section>${renderMap(screen, state)}</main>`;
+    ? renderScreen(screen, state, savedRouteList, workflowSnapshot)
+    : `<main id="content" class="workspace ${state.mapExpanded ? "expanded" : ""}"><section class="panel" aria-label="${screen}"><button class="mobile-expand" type="button" data-action="expand"><i class="ph ph-arrows-out-simple" aria-hidden="true"></i> ${state.mapExpanded ? "Reduce map" : "Expand map"}</button>${renderScreen(screen, state, savedRouteList, workflowSnapshot)}</section>${renderMap(screen, state)}</main>`;
   appRoot.innerHTML = `${header(screen)}${body}`;
   document.title = `${screen} · GPSART`;
   bind();
@@ -70,6 +71,81 @@ function render(): void {
   const locationStatus = document.querySelector<HTMLElement>("#location-status");
   if (locationStatus) locationStatus.textContent = locationMessage;
   window.scrollTo(0, 0);
+}
+
+function storageFailureMessage(reason: StorageFailure): string {
+  if (reason === "denied") return "Saving on this device is blocked by browser settings.";
+  if (reason === "quota_exceeded") return "This device has no storage space available for the route.";
+  return "Saving on this device is temporarily unavailable.";
+}
+
+function showDeviceStorageMessage(message: string, error = false): void {
+  document.querySelector("#device-storage-status")?.remove();
+  const status = document.createElement("div");
+  status.id = "device-storage-status";
+  status.className = error ? "notice error" : "notice";
+  status.setAttribute("role", error ? "alert" : "status");
+  status.textContent = message;
+  document.querySelector(".panel .section-top, .panel .route-detail")?.insertAdjacentElement("afterend", status);
+}
+
+async function refreshSavedRoutes(rerender = true): Promise<void> {
+  savedRouteList = await savedRoutes.list();
+  if (rerender && currentScreen(window.location.hash, document.body.dataset.screen) === "saved") render();
+}
+
+function requestForSnapshot(requestRevision: number): RouteRequest | null {
+  if (state.lastAttempt?.request.revision === requestRevision) return state.lastAttempt.request;
+  return state.request.revision === requestRevision ? state.request : null;
+}
+
+async function saveSelectedRoute(routeId: string): Promise<void> {
+  const snapshot = state.routeResults.find(({ id }) => id === routeId);
+  const request = snapshot ? requestForSnapshot(snapshot.requestRevision) : null;
+  if (!snapshot || !request) return;
+  const result = await savedRoutes.save({ name: `${request.design} route`, request, snapshot });
+  if (result.kind === "saved") {
+    await refreshSavedRoutes(false);
+    navigate("saved");
+    return;
+  }
+  showDeviceStorageMessage(result.kind === "unavailable" ? storageFailureMessage(result.reason) : "Choose a valid route name.", true);
+}
+
+async function openSaved(id: string): Promise<void> {
+  const result = await savedRoutes.get(id);
+  if (result.kind === "available") {
+    state = openSavedRoute(state, result.route);
+    navigate("details");
+    return;
+  }
+  await refreshSavedRoutes();
+  showDeviceStorageMessage(result.kind === "unavailable" ? storageFailureMessage(result.reason) : "That saved route could not be opened. Other saves are unchanged.", true);
+}
+
+async function exportSaved(id: string): Promise<void> {
+  const result = await savedRoutes.get(id);
+  if (result.kind === "available") downloadRouteSnapshotGpx(result.route.snapshot);
+  else {
+    await refreshSavedRoutes();
+    showDeviceStorageMessage(result.kind === "unavailable" ? storageFailureMessage(result.reason) : "That saved route could not be exported. Other saves are unchanged.", true);
+  }
+}
+
+async function renameSaved(id: string): Promise<void> {
+  const existing = savedRouteList.kind === "available" ? savedRouteList.routes.find((route) => route.id === id) : undefined;
+  if (!existing) return;
+  const name = window.prompt("Name this saved route", existing.name);
+  if (name === null) return;
+  const result = await savedRoutes.rename(id, name.trim());
+  await refreshSavedRoutes();
+  if (result.kind !== "renamed") showDeviceStorageMessage(result.kind === "unavailable" ? storageFailureMessage(result.reason) : "Enter a route name between 1 and 100 characters.", true);
+}
+
+async function deleteSaved(id: string): Promise<void> {
+  const result = await savedRoutes.delete(id);
+  await refreshSavedRoutes();
+  if (result.kind !== "deleted") showDeviceStorageMessage(result.kind === "unavailable" ? storageFailureMessage(result.reason) : "That saved route was already unavailable.", true);
 }
 
 function inputValue(id: string): string {
@@ -270,6 +346,11 @@ function bind(): void {
       const snapshot = state.routeResults.find(({ id }) => id === button.dataset.routeId);
       if (snapshot) downloadRouteSnapshotGpx(snapshot);
     }
+    if (button.dataset.action === "save-route" && button.dataset.routeId) void saveSelectedRoute(button.dataset.routeId);
+    if (button.dataset.action === "open-saved" && button.dataset.routeId) void openSaved(button.dataset.routeId);
+    if (button.dataset.action === "export-saved-gpx" && button.dataset.routeId) void exportSaved(button.dataset.routeId);
+    if (button.dataset.action === "rename-saved" && button.dataset.routeId) void renameSaved(button.dataset.routeId);
+    if (button.dataset.action === "delete-saved" && button.dataset.routeId) void deleteSaved(button.dataset.routeId);
     if (button.dataset.action === "edit-start") document.querySelector<HTMLInputElement>("#start")?.select();
     if (button.dataset.action === "google") navigate("auth-pending");
   }));
@@ -288,6 +369,7 @@ window.addEventListener("gpsart:session-ready", () => {
 window.addEventListener("hashchange", render);
 window.addEventListener("pagehide", () => workflow.dispose());
 render();
+void refreshSavedRoutes();
 void fetchDesignCatalogue().then((result) => {
   state = acceptCatalogueLoad(state, result);
   render();
