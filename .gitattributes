@@ -1,2 +1,3 @@
 crates/gpsart-routing/data/*.json text eol=lf
 crates/gpsart-routing/data/*.sha256 text eol=lf
+tests/fixtures/route-export.gpx text eol=lf

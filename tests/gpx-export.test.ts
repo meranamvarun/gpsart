@@ -37,12 +37,27 @@ test("offline export escapes metadata and creates a predictable sanitized filena
   const snapshot = routeSnapshot();
   const hostile = {
     ...snapshot,
-    versions: { ...snapshot.versions, templateId: 'HI & <script> / "route"' },
+    versions: { ...snapshot.versions, templateId: 'HI & <script> / "route"\u0000\u000b' },
   };
   const exported = exportRouteSnapshotGpx(hostile);
-  assert.match(exported, /HI &amp; &lt;script&gt; \/ &quot;route&quot;@1/);
+  assert.match(exported, /HI &amp; &lt;script&gt; \/ &quot;route&quot;\uFFFD\uFFFD@1/);
   assert.doesNotMatch(exported, /<script>/);
+  assert.doesNotMatch(exported, /[\u0000\u000b]/);
   assert.equal(routeExportFilename(hostile), `gpsart-hi-script-route-${snapshot.id}-v1.gpx`);
+});
+
+test("offline export uses GPX decimal lexical form for sub-microdegree coordinates", () => {
+  const snapshot = routeSnapshot();
+  const exported = exportRouteSnapshotGpx({
+    ...snapshot,
+    trace: [
+      { latitude: 0.0000001, longitude: -0.0000001 },
+      { latitude: -0.0000001, longitude: 0.0000001 },
+    ],
+  });
+  assert.match(exported, /<trkpt lat="0\.0000001" lon="-0\.0000001">/);
+  assert.match(exported, /<trkpt lat="-0\.0000001" lon="0\.0000001">/);
+  assert.doesNotMatch(exported, /(?:lat|lon)="[^"]*[eE][+-]?\d+"/);
 });
 
 test("offline browser download uses GPX media type and sanitized attachment name", () => {

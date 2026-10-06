@@ -239,6 +239,16 @@ async fn owned_route_exports_exact_gpx_with_safe_download_headers() {
         policy(),
         Routes(Arc::new(Mutex::new(Some((Uuid::nil(), expected))))),
     );
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/api/v1/routes/{id}/export.gpx"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), 401);
     let owner = auth(&app).await;
     let response = app
         .clone()

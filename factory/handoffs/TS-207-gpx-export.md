@@ -1,8 +1,8 @@
 # TS-207 GPX export handoff
 
-**Producer:** TS-207  
-**Consumers:** TS-303  
-**Status:** ready  
+**Producer:** TS-207
+**Consumers:** TS-303
+**Status:** ready
 **Compatibility:** `route-gpx-v1`; changing point order, coordinate serialization, planned-route metadata, filename rules, or media/download headers requires a coordinated versioned handoff
 
 `GET /api/v1/routes/{id}/export.gpx` authenticates the private guest session and loads the same immutable TS-205 snapshot as the route-detail endpoint. Foreign and missing IDs are indistinguishable (`404`); unavailable or invalid stored snapshots return `503`. The response is GPX 1.1 (`application/gpx+xml; charset=utf-8`) with `Content-Disposition`, `X-Content-Type-Options: nosniff`, and `Cache-Control: private, no-store`.

@@ -1,7 +1,27 @@
 import type { RouteSnapshot } from "./route-snapshot.ts";
 
 function xml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+  const valid = [...value].map((character) => {
+    const codePoint = character.codePointAt(0)!;
+    const allowed = codePoint === 0x09 || codePoint === 0x0a || codePoint === 0x0d
+      || (codePoint >= 0x20 && codePoint <= 0xd7ff)
+      || (codePoint >= 0xe000 && codePoint <= 0xfffd)
+      || (codePoint >= 0x10000 && codePoint <= 0x10ffff);
+    return allowed ? character : "\uFFFD";
+  }).join("");
+  return valid.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+}
+
+function coordinate(value: number): string {
+  const rendered = String(value);
+  const exponential = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(rendered);
+  if (!exponential) return rendered;
+  const [, sign, integer, fraction = "", exponentText] = exponential;
+  const digits = `${integer}${fraction}`;
+  const decimalIndex = integer.length + Number(exponentText);
+  if (decimalIndex <= 0) return `${sign}0.${"0".repeat(-decimalIndex)}${digits}`;
+  if (decimalIndex >= digits.length) return `${sign}${digits}${"0".repeat(decimalIndex - digits.length)}`;
+  return `${sign}${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
 }
 
 function filenamePart(value: string): string {
@@ -15,7 +35,7 @@ export function routeExportFilename(snapshot: RouteSnapshot): string {
 
 export function exportRouteSnapshotGpx(snapshot: RouteSnapshot): string {
   const routeId = xml(snapshot.id);
-  const points = snapshot.trace.map(({ latitude, longitude }) => `      <trkpt lat="${latitude}" lon="${longitude}"></trkpt>`).join("\n");
+  const points = snapshot.trace.map(({ latitude, longitude }) => `      <trkpt lat="${coordinate(latitude)}" lon="${coordinate(longitude)}"></trkpt>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="GPSART" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 https://www.topografix.com/GPX/1/1/gpx.xsd">
   <metadata>

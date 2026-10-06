@@ -2,11 +2,26 @@ use gpsart_persistence::routes::CandidateSnapshot;
 
 fn xml(value: &str) -> String {
     value
+        .chars()
+        .map(|character| {
+            if matches!(character, '\u{9}' | '\u{a}' | '\u{d}')
+                || matches!(character as u32, 0x20..=0xd7ff | 0xe000..=0xfffd | 0x10000..=0x10ffff)
+            {
+                character
+            } else {
+                '\u{fffd}'
+            }
+        })
+        .collect::<String>()
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+fn coordinate(value: f64) -> String {
+    value.to_string()
 }
 
 fn filename_part(value: &str) -> String {
@@ -51,7 +66,11 @@ pub(crate) fn serialize(snapshot: &CandidateSnapshot) -> String {
         .coordinates
         .iter()
         .map(|[longitude, latitude]| {
-            format!("      <trkpt lat=\"{latitude}\" lon=\"{longitude}\"></trkpt>")
+            format!(
+                "      <trkpt lat=\"{}\" lon=\"{}\"></trkpt>",
+                coordinate(*latitude),
+                coordinate(*longitude)
+            )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -67,7 +86,7 @@ pub(crate) fn serialize(snapshot: &CandidateSnapshot) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{filename_part, xml};
+    use super::{coordinate, filename_part, xml};
 
     #[test]
     fn metadata_and_filename_components_are_safe() {
@@ -76,6 +95,26 @@ mod tests {
             "hi-script-route"
         );
         assert_eq!(filename_part("../../"), "route");
-        assert_eq!(xml("<&\"'>"), "&lt;&amp;&quot;&apos;&gt;");
+        assert_eq!(xml("<&\"'>\0\u{b}"), "&lt;&amp;&quot;&apos;&gt;��");
+        assert_eq!(coordinate(0.000_000_1), "0.0000001");
+        assert_eq!(coordinate(-0.000_000_1), "-0.0000001");
+    }
+
+    #[test]
+    fn canonical_coordinate_serialization_round_trips_without_exponents() {
+        for encoded in [
+            -1_800_000_000_i32,
+            -900_000_000,
+            -1,
+            0,
+            1,
+            900_000_000,
+            1_800_000_000,
+        ] {
+            let value = f64::from(encoded) / 10_000_000.0;
+            let rendered = coordinate(value);
+            assert!(!rendered.contains(['e', 'E']));
+            assert_eq!(rendered.parse::<f64>().unwrap(), value);
+        }
     }
 }
