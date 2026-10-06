@@ -111,7 +111,7 @@ function candidateResult(state: AppState, details: boolean): string {
   }
   const comparison = buildCandidateComparison(state.routeResults, request.distanceKm * 1000);
   const selectedId = state.selectedCandidateId ?? comparison.candidates[0]!.snapshot.id;
-  if (details) return `${heading}${requestSummary(request)}${renderCandidateDetails(comparison, selectedId)}<div class="actions">${link("results", "Compare routes")}</div>`;
+  if (details) return `${heading}${requestSummary(request)}${renderCandidateDetails(comparison, selectedId)}<div class="actions"><button type="button" class="primary" data-action="export-gpx" data-route-id="${escapeHtml(selectedId)}">Export exact planned route (GPX)</button>${link("results", "Compare routes")}</div><p class="helper">Export uses this immutable route without rerouting or adding activity timestamps.</p>`;
   return `${heading}${requestSummary(request)}${renderCandidateResults(comparison, selectedId)}<div class="notice">${escapeHtml(ROUTE_USE_ADVISORY)}</div><div class="actions"><a class="primary" href="#/details">View selected route details ${icon("arrow-right")}</a>${link("planner", "Refine your plan")}</div>`;
 }
 

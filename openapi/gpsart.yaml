@@ -131,6 +131,28 @@ paths:
         '503':
           description: Snapshot storage is unavailable or failed immutable validation
           content: { application/json: { schema: { $ref: '#/components/schemas/RouteSnapshotError' }, example: { code: route_storage_unavailable } } }
+  /api/v1/routes/{route_id}/export.gpx:
+    get:
+      summary: Export the exact immutable owned route as a planned GPX 1.1 track
+      description: Serializes every stored point in order without rerouting, simplifying, or adding recorded-activity data. Connectors and retraced sections remain in the single ordered track segment.
+      security: [{ guestSession: [] }]
+      parameters:
+        - { in: path, name: route_id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Exact planned route in GPX 1.1 format
+          headers:
+            Cache-Control: { description: Private exports are not cached, schema: { type: string, const: 'private, no-store' } }
+            Content-Disposition: { description: Predictable sanitized attachment filename, schema: { type: string, example: 'attachment; filename="gpsart-heart-40000000-0000-4000-8000-000000000001-v1.gpx"' } }
+            X-Content-Type-Options: { description: Prevent content-type sniffing, schema: { type: string, const: nosniff } }
+          content:
+            application/gpx+xml:
+              schema: { type: string, contentMediaType: application/gpx+xml }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/PrivateNotFound' }
+        '503':
+          description: Snapshot storage is unavailable or failed immutable validation
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteSnapshotError' }, example: { code: route_storage_unavailable } } }
   /api/v1/guest-sessions:
     post:
       summary: Issue an opaque private guest session

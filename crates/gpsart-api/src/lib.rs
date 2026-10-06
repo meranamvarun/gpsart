@@ -35,6 +35,7 @@ use std::{
 };
 
 pub mod auth;
+mod gpx_export;
 use auth::{
     AuthError, InMemorySessionStore, SessionPolicy, authenticate, csrf_cookie,
     enforce_request_protection, expired_cookies, issue_session, rotate_session, session_cookie,
@@ -226,6 +227,7 @@ fn build_app(
             get(get_route_job).delete(cancel_route_job),
         )
         .route("/api/v1/routes/{id}", get(get_route_snapshot))
+        .route("/api/v1/routes/{id}/export.gpx", get(export_route_gpx))
         .route(
             "/api/v1/guest-sessions",
             axum::routing::post(create_guest_session),
@@ -871,6 +873,46 @@ async fn get_route_snapshot(
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("private, no-store"),
+    );
+    response
+}
+
+async fn export_route_gpx(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
+        Ok(value) => value,
+        Err(error) => return auth_error(error),
+    };
+    let snapshot = match state.routes.get(session.id, id).await {
+        Ok(value) => value,
+        Err(error) => return route_snapshot_error_response(error),
+    };
+    if snapshot.validate().is_err() {
+        return route_snapshot_error_response(RouteSnapshotError::InvalidSnapshot);
+    }
+    let filename = gpx_export::filename(&snapshot);
+    let disposition = match HeaderValue::from_str(&format!("attachment; filename=\"{filename}\"")) {
+        Ok(value) => value,
+        Err(_) => return route_snapshot_error_response(RouteSnapshotError::InvalidSnapshot),
+    };
+    let mut response = (StatusCode::OK, gpx_export::serialize(&snapshot)).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/gpx+xml; charset=utf-8"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_DISPOSITION, disposition);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
     );
     response
 }

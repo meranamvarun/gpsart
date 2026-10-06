@@ -56,6 +56,7 @@ test("loaded candidates drive result cards, details, and selected route map", ()
   assert.equal(loaded.selectedCandidateId, snapshot.id);
   assert.match(renderScreen("results", loaded, { kind: "available", snapshots: [] }), new RegExp(snapshot.id));
   assert.match(renderScreen("details", loaded, { kind: "available", snapshots: [] }), /Route facts/);
+  assert.match(renderScreen("details", loaded, { kind: "available", snapshots: [] }), /data-action="export-gpx"/);
   assert.match(renderMap("results", loaded), /id="route-map"/);
   assert.match(renderMap("results", loaded), /North-up comparison/);
   assert.equal(selectCandidate(loaded, "not-owned"), loaded);

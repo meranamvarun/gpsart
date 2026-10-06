@@ -8,6 +8,7 @@ use gpsart_persistence::routes::{
     RouteSnapshotError, RouteTraversal, SnapshotVersions, TraversalClass, TraversalDirection,
 };
 use http_body_util::BodyExt;
+use std::io::Cursor;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -218,6 +219,68 @@ async fn owned_route_serves_one_exact_ordered_snapshot_after_job_completion() {
         .clone()
         .oneshot(
             Request::get(format!("/api/v1/routes/{id}"))
+                .header("cookie", foreign)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), 404);
+}
+
+#[tokio::test]
+async fn owned_route_exports_exact_gpx_with_safe_download_headers() {
+    let expected = snapshot();
+    let expected_points = expected.geometry.coordinates.clone();
+    let id = expected.id;
+    let app = app_with_routes(
+        Healthy,
+        Arc::new(InMemorySessionStore::default()),
+        policy(),
+        Routes(Arc::new(Mutex::new(Some((Uuid::nil(), expected))))),
+    );
+    let owner = auth(&app).await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/api/v1/routes/{id}/export.gpx"))
+                .header("cookie", &owner)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/gpx+xml; charset=utf-8"
+    );
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(response.headers()["cache-control"], "private, no-store");
+    assert_eq!(
+        response.headers()["content-disposition"],
+        format!("attachment; filename=\"gpsart-heart-{id}-v1.gpx\"")
+    );
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        bytes.as_ref(),
+        include_bytes!("../../../tests/fixtures/route-export.gpx")
+    );
+
+    let imported = gpx::read(Cursor::new(bytes)).expect("external GPX importer accepts export");
+    assert_eq!(imported.version, gpx::GpxVersion::Gpx11);
+    let points = &imported.tracks[0].segments[0].points;
+    let coordinates = points
+        .iter()
+        .map(|point| [point.point().x(), point.point().y()])
+        .collect::<Vec<_>>();
+    assert_eq!(coordinates, expected_points);
+    assert!(points.iter().all(|point| point.time.is_none()));
+
+    let foreign = auth(&app).await;
+    let denied = app
+        .oneshot(
+            Request::get(format!("/api/v1/routes/{id}/export.gpx"))
                 .header("cookie", foreign)
                 .body(Body::empty())
                 .unwrap(),

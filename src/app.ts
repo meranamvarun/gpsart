@@ -21,6 +21,7 @@ import { acceptCandidateLoad, beginCandidateLoad, initialState, recordCompletedA
 import { buildCandidateComparison, routeMapModel } from "./app/route-presentation.ts";
 import type { DesignCategory } from "./app/catalogue.ts";
 import type { RouteRequest } from "./domain/planner.ts";
+import { downloadRouteSnapshotGpx } from "./domain/gpx-export.ts";
 import {
   fromMapSelection,
   fromSearchSelection,
@@ -263,6 +264,10 @@ function bind(): void {
     if (button.dataset.action === "confirm-start") void workflow.confirmAndStart();
     if (button.dataset.action === "cancel-job") void workflow.cancel();
     if (button.dataset.action === "retry-job") retryDependency();
+    if (button.dataset.action === "export-gpx") {
+      const snapshot = state.routeResults.find(({ id }) => id === button.dataset.routeId);
+      if (snapshot) downloadRouteSnapshotGpx(snapshot);
+    }
     if (button.dataset.action === "edit-start") document.querySelector<HTMLInputElement>("#start")?.select();
     if (button.dataset.action === "google") navigate("auth-pending");
   }));

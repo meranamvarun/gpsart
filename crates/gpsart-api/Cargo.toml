@@ -23,6 +23,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+gpx.workspace = true
 http-body-util.workspace = true
 serde_json.workspace = true
 tower.workspace = true
