@@ -25,7 +25,7 @@ Catalogue membership explicitly does not claim feasibility for a user's current 
 
 1. `crates/gpsart-api/tests/designs.rs` checks category filtering, version, published status, accessible name, and SVG preview data. OpenAPI and the TypeScript decoder require the same fields.
 2. The fixture matrix above links every published entry to positive and negative routing checks. The complete routing suites remain the authoritative fixture evidence.
-3. `tests/catalogue.test.ts` and `tests/planner-screen.test.ts` prove that unpublished prototypes are disabled with a reason, malformed/unavailable catalogue states fail closed, and the selected control exposes `aria-pressed`.
+3. `tests/catalogue.test.ts` and `tests/planner-screen.test.ts` prove that unpublished prototypes are disabled with a reason; malformed, unavailable, or identity-inconsistent catalogue data fails closed; and the selected control exposes `aria-pressed`.
 4. The catalogue screen says that presence never claims local fit. No catalogue response or browser code creates route feasibility data.
 5. `tests/app-state.test.ts` proves a design revision preserves start, activity, and distance. The disabled state preserves the current form and prevents unsupported submission.
 

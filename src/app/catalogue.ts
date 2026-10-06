@@ -30,14 +30,18 @@ export const textPreviews: readonly DesignTemplatePreview[] = [
   { id: "RUN", version: 1, name: "RUN", icon: null, complexity: "Complex" },
 ];
 
-function publishedMatch(preview: DesignTemplatePreview, designs: readonly DesignSummary[]): DesignSummary | undefined {
-  return designs.find(({ id, version }) => id === preview.id && version === preview.version);
+function publishedMatch(preview: DesignTemplatePreview, category: DesignCategory, designs: readonly DesignSummary[]): DesignSummary | undefined {
+  const expectedCategory = category === "Shapes" ? "shape" : "text";
+  return designs.find(({ id, version, category: actualCategory, name }) => id === preview.id
+    && version === preview.version
+    && actualCategory === expectedCategory
+    && name === preview.name);
 }
 
 export function previewsFor(category: DesignCategory, state: DesignCatalogueState): readonly PresentedDesignTemplate[] {
   const previews = category === "Shapes" ? shapePreviews : textPreviews;
   return Object.freeze(previews.map((preview) => {
-    const published = state.kind === "available" ? publishedMatch(preview, state.designs) : undefined;
+    const published = state.kind === "available" ? publishedMatch(preview, category, state.designs) : undefined;
     const statusReason = published ? null
       : state.kind === "loading" ? `${preview.name} availability is still loading.`
         : state.kind === "unavailable" ? `${preview.name} is unavailable while the design catalogue cannot be reached.`

@@ -23,6 +23,14 @@ test("only server-published fixture-backed designs are enabled", () => {
   assert.equal(previewsFor("Text", state).find(({ name }) => name === "HI")?.enabled, true);
 });
 
+test("a published identity with inconsistent catalogue metadata stays disabled", () => {
+  const inconsistent = {
+    kind: "available" as const,
+    designs: [{ ...published[0]!, category: "text" as const }],
+  };
+  assert.equal(previewsFor("Shapes", inconsistent).find(({ name }) => name === "Heart")?.enabled, false);
+});
+
 test("catalogue loading is category-filtered and rejects malformed responses", async () => {
   let requested = "";
   const loaded = await fetchDesignCatalogue("text", async (input) => {
