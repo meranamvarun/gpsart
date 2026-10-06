@@ -246,6 +246,7 @@ paths:
                         status: published
                         category: text
                         name: HI
+                        accessible_name: HI text route design
                         complexity_hint: moderate
                         preview_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">...</svg>'
                         definition_hash: 64-lowercase-hex-characters
@@ -662,13 +663,14 @@ components:
     DesignSummary:
       type: object
       additionalProperties: false
-      required: [id, version, status, category, name, complexity_hint, preview_svg, definition_hash]
+      required: [id, version, status, category, name, accessible_name, complexity_hint, preview_svg, definition_hash]
       properties:
         id: { type: string }
         version: { type: integer, minimum: 1 }
         status: { const: published }
         category: { type: string, enum: [shape, text] }
         name: { type: string }
+        accessible_name: { type: string, minLength: 1 }
         complexity_hint: { type: string }
         preview_svg: { type: string }
         definition_hash: { type: string, pattern: '^[0-9a-f]{64}$' }

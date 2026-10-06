@@ -89,6 +89,7 @@ struct DesignSummary {
     status: &'static str,
     category: Category,
     name: String,
+    accessible_name: String,
     complexity_hint: String,
     preview_svg: String,
     definition_hash: String,
@@ -1171,6 +1172,10 @@ async fn designs(Query(query): Query<DesignsQuery>) -> impl IntoResponse {
                     status: template.definition.status.as_str(),
                     category: template.definition.category,
                     name: template.definition.name.clone(),
+                    accessible_name: match template.definition.category {
+                        Category::Shape => format!("{} route design", template.definition.name),
+                        Category::Text => format!("{} text route design", template.definition.name),
+                    },
                     complexity_hint: template.definition.complexity.hint.clone(),
                     preview_svg: render_svg(&template.definition),
                     definition_hash: template.definition_hash.clone(),

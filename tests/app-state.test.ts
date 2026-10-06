@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { acceptApiResult, initialState, updateRequest } from "../src/app/state.ts";
+import { acceptApiResult, acceptCatalogueLoad, initialState, updateRequest } from "../src/app/state.ts";
 import { routeSnapshot } from "./fixtures/route-snapshot.ts";
 
 const snapshot = routeSnapshot();
@@ -36,4 +36,14 @@ test("non-route outcomes are explicit and never synthesize a candidate", () => {
   assert.equal(acceptApiResult(state, { kind: "no_match" }).outcome, "no_match");
   assert.equal(acceptApiResult(state, { kind: "unavailable" }).outcome, "unavailable");
   assert.equal(acceptApiResult(state, { kind: "invalid_response" }).outcome, "invalid_response");
+});
+
+test("design changes preserve the remaining planner form", () => {
+  const loaded = acceptCatalogueLoad(initialState(), { kind: "available", designs: [] });
+  const before = updateRequest(loaded, { start: "12.97, 77.59", activity: "Walking", distanceKm: 8 });
+  const after = updateRequest(before, { design: "HI" });
+  assert.equal(after.request.start, before.request.start);
+  assert.equal(after.request.activity, before.request.activity);
+  assert.equal(after.request.distanceKm, before.request.distanceKm);
+  assert.equal(after.request.design, "HI");
 });

@@ -31,6 +31,10 @@ async fn designs_returns_only_published_templates_and_filters_category() {
     assert_eq!(json["designs"][0]["id"], "HI");
     assert_eq!(json["designs"][0]["version"], 1);
     assert_eq!(json["designs"][0]["status"], "published");
+    assert_eq!(
+        json["designs"][0]["accessible_name"],
+        "HI text route design"
+    );
     assert!(
         json["designs"][0]["preview_svg"]
             .as_str()

@@ -1,4 +1,31 @@
 import { decodeRouteSnapshot, type RouteSnapshot } from "../domain/route-snapshot.ts";
+import { decodeDesignCatalogue, type DesignCatalogueLoad, type DesignCategory } from "../domain/design-template.ts";
+
+export async function fetchDesignCatalogue(
+  category?: DesignCategory,
+  fetcher: typeof fetch = fetch,
+): Promise<DesignCatalogueLoad> {
+  const suffix = category ? `?category=${encodeURIComponent(category)}` : "";
+  let response: Response;
+  try {
+    response = await fetcher(`/api/v1/designs${suffix}`, {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (!response.ok) return { kind: "unavailable" };
+  try {
+    const designs = decodeDesignCatalogue(await response.json());
+    if (category && designs.some((design) => design.category !== category)) return { kind: "invalid_response" };
+    return { kind: "available", designs };
+  } catch {
+    return { kind: "invalid_response" };
+  }
+}
 
 export type ApiRouteResult =
   | { readonly kind: "route"; readonly snapshot: RouteSnapshot }

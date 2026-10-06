@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
 import "./styles.css";
 import { readCsrfCookie } from "./client/guest-session.ts";
-import { fetchRouteCandidates } from "./client/api.ts";
+import { fetchDesignCatalogue, fetchRouteCandidates } from "./client/api.ts";
 import {
   PlannerWorkflow,
   type PlannerWorkflowSnapshot,
@@ -17,7 +17,8 @@ import { baseMapTileErrorHandler, renderMap } from "./app/map.ts";
 import { currentScreen, navigate, type Screen } from "./app/router.ts";
 import { screenForWorkflow } from "./app/outcome-flow.ts";
 import { isStandaloneScreen, renderScreen } from "./app/screen-controller.ts";
-import { acceptCandidateLoad, beginCandidateLoad, initialState, recordCompletedAttempt, retryCompletedAttempt, selectCandidate, updateRequest, updateUi } from "./app/state.ts";
+import { acceptCandidateLoad, acceptCatalogueLoad, beginCandidateLoad, initialState, recordCompletedAttempt, retryCompletedAttempt, selectCandidate, updateRequest, updateUi } from "./app/state.ts";
+import { isDesignEnabled } from "./app/catalogue.ts";
 import { buildCandidateComparison, routeMapModel } from "./app/route-presentation.ts";
 import type { DesignCategory } from "./app/catalogue.ts";
 import type { RouteRequest } from "./domain/planner.ts";
@@ -193,6 +194,7 @@ function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
 }
 
 function submitPlan(): void {
+  if (!isDesignEnabled(state.request.design, state.catalogue)) return;
   const start = inputValue("start");
   const distanceKm = Number(inputValue("distance"));
   const selected = proposedStart?.label === start ? proposedStart : parseManualCoordinates(start);
@@ -286,3 +288,7 @@ window.addEventListener("gpsart:session-ready", () => {
 window.addEventListener("hashchange", render);
 window.addEventListener("pagehide", () => workflow.dispose());
 render();
+void fetchDesignCatalogue().then((result) => {
+  state = acceptCatalogueLoad(state, result);
+  render();
+});

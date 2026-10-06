@@ -4,6 +4,7 @@ import { isCurrentResult, type RouteRequest, reviseRequest } from "../domain/pla
 import type { RouteSnapshot } from "../domain/route-snapshot.ts";
 import type { RouteJobStatus } from "../domain/job-status.ts";
 import type { DesignCategory } from "./catalogue.ts";
+import type { DesignCatalogueLoad, DesignCatalogueState } from "../domain/design-template.ts";
 
 export type RouteOutcome = "idle" | "pending" | "route" | "no_match" | "unavailable" | "invalid_response" | "stale";
 
@@ -16,6 +17,7 @@ export interface AppState {
   readonly request: RouteRequest;
   readonly signedIn: boolean;
   readonly category: DesignCategory;
+  readonly catalogue: DesignCatalogueState;
   readonly mapExpanded: boolean;
   readonly outcome: RouteOutcome;
   readonly routeResult: RouteSnapshot | null;
@@ -31,6 +33,7 @@ export function initialState(): AppState {
     request: { start: "", activity: "Cycling", design: "Heart", distanceKm: 15, tolerancePercent: 10, returnsToStart: true, revision: 0 },
     signedIn: false,
     category: "Shapes",
+    catalogue: Object.freeze({ kind: "loading" }),
     mapExpanded: false,
     outcome: "idle",
     routeResult: null,
@@ -54,6 +57,10 @@ export function acceptApiResult(state: AppState, result: ApiRouteResult): AppSta
   if (result.kind !== "route") return { ...state, outcome: result.kind, routeResult: null };
   if (!isCurrentResult(state.request, result.snapshot.requestRevision)) return { ...state, outcome: "stale", routeResult: null };
   return { ...state, outcome: "route", routeResult: result.snapshot };
+}
+
+export function acceptCatalogueLoad(state: AppState, result: DesignCatalogueLoad): AppState {
+  return { ...state, catalogue: result };
 }
 
 export function beginCandidateLoad(state: AppState, requestRevision: number): AppState {
