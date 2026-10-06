@@ -38,6 +38,9 @@ let workflowSnapshot: PlannerWorkflowSnapshot | null = null;
 let locationMessage = "Location is requested only when you choose. You can always enter coordinates or click the map.";
 let leafletMap: L.Map | null = null;
 let resuming = false;
+let renderedScreen: Screen | null = null;
+let dialogReturnFocus: HTMLElement | null = null;
+let lastAnnouncementKey = "";
 const savedRoutes = new IndexedDbSavedRouteRepository();
 let savedRouteList: SavedRouteList = { kind: "available", routes: Object.freeze([]), errors: Object.freeze([]) };
 
@@ -53,13 +56,33 @@ const workflow = new PlannerWorkflow({
 
 function header(screen: string): string {
   const plannerActive = !["saved", "login", "account", "welcome", "screens"].includes(screen);
-  return `<header class="header"><a class="brand" href="#/planner" aria-label="GPSART home">GPSART</a><nav class="nav" aria-label="Main navigation"><a href="#/planner" class="${plannerActive ? "active" : ""}">Planner</a><a href="#/saved" class="${screen === "saved" ? "active" : ""}">Saved</a></nav><div class="header-end"><span class="pilot"><i class="ph ph-leaf" aria-hidden="true"></i> Bengaluru pilot</span><a class="signin" href="#/${state.signedIn ? "account" : "login"}">${state.signedIn ? "My account" : "Sign in"}</a></div></header>`;
+  return `<header class="header"><a class="brand" href="#/planner" aria-label="GPSART home">GPSART</a><nav class="nav" aria-label="Main navigation"><a href="#/planner" class="${plannerActive ? "active" : ""}"${plannerActive ? ` aria-current="page"` : ""}>Planner</a><a href="#/saved" class="${screen === "saved" ? "active" : ""}"${screen === "saved" ? ` aria-current="page"` : ""}>Saved</a></nav><div class="header-end"><span class="pilot"><i class="ph ph-leaf" aria-hidden="true"></i> Bengaluru pilot</span><a class="signin" href="#/${state.signedIn ? "account" : "login"}"${screen === "login" || screen === "account" ? ` aria-current="page"` : ""}>${state.signedIn ? "My account" : "Sign in"}</a></div></header>`;
+}
+
+function focusLocator(): string | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !appRoot.contains(active)) return null;
+  if (active.id) return `#${CSS.escape(active.id)}`;
+  for (const attribute of ["data-action", "data-activity", "data-category", "data-design", "data-candidate-id", "href"] as const) {
+    const value = active.getAttribute(attribute);
+    if (value) return `${active.tagName.toLowerCase()}[${attribute}=${CSS.escape(value)}]`;
+  }
+  return null;
+}
+
+function announceOnce(key: string, message: string): void {
+  if (key === lastAnnouncementKey) return;
+  lastAnnouncementKey = key;
+  const announcer = document.querySelector<HTMLElement>("#announcer");
+  if (announcer) announcer.textContent = message;
 }
 
 function render(): void {
   leafletMap?.remove();
   leafletMap = null;
   const screen = currentScreen(window.location.hash, document.body.dataset.screen);
+  const sameScreen = renderedScreen === screen;
+  const restoreFocus = sameScreen ? focusLocator() : null;
   const body = isStandaloneScreen(screen)
     ? renderScreen(screen, state, savedRouteList, workflowSnapshot)
     : `<main id="content" class="workspace ${state.mapExpanded ? "expanded" : ""}"><section class="panel" aria-label="${screen}"><button class="mobile-expand" type="button" data-action="expand"><i class="ph ph-arrows-out-simple" aria-hidden="true"></i> ${state.mapExpanded ? "Reduce map" : "Expand map"}</button>${renderScreen(screen, state, savedRouteList, workflowSnapshot)}</section>${renderMap(screen, state)}</main>`;
@@ -70,7 +93,9 @@ function render(): void {
   bindRouteMap(screen);
   const locationStatus = document.querySelector<HTMLElement>("#location-status");
   if (locationStatus) locationStatus.textContent = locationMessage;
-  window.scrollTo(0, 0);
+  if (restoreFocus) document.querySelector<HTMLElement>(restoreFocus)?.focus();
+  if (!sameScreen) window.scrollTo(0, 0);
+  renderedScreen = screen;
 }
 
 function storageFailureMessage(reason: StorageFailure): string {
@@ -132,14 +157,22 @@ async function exportSaved(id: string): Promise<void> {
   }
 }
 
-async function renameSaved(id: string): Promise<void> {
-  const existing = savedRouteList.kind === "available" ? savedRouteList.routes.find((route) => route.id === id) : undefined;
-  if (!existing) return;
-  const name = window.prompt("Name this saved route", existing.name);
-  if (name === null) return;
-  const result = await savedRoutes.rename(id, name.trim());
+async function renameSaved(id: string, name: string): Promise<void> {
+  const result = await savedRoutes.rename(id, name);
   await refreshSavedRoutes();
   if (result.kind !== "renamed") showDeviceStorageMessage(result.kind === "unavailable" ? storageFailureMessage(result.reason) : "Enter a route name between 1 and 100 characters.", true);
+}
+
+function openRenameDialog(opener: HTMLElement, id: string): void {
+  const existing = savedRouteList.kind === "available" ? savedRouteList.routes.find((route) => route.id === id) : undefined;
+  const dialog = document.querySelector<HTMLDialogElement>("#rename-route-dialog");
+  const input = document.querySelector<HTMLInputElement>("#rename-route-name");
+  if (!existing || !dialog || !input) return;
+  dialogReturnFocus = opener;
+  dialog.dataset.routeId = id;
+  input.value = existing.name;
+  dialog.showModal();
+  input.select();
 }
 
 async function deleteSaved(id: string): Promise<void> {
@@ -245,6 +278,16 @@ function showScreen(screen: Screen): void {
 
 function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
   workflowSnapshot = snapshot;
+  const stage = snapshot.status?.stage;
+  if (snapshot.jobId && stage) {
+    const labels: Partial<Record<typeof stage, string>> = {
+      queued: "Route generation queued.",
+      checking_roads: "Route generation: checking roads.",
+      fitting_design: "Route generation: fitting your design.",
+      comparing_routes: "Route generation: comparing routes.",
+    };
+    announceOnce(`${snapshot.jobId}:${stage}`, labels[stage] ?? `Route generation stage: ${stage}.`);
+  }
   if (resuming && snapshot.request) {
     state = { ...state, request: snapshot.request, outcome: "pending", routeResult: null };
     proposedStart = snapshot.proposedStart;
@@ -282,6 +325,7 @@ function submitPlan(): void {
       status.classList.add("error");
       status.setAttribute("role", "alert");
     }
+    document.querySelector<HTMLInputElement>("#start")?.setAttribute("aria-invalid", "true");
     return;
   }
   proposedStart = selected;
@@ -316,6 +360,20 @@ function bind(): void {
     const category = button.dataset.category as DesignCategory | undefined;
     if (category) { state = updateUi(state, { category }); render(); }
   }));
+  const categoryTabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"][data-category]')];
+  categoryTabs.forEach((button, index) => button.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? categoryTabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + categoryTabs.length) % categoryTabs.length;
+    const category = categoryTabs[nextIndex]?.dataset.category as DesignCategory | undefined;
+    if (category) {
+      state = updateUi(state, { category });
+      render();
+      document.querySelector<HTMLElement>(`#design-tab-${category.toLowerCase()}`)?.focus();
+    }
+  }));
   document.querySelectorAll<HTMLButtonElement>("[data-design]").forEach((button) => button.addEventListener("click", () => {
     const design = button.dataset.design;
     if (design) patchRequest({ design });
@@ -336,6 +394,19 @@ function bind(): void {
     event.preventDefault();
     submitPlan();
   });
+  const renameDialog = document.querySelector<HTMLDialogElement>("#rename-route-dialog");
+  renameDialog?.addEventListener("close", () => {
+    dialogReturnFocus?.focus();
+    dialogReturnFocus = null;
+  }, { once: true });
+  document.querySelector<HTMLFormElement>("#rename-route-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const id = renameDialog?.dataset.routeId;
+    const name = document.querySelector<HTMLInputElement>("#rename-route-name")?.value.trim();
+    if (!id || !name) return;
+    renameDialog.close();
+    void renameSaved(id, name);
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => button.addEventListener("click", () => {
     if (button.dataset.action === "expand") { state = updateUi(state, { mapExpanded: !state.mapExpanded }); render(); }
     if (button.dataset.action === "location") void useBrowserLocation();
@@ -349,8 +420,9 @@ function bind(): void {
     if (button.dataset.action === "save-route" && button.dataset.routeId) void saveSelectedRoute(button.dataset.routeId);
     if (button.dataset.action === "open-saved" && button.dataset.routeId) void openSaved(button.dataset.routeId);
     if (button.dataset.action === "export-saved-gpx" && button.dataset.routeId) void exportSaved(button.dataset.routeId);
-    if (button.dataset.action === "rename-saved" && button.dataset.routeId) void renameSaved(button.dataset.routeId);
+    if (button.dataset.action === "rename-saved" && button.dataset.routeId) openRenameDialog(button, button.dataset.routeId);
     if (button.dataset.action === "delete-saved" && button.dataset.routeId) void deleteSaved(button.dataset.routeId);
+    if (button.dataset.action === "cancel-rename") renameDialog?.close();
     if (button.dataset.action === "edit-start") document.querySelector<HTMLInputElement>("#start")?.select();
     if (button.dataset.action === "google") navigate("auth-pending");
   }));
