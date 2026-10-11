@@ -1,3 +1,4 @@
+use gpsart_config::WorkloadLimits;
 use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use std::{
     collections::HashMap,
@@ -416,6 +417,10 @@ fn require_lease(job: &JobRecord, lease: &JobLease, now: SystemTime) -> Result<(
 pub enum JobError {
     #[error("route-job input is invalid")]
     InvalidInput,
+    #[error("route-job request exceeds the configured payload limit")]
+    PayloadTooLarge,
+    #[error("route-job admission limit reached; retry later")]
+    RateLimited { retry_after_seconds: u64 },
     #[error("resolved start was not found")]
     StartNotFound,
     #[error("idempotency key was reused with different input")]
@@ -454,6 +459,7 @@ pub struct RouteJobSubmission {
 #[derive(Clone)]
 pub struct PostgresJobCoordinator {
     pool: PgPool,
+    limits: WorkloadLimits,
 }
 
 pub struct PostgresProviderCallPermit {
@@ -473,28 +479,57 @@ impl PostgresProviderCallPermit {
 
 impl PostgresJobCoordinator {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            limits: WorkloadLimits::default(),
+        }
+    }
+
+    pub fn with_limits(pool: PgPool, limits: WorkloadLimits) -> Self {
+        Self { pool, limits }
     }
 
     pub async fn connect(database_url: &str) -> Result<Self, JobError> {
+        Self::connect_with_limits(database_url, WorkloadLimits::default()).await
+    }
+
+    pub async fn connect_with_limits(
+        database_url: &str,
+        limits: WorkloadLimits,
+    ) -> Result<Self, JobError> {
         PgPoolOptions::new()
             .max_connections(10)
             .connect(database_url)
             .await
-            .map(Self::new)
+            .map(|pool| Self::with_limits(pool, limits))
             .map_err(|_| JobError::Unavailable)
     }
 
     pub async fn submit(&self, owner: Uuid, input: &RouteJobSubmission) -> Result<Uuid, JobError> {
+        let now = SystemTime::now();
         if input.revision <= 0
             || input.idempotency_key.is_empty()
             || input.idempotency_key.len() > 200
-            || !(1_000..=100_000).contains(&input.requested_distance_metres)
+            || !(1_000..=self.limits.max_distance_metres).contains(&input.requested_distance_metres)
             || input.distance_tolerance_metres < 0
-            || input.distance_tolerance_metres > input.requested_distance_metres
+            || !self.limits.allowed_tolerance_percent.iter().any(|percent| {
+                (input.distance_tolerance_metres * 100
+                    - input.requested_distance_metres * i32::from(*percent))
+                .abs()
+                    <= 50
+            })
             || input.max_attempts <= 0
-            || input.deadline_at <= SystemTime::now()
+            || input.max_attempts > self.limits.max_candidate_attempts
+            || input.deadline_at <= now
+            || input
+                .deadline_at
+                .duration_since(now)
+                .map_or(true, |value| value > self.limits.max_runtime)
             || input.expires_at <= input.deadline_at
+            || input
+                .expires_at
+                .duration_since(now)
+                .map_or(true, |value| value > self.limits.guest_retention)
             || input.algorithm_version != SUPPORTED_ALGORITHM_VERSION
             || [
                 &input.activity_profile_version,
@@ -510,6 +545,10 @@ impl PostgresJobCoordinator {
             return Err(JobError::InvalidInput);
         }
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
+        sqlx::query("SELECT pg_advisory_xact_lock(401)")
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(format!("{owner}:{}", input.idempotency_key))
             .execute(&mut *tx)
@@ -520,6 +559,24 @@ impl PostgresJobCoordinator {
             let hash: Vec<u8> = row.try_get("input_hash").map_err(|_| JobError::Unavailable)?;
             let id: Uuid = row.try_get("id").map_err(|_| JobError::Unavailable)?;
             return if hash == input.input_hash { Ok(id) } else { Err(JobError::IdempotencyConflict) };
+        }
+        let active_for_guest: i64 = sqlx::query_scalar("SELECT count(*) FROM generation_jobs WHERE guest_session_id=$1 AND state IN ('queued','running')")
+            .bind(owner).fetch_one(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
+        let active_deployment: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM generation_jobs WHERE state IN ('queued','running')",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| JobError::Unavailable)?;
+        let recent_for_guest: i64 = sqlx::query_scalar("SELECT count(*) FROM planning_requests WHERE guest_session_id=$1 AND created_at > now() - interval '1 minute'")
+            .bind(owner).fetch_one(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
+        if active_for_guest >= self.limits.max_active_jobs_per_guest
+            || active_deployment >= self.limits.max_active_jobs_deployment
+            || recent_for_guest >= self.limits.max_submissions_per_guest_per_minute
+        {
+            return Err(JobError::RateLimited {
+                retry_after_seconds: 60,
+            });
         }
         let request_id = Uuid::new_v4();
         let inserted = sqlx::query("INSERT INTO planning_requests (id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash, requested_pin, requested_distance_metres, distance_tolerance_metres, activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version, return_to_start, expires_at) SELECT $1, $2, rs.id, $3, $4, $5, rs.confirmed_start, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16 FROM resolved_starts rs WHERE rs.id = $17 AND rs.guest_session_id = $2 AND rs.expires_at > now() AND rs.profile_version = $9 AND rs.coverage_policy_version = $10 AND rs.map_data_version = $13 RETURNING id")
@@ -705,7 +762,7 @@ impl PostgresJobCoordinator {
     ) -> Result<Option<PostgresProviderCallPermit>, JobError> {
         let required_until = now.checked_add(required).ok_or(JobError::InvalidInput)?;
         let mut transaction = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
-        let row = sqlx::query("SELECT state::text AS state, cancellation_requested_at, lease_owner, attempt_count, lease_expires_at, deadline_at FROM generation_jobs WHERE id=$1 FOR UPDATE")
+        let row = sqlx::query("SELECT state::text AS state, cancellation_requested_at, lease_owner, attempt_count, lease_expires_at, deadline_at, provider_call_count FROM generation_jobs WHERE id=$1 FOR UPDATE")
             .bind(lease.job_id)
             .fetch_optional(&mut *transaction)
             .await
@@ -729,15 +786,27 @@ impl PostgresJobCoordinator {
         let deadline_at: OffsetDateTime = row
             .try_get("deadline_at")
             .map_err(|_| JobError::Unavailable)?;
+        let provider_call_count: i32 = row
+            .try_get("provider_call_count")
+            .map_err(|_| JobError::Unavailable)?;
         let allowed = state == "running"
             && cancellation_requested_at.is_none()
             && lease_owner == Some(lease.worker_id)
             && attempt == lease.attempt as i32
             && lease_expires_at.is_some_and(|expires| expires > OffsetDateTime::from(now))
-            && deadline_at >= OffsetDateTime::from(required_until);
+            && deadline_at >= OffsetDateTime::from(required_until)
+            && usize::try_from(provider_call_count)
+                .is_ok_and(|count| count < self.limits.max_provider_requests);
         if !allowed {
             return Ok(None);
         }
+        sqlx::query(
+            "UPDATE generation_jobs SET provider_call_count=provider_call_count+1 WHERE id=$1",
+        )
+        .bind(lease.job_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| JobError::Unavailable)?;
         Ok(Some(PostgresProviderCallPermit {
             transaction: Some(transaction),
         }))

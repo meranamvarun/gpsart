@@ -530,6 +530,7 @@ name = "gpsart-persistence"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "gpsart-config",
  "gpsart-domain",
  "gpsart-routing",
  "serde",

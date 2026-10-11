@@ -1,3 +1,4 @@
+use gpsart_config::WorkloadLimits;
 use gpsart_persistence::jobs::{
     Completion, JobError, JobOutcomeCode, JobStage, PostgresJobCoordinator, RouteJobSubmission,
 };
@@ -6,8 +7,8 @@ use gpsart_persistence::routes::{
     SnapshotIdentity,
 };
 use gpsart_persistence::{
-    MIGRATOR, MigrationStatus, PostgresResolvedStartStore, ResolvedStartRecord, ResolvedStartStore,
-    migration_status,
+    GuestSessionStore, MIGRATOR, MigrationStatus, PostgresGuestSessionStore,
+    PostgresResolvedStartStore, ResolvedStartRecord, ResolvedStartStore, migration_status,
 };
 use sqlx::{Connection, Executor, PgConnection, PgPool, Row, postgres::PgConnectOptions};
 use std::time::{Duration, SystemTime};
@@ -528,7 +529,7 @@ async fn confirmed_start_store_feeds_owned_job_submission() {
                 map_data_version: "map-v1".into(),
                 algorithm_version: "algorithm-v1".into(),
                 expires_at: now + Duration::from_secs(3_600),
-                deadline_at: now + Duration::from_secs(120),
+                deadline_at: now + Duration::from_secs(60),
                 max_attempts: 3,
             },
         )
@@ -551,6 +552,97 @@ async fn confirmed_start_store_feeds_owned_job_submission() {
     .await
     .unwrap();
     assert_eq!(return_to_start, Some(false));
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let make_submission = |key: &str, hash: u8| RouteJobSubmission {
+        resolved_start_id: start_id,
+        revision: i32::from(hash),
+        idempotency_key: key.into(),
+        input_hash: [hash; 32],
+        requested_distance_metres: 5_000,
+        distance_tolerance_metres: 250,
+        return_to_start: false,
+        activity_profile_json: r#"{"activity":"walking","profile_version":"walking-v1"}"#.into(),
+        activity_profile_version: "walking-v1".into(),
+        coverage_policy_version: "coverage-v1".into(),
+        template_id: "heart".into(),
+        template_version: "1".into(),
+        map_data_version: "map-v1".into(),
+        algorithm_version: "algorithm-v1".into(),
+        expires_at: SystemTime::now() + Duration::from_secs(3_600),
+        deadline_at: SystemTime::now() + Duration::from_secs(60),
+        max_attempts: 3,
+    };
+    let second = make_submission("second-active", 2);
+    let second_id = coordinator.submit(owner, &second).await.unwrap();
+    assert_eq!(coordinator.submit(owner, &second).await.unwrap(), second_id);
+    assert_eq!(
+        coordinator
+            .submit(owner, &make_submission("new-key-cannot-bypass", 3))
+            .await,
+        Err(JobError::RateLimited {
+            retry_after_seconds: 60,
+        }),
+        "new idempotency keys cannot bypass the per-guest active-job limit",
+    );
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn cleanup_is_batched_and_never_deletes_work_behind_an_active_lease() {
+    let Some((admin, pool, database_name)) = isolated_database("retention_cleanup").await else {
+        return;
+    };
+    MIGRATOR.run(&pool).await.expect("migrations apply");
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO guest_sessions (id, token_hash, created_at, expires_at, cleanup_after)
+        VALUES ('00000000-0000-0000-0000-000000000011', decode(repeat('31',32),'hex'), now()-interval '2 days', now()+interval '1 day', now()+interval '2 days');
+        INSERT INTO resolved_starts (id, guest_session_id, requested_pin, confirmed_start, profile_version, coverage_policy_version, map_data_version, created_at, expires_at)
+        VALUES ('10000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000011',ST_SetSRID(ST_MakePoint(10,10),4326),ST_SetSRID(ST_MakePoint(10,10),4326),'walking-v1','coverage-v1','map-v1',now()-interval '2 days',now()-interval '1 day');
+        INSERT INTO planning_requests (id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash, requested_pin, requested_distance_metres, distance_tolerance_metres, activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version, return_to_start, created_at, expires_at)
+        VALUES ('20000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000011','10000000-0000-0000-0000-000000000011',1,'expired',decode(repeat('41',32),'hex'),ST_SetSRID(ST_MakePoint(10,10),4326),5000,250,'{}','walking-v1','coverage-v1','heart','1','map-v1','algorithm-v1',true,now()-interval '2 days',now()-interval '1 day');
+        INSERT INTO generation_jobs (id, guest_session_id, planning_request_id, state, stage, queued_at, started_at, deadline_at, lease_owner, lease_expires_at, max_attempts)
+        VALUES ('30000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000011','20000000-0000-0000-0000-000000000011','running','fitting_design',now()-interval '2 days',now()-interval '2 days',now()+interval '1 hour','50000000-0000-0000-0000-000000000011',now()+interval '5 minutes',3);
+        INSERT INTO route_candidates (id, guest_session_id, generation_job_id, candidate_version, start_point, end_point, canonical_route, distance_metres, map_data_version, algorithm_version, created_at, expires_at)
+        VALUES ('40000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000011','30000000-0000-0000-0000-000000000011',1,ST_SetSRID(ST_MakePoint(10,10),4326),ST_SetSRID(ST_MakePoint(10.1,10.1),4326),ST_SetSRID(ST_MakeLine(ST_MakePoint(10,10),ST_MakePoint(10.1,10.1)),4326),5000,'map-v1','algorithm-v1',now()-interval '2 days',now()-interval '1 day');
+        "#,
+    ).execute(&pool).await.unwrap();
+    let store = PostgresGuestSessionStore::new(pool.clone());
+    let protected = store
+        .cleanup_expired_sessions(SystemTime::now())
+        .await
+        .unwrap();
+    assert_eq!(protected.deleted_jobs, 0);
+    assert_eq!(protected.deleted_candidates, 0);
+    sqlx::query("UPDATE generation_jobs SET lease_expires_at=now()-interval '1 second' WHERE id='30000000-0000-0000-0000-000000000011'")
+        .execute(&pool).await.unwrap();
+    let deleted = store
+        .cleanup_expired_sessions(SystemTime::now())
+        .await
+        .unwrap();
+    assert_eq!(deleted.deleted_jobs, 1);
+    assert_eq!(deleted.deleted_candidates, 1);
+    assert_eq!(deleted.deleted_starts, 1);
+    assert!(!deleted.retry_required);
+
+    sqlx::raw_sql(
+        "INSERT INTO guest_sessions (id, token_hash, created_at, expires_at, cleanup_after) SELECT md5(value::text)::uuid, decode(lpad(to_hex(value),64,'0'),'hex'), now()-interval '3 days', now()-interval '2 days', now()-interval '1 day' FROM generate_series(1,101) value",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let first_batch = store
+        .cleanup_expired_sessions(SystemTime::now())
+        .await
+        .unwrap();
+    assert_eq!(first_batch.deleted_sessions, 100);
+    assert!(first_batch.retry_required);
+    let final_batch = store
+        .cleanup_expired_sessions(SystemTime::now())
+        .await
+        .unwrap();
+    assert_eq!(final_batch.deleted_sessions, 1);
+    assert!(!final_batch.retry_required);
     drop_database(admin, pool, &database_name).await;
 }
 
@@ -589,6 +681,42 @@ async fn provider_reservation_orders_scheduling_before_cancellation() {
     assert_eq!(
         cancelling.await.unwrap().unwrap(),
         gpsart_persistence::jobs::JobState::Cancelled
+    );
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn provider_call_budget_is_durable_and_hard_capped() {
+    let Some((admin, pool, database_name)) = isolated_database("provider_budget").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let limits = WorkloadLimits {
+        max_provider_requests: 1,
+        ..WorkloadLimits::default()
+    };
+    let coordinator = PostgresJobCoordinator::with_limits(pool.clone(), limits);
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(30))
+        .await
+        .unwrap()
+        .unwrap();
+    coordinator
+        .begin_provider_call(&lease, now, Duration::from_secs(1))
+        .await
+        .unwrap()
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    assert!(
+        coordinator
+            .begin_provider_call(&lease, now, Duration::from_secs(1))
+            .await
+            .unwrap()
+            .is_none(),
+        "a new worker or retry cannot reset the durable provider-call budget"
     );
     drop_database(admin, pool, &database_name).await;
 }

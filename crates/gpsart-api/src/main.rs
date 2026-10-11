@@ -38,7 +38,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let sessions =
         Arc::new(PostgresGuestSessionStore::connect(config.database_url.expose()).await?);
-    let jobs = PostgresJobCoordinator::connect(config.database_url.expose()).await?;
+    let jobs = PostgresJobCoordinator::connect_with_limits(
+        config.database_url.expose(),
+        config.workload_limits.clone(),
+    )
+    .await?;
     let routes = PostgresRouteSnapshotStore::connect(config.database_url.expose()).await?;
     let public_origin = std::env::var("GPSART_PUBLIC_ORIGIN")?;
     let session_policy = SessionPolicy::new(
@@ -49,13 +53,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     )?;
     let listener = tokio::net::TcpListener::bind(config.api_bind).await?;
     tracing::info!(bind = %config.api_bind, "API listening");
-    let app = gpsart_api::app_with_all_services_and_routes(
+    let app = gpsart_api::app_with_all_services_and_routes_and_limits(
         readiness,
         starts,
         sessions,
         session_policy,
         jobs,
         routes,
+        config.workload_limits,
     );
     axum::serve(listener, app)
         .with_graceful_shutdown(async {

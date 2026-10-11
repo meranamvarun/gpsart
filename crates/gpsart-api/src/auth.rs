@@ -399,6 +399,10 @@ impl GuestSessionStore for InMemorySessionStore {
         sessions.retain(|_, session| session.cleanup_after > cutoff);
         Ok(CleanupReport {
             deleted_sessions: (before - sessions.len()) as u64,
+            deleted_jobs: 0,
+            deleted_candidates: 0,
+            deleted_starts: 0,
+            retry_required: false,
         })
     }
 }

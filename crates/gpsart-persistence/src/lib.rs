@@ -135,6 +135,10 @@ impl ResolvedStartStore for PostgresResolvedStartStore {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CleanupReport {
     pub deleted_sessions: u64,
+    pub deleted_jobs: u64,
+    pub deleted_candidates: u64,
+    pub deleted_starts: u64,
+    pub retry_required: bool,
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -174,12 +178,16 @@ pub struct PostgresGuestSessionStore {
 }
 
 impl PostgresGuestSessionStore {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
     pub async fn connect(database_url: &str) -> Result<Self, SessionStoreError> {
         PgPoolOptions::new()
             .max_connections(5)
             .connect(database_url)
             .await
-            .map(|pool| Self { pool })
+            .map(Self::new)
             .map_err(|_| SessionStoreError::Unavailable)
     }
 }
@@ -283,14 +291,51 @@ impl GuestSessionStore for PostgresGuestSessionStore {
         &self,
         cutoff: SystemTime,
     ) -> Result<CleanupReport, SessionStoreError> {
-        // Deliberately return only a count: cleanup must never materialize or log route geometry.
-        let deleted_sessions = sqlx::query("DELETE FROM guest_sessions WHERE cleanup_after <= $1")
-            .bind(OffsetDateTime::from(cutoff))
-            .execute(&self.pool)
+        const BATCH_SIZE: i64 = 100;
+        let cutoff = OffsetDateTime::from(cutoff);
+        let run_id = Uuid::new_v4();
+        let mut transaction = self
+            .pool
+            .begin()
             .await
-            .map_err(|_| SessionStoreError::Unavailable)?
-            .rows_affected();
-        Ok(CleanupReport { deleted_sessions })
+            .map_err(|_| SessionStoreError::Unavailable)?;
+        sqlx::query("INSERT INTO cleanup_runs (id, cutoff_at, status) VALUES ($1,$2,'running')")
+            .bind(run_id)
+            .bind(cutoff)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| SessionStoreError::Unavailable)?;
+
+        let eligible = "SELECT pr.id FROM planning_requests pr WHERE pr.expires_at <= $1 AND NOT EXISTS (SELECT 1 FROM generation_jobs active WHERE active.planning_request_id=pr.id AND active.state='running' AND active.lease_expires_at>$1) ORDER BY pr.expires_at LIMIT $2";
+        let deleted_candidates = sqlx::query(&format!("WITH eligible AS ({eligible}) DELETE FROM route_candidates rc USING generation_jobs gj WHERE rc.generation_job_id=gj.id AND gj.planning_request_id IN (SELECT id FROM eligible)"))
+            .bind(cutoff).bind(BATCH_SIZE).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?.rows_affected();
+        let deleted_jobs = sqlx::query(&format!("WITH eligible AS ({eligible}) DELETE FROM generation_jobs gj WHERE gj.planning_request_id IN (SELECT id FROM eligible)"))
+            .bind(cutoff).bind(BATCH_SIZE).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?.rows_affected();
+        sqlx::query(&format!("WITH eligible AS ({eligible}) DELETE FROM planning_requests pr WHERE pr.id IN (SELECT id FROM eligible)"))
+            .bind(cutoff).bind(BATCH_SIZE).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?;
+        let deleted_starts = sqlx::query("WITH eligible AS (SELECT rs.id FROM resolved_starts rs WHERE rs.expires_at <= $1 AND NOT EXISTS (SELECT 1 FROM planning_requests pr WHERE pr.resolved_start_id=rs.id) ORDER BY rs.expires_at LIMIT $2) DELETE FROM resolved_starts rs WHERE rs.id IN (SELECT id FROM eligible)")
+            .bind(cutoff).bind(BATCH_SIZE).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?.rows_affected();
+        let deleted_sessions = sqlx::query("WITH eligible AS (SELECT gs.id FROM guest_sessions gs WHERE gs.cleanup_after <= $1 AND NOT EXISTS (SELECT 1 FROM generation_jobs active WHERE active.guest_session_id=gs.id AND active.state='running' AND active.lease_expires_at>$1) ORDER BY gs.cleanup_after LIMIT $2) DELETE FROM guest_sessions gs WHERE gs.id IN (SELECT id FROM eligible)")
+            .bind(cutoff).bind(BATCH_SIZE).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?.rows_affected();
+        let retry_required: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM planning_requests WHERE expires_at <= $1) OR EXISTS(SELECT 1 FROM resolved_starts WHERE expires_at <= $1) OR EXISTS(SELECT 1 FROM guest_sessions WHERE cleanup_after <= $1)")
+            .bind(cutoff).fetch_one(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?;
+        sqlx::query("UPDATE cleanup_runs SET finished_at=now(), status='succeeded', deleted_session_count=$1, deleted_job_count=$2, deleted_candidate_count=$3, deleted_start_count=$4, retry_required=$5, retry_after=CASE WHEN $5 THEN now()+interval '30 seconds' ELSE NULL END WHERE id=$6")
+            .bind(i32::try_from(deleted_sessions).map_err(|_| SessionStoreError::Unavailable)?)
+            .bind(i32::try_from(deleted_jobs).map_err(|_| SessionStoreError::Unavailable)?)
+            .bind(i32::try_from(deleted_candidates).map_err(|_| SessionStoreError::Unavailable)?)
+            .bind(i32::try_from(deleted_starts).map_err(|_| SessionStoreError::Unavailable)?)
+            .bind(retry_required).bind(run_id).execute(&mut *transaction).await.map_err(|_| SessionStoreError::Unavailable)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| SessionStoreError::Unavailable)?;
+        Ok(CleanupReport {
+            deleted_sessions,
+            deleted_jobs,
+            deleted_candidates,
+            deleted_starts,
+            retry_required,
+        })
     }
 }
 

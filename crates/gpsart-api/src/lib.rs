@@ -2,11 +2,12 @@ use async_trait::async_trait;
 use axum::{
     Json, Router,
     extract::rejection::JsonRejection,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
 };
+use gpsart_config::WorkloadLimits;
 use gpsart_domain::templates::{Category, embedded_catalogue, render_svg};
 use gpsart_domain::{
     RouteRequestProfile,
@@ -64,6 +65,7 @@ struct AppState {
     authenticate_starts: bool,
     jobs: Arc<dyn RouteJobService>,
     routes: Arc<dyn RouteSnapshotService>,
+    workload_limits: WorkloadLimits,
 }
 
 #[derive(Serialize)]
@@ -215,6 +217,29 @@ fn build_app(
     jobs: impl RouteJobService,
     routes: impl RouteSnapshotService,
 ) -> Router {
+    build_app_with_limits(
+        readiness,
+        starts,
+        sessions,
+        session_policy,
+        authenticate_starts,
+        jobs,
+        routes,
+        WorkloadLimits::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_app_with_limits(
+    readiness: impl Readiness,
+    starts: impl StartService,
+    sessions: Arc<impl GuestSessionStore>,
+    session_policy: SessionPolicy,
+    authenticate_starts: bool,
+    jobs: impl RouteJobService,
+    routes: impl RouteSnapshotService,
+    limits: WorkloadLimits,
+) -> Router {
     Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
@@ -241,6 +266,7 @@ fn build_app(
             "/api/v1/guest-sessions/current/rotate",
             axum::routing::post(rotate_guest_session),
         )
+        .layer(DefaultBodyLimit::max(limits.max_request_bytes))
         .with_state(AppState {
             readiness: Arc::new(readiness),
             starts: Arc::new(starts),
@@ -249,7 +275,29 @@ fn build_app(
             authenticate_starts,
             jobs: Arc::new(jobs),
             routes: Arc::new(routes),
+            workload_limits: limits,
         })
+}
+
+pub fn app_with_all_services_and_routes_and_limits(
+    readiness: impl Readiness,
+    starts: impl StartService,
+    sessions: Arc<impl GuestSessionStore>,
+    session_policy: SessionPolicy,
+    jobs: impl RouteJobService,
+    routes: impl RouteSnapshotService,
+    limits: WorkloadLimits,
+) -> Router {
+    build_app_with_limits(
+        readiness,
+        starts,
+        sessions,
+        session_policy,
+        true,
+        jobs,
+        routes,
+        limits,
+    )
 }
 
 fn default_session_policy() -> SessionPolicy {
@@ -693,14 +741,23 @@ async fn create_route_job(
     }
     let Json(body) = match body {
         Ok(value) => value,
+        Err(error) if error.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+            return job_error_response(JobError::PayloadTooLarge);
+        }
         Err(_) => return job_error_response(JobError::InvalidInput),
     };
+    let limits = &state.workload_limits;
     if body.revision <= 0
         || body.idempotency_key.is_empty()
         || body.idempotency_key.len() > 200
-        || !(1_000..=100_000).contains(&body.requested_distance_metres)
+        || !(1_000..=limits.max_distance_metres).contains(&body.requested_distance_metres)
         || body.distance_tolerance_metres < 0
-        || body.distance_tolerance_metres > body.requested_distance_metres
+        || !limits.allowed_tolerance_percent.iter().any(|percent| {
+            (body.distance_tolerance_metres * 100
+                - body.requested_distance_metres * i32::from(*percent))
+            .abs()
+                <= 50
+        })
         || body.algorithm_version != SUPPORTED_ALGORITHM_VERSION
         || [
             &body.template_id,
@@ -718,13 +775,33 @@ async fn create_route_job(
         Ok(value) => value,
         Err(_) => return job_error_response(JobError::InvalidInput),
     };
-    let template_is_published = embedded_catalogue().is_ok_and(|catalogue| {
-        catalogue.published(None).iter().any(|template| {
-            template.definition.id == body.template_id
-                && template.definition.version == template_version
-        })
+    let template = embedded_catalogue().ok().and_then(|catalogue| {
+        catalogue
+            .published(None)
+            .into_iter()
+            .find(|template| {
+                template.definition.id == body.template_id
+                    && template.definition.version == template_version
+            })
+            .cloned()
     });
-    if !template_is_published {
+    let template_within_limits = template.as_ref().is_some_and(|template| {
+        let points = template
+            .definition
+            .strokes
+            .iter()
+            .map(|stroke| stroke.points.len())
+            .sum::<usize>()
+            + template
+                .definition
+                .transitions
+                .iter()
+                .map(|transition| transition.points.len())
+                .sum::<usize>();
+        points <= limits.max_template_points
+            && template.complete_traversal().len() <= limits.max_anchors
+    });
+    if !template_within_limits {
         return job_error_response(JobError::InvalidInput);
     }
     let canonical = match serde_json::to_vec(&body) {
@@ -751,9 +828,9 @@ async fn create_route_job(
         template_version: body.template_version,
         map_data_version: body.map_data_version,
         algorithm_version: body.algorithm_version,
-        expires_at: now + Duration::from_secs(86_400),
-        deadline_at: now + Duration::from_secs(120),
-        max_attempts: 3,
+        expires_at: now + limits.guest_retention,
+        deadline_at: now + limits.max_runtime,
+        max_attempts: limits.max_candidate_attempts,
     };
     match state.jobs.submit(session.id, submission).await {
         Ok(job_id) => (
@@ -870,6 +947,11 @@ async fn get_route_snapshot(
         direction_markers: snapshot.direction_markers(),
         snapshot,
     };
+    if serde_json::to_vec(&body).map_or(true, |encoded| {
+        encoded.len() > state.workload_limits.max_response_bytes
+    }) {
+        return route_snapshot_error_response(RouteSnapshotError::InvalidSnapshot);
+    }
     let mut response = (StatusCode::OK, Json(body)).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -997,12 +1079,31 @@ fn job_state_name(state: JobState) -> &'static str {
 }
 
 fn job_error_response(error: JobError) -> axum::response::Response {
+    if let JobError::RateLimited {
+        retry_after_seconds,
+    } = error
+    {
+        let mut response = (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "code": "rate_limited",
+                "retry_after_seconds": retry_after_seconds,
+            })),
+        )
+            .into_response();
+        if let Ok(value) = HeaderValue::from_str(&retry_after_seconds.to_string()) {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
+        }
+        return response;
+    }
     let (status, code) = match error {
         JobError::InvalidInput => (StatusCode::BAD_REQUEST, "invalid_request"),
+        JobError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
         JobError::StartNotFound | JobError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
         JobError::IdempotencyConflict => (StatusCode::CONFLICT, "idempotency_conflict"),
         JobError::LeaseLost | JobError::Terminal => (StatusCode::CONFLICT, "job_state_conflict"),
         JobError::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "job_storage_unavailable"),
+        JobError::RateLimited { .. } => unreachable!("handled above"),
     };
     (status, Json(serde_json::json!({ "code": code }))).into_response()
 }

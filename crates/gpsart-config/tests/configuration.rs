@@ -1,4 +1,4 @@
-use gpsart_config::{AppConfig, ConfigError, DatabaseConfig};
+use gpsart_config::{AppConfig, ConfigError, DatabaseConfig, WorkloadLimits};
 
 fn valid() -> Vec<(String, String)> {
     vec![
@@ -36,4 +36,37 @@ fn rejects_missing_or_invalid_configuration_without_echoing_secrets() {
         ("GPSART_API_BIND", "bad-address"),
     ]);
     assert!(!format!("{error:?}").contains("secret"));
+}
+
+#[test]
+fn workload_defaults_cap_every_expensive_dimension() {
+    let limits = WorkloadLimits::default();
+    assert_eq!(limits.allowed_tolerance_percent, [5, 10, 20]);
+    assert_eq!(limits.max_distance_metres, 100_000);
+    assert!(limits.max_template_points <= 512);
+    assert!(limits.max_anchors > 0);
+    assert!(limits.max_candidate_attempts > 0);
+    assert!(limits.max_provider_requests > 0);
+    assert!(limits.max_response_bytes > 0);
+    assert!(limits.max_runtime.as_secs() <= 60);
+    assert!(limits.max_active_jobs_per_guest < limits.max_active_jobs_deployment);
+    assert_eq!(limits.guest_retention.as_secs(), 86_400);
+}
+
+#[test]
+fn workload_limits_are_configurable_but_cannot_weaken_release_caps() {
+    let mut pairs = valid();
+    pairs.push(("GPSART_MAX_ACTIVE_JOBS_PER_GUEST".into(), "1".into()));
+    pairs.push(("GPSART_MAX_ACTIVE_JOBS_DEPLOYMENT".into(), "4".into()));
+    pairs.push(("GPSART_GUEST_RETENTION_SECONDS".into(), "3600".into()));
+    let config = AppConfig::from_pairs(pairs).unwrap();
+    assert_eq!(config.workload_limits.max_active_jobs_per_guest, 1);
+    assert_eq!(config.workload_limits.guest_retention.as_secs(), 3600);
+
+    let mut weakened = valid();
+    weakened.push(("GPSART_GUEST_RETENTION_SECONDS".into(), "86401".into()));
+    assert_eq!(
+        AppConfig::from_pairs(weakened),
+        Err(ConfigError::Invalid("GPSART_WORKLOAD_LIMITS"))
+    );
 }

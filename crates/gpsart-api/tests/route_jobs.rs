@@ -62,6 +62,11 @@ struct Jobs {
 #[async_trait]
 impl RouteJobService for Jobs {
     async fn submit(&self, _: Uuid, input: RouteJobSubmission) -> Result<Uuid, JobError> {
+        if input.idempotency_key == "rate-limited" {
+            return Err(JobError::RateLimited {
+                retry_after_seconds: 60,
+            });
+        }
         if input.resolved_start_id == Uuid::nil() {
             return Err(JobError::StartNotFound);
         }
@@ -129,7 +134,7 @@ async fn auth(app: &axum::Router) -> (String, String) {
 fn body(key: &str, distance: i32, start: Uuid) -> String {
     serde_json::json!({
     "resolved_start_id": start, "revision": 1, "idempotency_key": key,
-    "requested_distance_metres": distance, "distance_tolerance_metres": 250, "return_to_start": true,
+    "requested_distance_metres": distance, "distance_tolerance_metres": distance / 20, "return_to_start": true,
         "profile": {"activity":"walking","profile_version":"walking-v1"},
         "coverage_policy_version":"coverage-v1",
     "template_id":"heart", "template_version":"1", "map_data_version":"map-v1", "algorithm_version":"algorithm-v1"
@@ -235,6 +240,32 @@ async fn creation_is_validated_owned_and_idempotent() {
             .status(),
         400
     );
+    let mut unsupported_tolerance: serde_json::Value =
+        serde_json::from_str(&body("bad-tolerance", 5_000, start)).unwrap();
+    unsupported_tolerance["distance_tolerance_metres"] = serde_json::json!(251);
+    assert_eq!(
+        post(&app, &cookie, &csrf, unsupported_tolerance.to_string())
+            .await
+            .status(),
+        400
+    );
+
+    let limited = post(&app, &cookie, &csrf, body("rate-limited", 5_000, start)).await;
+    assert_eq!(limited.status(), 429);
+    assert_eq!(limited.headers()["retry-after"], "60");
+    let limited_body: serde_json::Value =
+        serde_json::from_slice(&limited.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(limited_body["code"], "rate_limited");
+    assert_eq!(limited_body["retry_after_seconds"], 60);
+
+    let oversized = post(
+        &app,
+        &cookie,
+        &csrf,
+        format!("{{\"padding\":\"{}\"}}", "x".repeat(70_000)),
+    )
+    .await;
+    assert_eq!(oversized.status(), 413);
     let job_id = first_body["job_id"].as_str().unwrap();
     for _ in 0..2 {
         let cancelled = app

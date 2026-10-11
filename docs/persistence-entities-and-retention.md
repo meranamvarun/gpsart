@@ -48,12 +48,13 @@ outcome to be written atomically in either order inside one transaction.
 
 ## Retention and cleanup metadata
 
-The proposed default retention for unsaved guest work is **24 hours**. Callers set `expires_at` and
-`cleanup_after`; TS-401 will implement policy and batching. `cleanup_runs` records cutoff, status,
+The enforced default retention for unsaved guest work is **24 hours**. Callers set `expires_at` and
+`cleanup_after`; TS-401 implements 100-record transactional batches that skip work protected by an
+active lease and expose an explicit retry-required state. `cleanup_runs` records cutoff, status,
 counts, and retry timing. `cleanup_run_failures` records only an owner UUID and public error code; it
 must not store exact coordinates, traces, credentials, provider payloads, or private exception text.
-Deleting a guest session cascades through all precise child data. Backup deletion guarantees remain
-deployment policy work for TS-401 and must not be inferred from this schema.
+Deleting a guest session cascades through all precise child data. The live-data and encrypted-backup
+deletion guarantees are defined in `docs/privacy-retention-policy.md`.
 
 ## Startup and deployment
 

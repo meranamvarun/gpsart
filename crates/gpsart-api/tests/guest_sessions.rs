@@ -235,7 +235,7 @@ async fn expired_sessions_cannot_authorize_work_and_cleanup_exposes_only_counts(
     assert_eq!(report.deleted_sessions, 1);
     assert_eq!(
         format!("{report:?}"),
-        "CleanupReport { deleted_sessions: 1 }"
+        "CleanupReport { deleted_sessions: 1, deleted_jobs: 0, deleted_candidates: 0, deleted_starts: 0, retry_required: false }"
     );
 }
 
