@@ -11,6 +11,16 @@ test("release checklist is traceable and fail-closed", async () => {
   const required = ["held_out_benchmark", "route_validity", "browser_journey", "provider_obligations", "performance", "accessibility", "security_privacy", "gpx_import"];
   assert.deepEqual(checklist.gates.map((gate) => gate.id).sort(), required.sort());
   assert.ok(checklist.gates.some((gate) => gate.status !== "passed"));
+  assert.equal(
+    checklist.gates.find((gate) => gate.id === "provider_obligations")?.status,
+    "blocked",
+    "provider obligations cannot pass without a reviewed deployed configuration and measured cost",
+  );
+  assert.deepEqual(
+    checklist.signatures.map((signature) => signature.role).sort(),
+    ["developer", "qa"],
+    "the NO-GO decision requires developer and independent QA signatures",
+  );
   for (const gate of checklist.gates) {
     assert.ok(gate.evidence.length > 0);
     for (const path of gate.evidence) await access(new URL(`../${path}`, import.meta.url));
@@ -31,7 +41,7 @@ test("missing held-out reviews and browsers remain explicit blockers", async () 
   assert.equal(browsers.release_gate_passed, false);
 });
 
-test("deployed OpenStreetMap tiles use the reviewed endpoint and linked attribution", async () => {
+test("source-configured OpenStreetMap tiles use the reviewed endpoint and linked attribution", async () => {
   const app = await readFile(new URL("../src/app.ts", import.meta.url), "utf8");
   assert.doesNotMatch(app, /\{s\}\.tile\.openstreetmap\.org/);
   assert.match(app, /https:\/\/tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/);
