@@ -1,0 +1,29 @@
+{
+  "schema_version": "gpsart-pilot-load-v1",
+  "concurrency": 20,
+  "provider": "pinned Bengaluru OSM snapshot v3",
+  "algorithm_version": "candidate-quality-v1",
+  "maximum_job_seconds": 60,
+  "cases": [
+    { "id": "load-shape-01", "category": "shape", "activity": "walking", "requested_distance_metres": 1300, "injection": "normal" },
+    { "id": "load-shape-02", "category": "shape", "activity": "running", "requested_distance_metres": 1300, "injection": "normal" },
+    { "id": "load-shape-03", "category": "shape", "activity": "cycling", "requested_distance_metres": 1300, "injection": "normal" },
+    { "id": "load-shape-04", "category": "shape", "activity": "walking", "requested_distance_metres": 1000, "injection": "normal" },
+    { "id": "load-shape-05", "category": "shape", "activity": "running", "requested_distance_metres": 2000, "injection": "normal" },
+    { "id": "load-shape-06", "category": "shape", "activity": "cycling", "requested_distance_metres": 5000, "injection": "normal" },
+    { "id": "load-shape-07", "category": "shape", "activity": "walking", "requested_distance_metres": 10000, "injection": "normal" },
+    { "id": "load-shape-08", "category": "shape", "activity": "running", "requested_distance_metres": 1300, "injection": "cancel" },
+    { "id": "load-shape-09", "category": "shape", "activity": "walking", "requested_distance_metres": 1300, "injection": "provider_timeout" },
+    { "id": "load-shape-10", "category": "shape", "activity": "cycling", "requested_distance_metres": 1300, "injection": "provider_quota" },
+    { "id": "load-text-01", "category": "text", "activity": "walking", "requested_distance_metres": 1000, "injection": "normal" },
+    { "id": "load-text-02", "category": "text", "activity": "running", "requested_distance_metres": 1000, "injection": "normal" },
+    { "id": "load-text-03", "category": "text", "activity": "cycling", "requested_distance_metres": 1000, "injection": "normal" },
+    { "id": "load-text-04", "category": "text", "activity": "walking", "requested_distance_metres": 1300, "injection": "normal" },
+    { "id": "load-text-05", "category": "text", "activity": "running", "requested_distance_metres": 2000, "injection": "normal" },
+    { "id": "load-text-06", "category": "text", "activity": "cycling", "requested_distance_metres": 5000, "injection": "normal" },
+    { "id": "load-text-07", "category": "text", "activity": "walking", "requested_distance_metres": 10000, "injection": "normal" },
+    { "id": "load-text-08", "category": "text", "activity": "running", "requested_distance_metres": 1000, "injection": "cancel" },
+    { "id": "load-text-09", "category": "text", "activity": "walking", "requested_distance_metres": 1000, "injection": "provider_timeout" },
+    { "id": "load-text-10", "category": "text", "activity": "cycling", "requested_distance_metres": 1000, "injection": "provider_quota" }
+  ]
+}

@@ -21,6 +21,46 @@ async fn worker_checks_dependencies_and_stops_taking_work_after_shutdown() {
     assert_eq!(leases.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn transient_database_failure_rechecks_and_resumes_without_external_restart() {
+    let checks = Arc::new(AtomicUsize::new(0));
+    let leases = Arc::new(AtomicUsize::new(0));
+    let dependencies =
+        WorkerDependencies::for_test_with_check_failures(checks.clone(), leases.clone(), 2);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let worker = tokio::spawn(run_until_shutdown(dependencies, shutdown_rx));
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while leases.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("worker should recover after database readiness returns");
+    shutdown_tx.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    assert!(checks.load(Ordering::SeqCst) >= 3);
+}
+
+#[tokio::test]
+async fn database_loss_while_taking_work_rechecks_before_resuming() {
+    let checks = Arc::new(AtomicUsize::new(0));
+    let work_attempts = Arc::new(AtomicUsize::new(0));
+    let dependencies =
+        WorkerDependencies::for_test_with_work_failures(checks.clone(), work_attempts.clone(), 1);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let worker = tokio::spawn(run_until_shutdown(dependencies, shutdown_rx));
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while work_attempts.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("worker should retry taking work after reconnect");
+    shutdown_tx.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    assert!(checks.load(Ordering::SeqCst) >= 2);
+}
+
 struct Gate(bool);
 
 struct Permit<'a>(&'a AtomicUsize);

@@ -1,0 +1,48 @@
+{
+  "schema_version": "gpsart-failure-injection-v1",
+  "verified_at": "2026-10-11",
+  "scenarios": {
+    "worker_termination_during_fitting": {
+      "passed": true,
+      "checks": [
+        "gpsart-persistence job_coordinator::leases_are_exclusive_recoverable_and_fenced reclaims only after expiry",
+        "the expired worker token cannot renew or publish and the replacement attempt publishes at most once"
+      ]
+    },
+    "database_reconnect": {
+      "passed": true,
+      "checks": [
+        "gpsart-worker shutdown::transient_database_failure_rechecks_and_resumes_without_external_restart",
+        "gpsart-worker shutdown::database_loss_while_taking_work_rechecks_before_resuming"
+      ]
+    },
+    "provider_timeout": {
+      "passed": true,
+      "checks": [
+        "pilot_load injects two deterministic DeadlineExceeded provider results and records two provider_timeout outcomes",
+        "provider timeout cases publish no candidate and all 20 tasks terminate below the 60-second cap"
+      ]
+    },
+    "provider_quota": {
+      "passed": true,
+      "checks": [
+        "pilot_load injects two deterministic provider-unavailable quota results and records two provider_quota outcomes",
+        "gpsart-worker provider gate reserves durable budget before starting provider work and schedules nothing without a permit"
+      ]
+    },
+    "lease_expiry": {
+      "passed": true,
+      "checks": [
+        "expired leases are fenced by worker UUID and attempt number",
+        "recovery increments the attempt and rejects duplicate or stale terminal publication"
+      ]
+    },
+    "base_map_slow_or_absent": {
+      "passed": true,
+      "checks": [
+        "route-presentation test keeps the complete immutable snapshot, route facts, and text traversal when tile loading fails",
+        "route-candidate-journey tile-error test changes only base-map status and does not mutate form state or generated route data"
+      ]
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "schema_version": "gpsart-pilot-report-v1",
+  "measured_at": "2026-10-11",
+  "configuration": "ops/performance/ts403-workload.json",
+  "command": "node scripts/cargo.mjs test -p gpsart-routing --test pilot_load -- --ignored --nocapture",
+  "sample_count": 20,
+  "concurrency": 20,
+  "hardware": {
+    "cpu": "AMD Ryzen 3 5300U with Radeon Graphics (4 cores, 8 logical processors)",
+    "memory_gib": 7.3,
+    "os": "Microsoft Windows 11 Home Single Language 10.0.26200 64-bit"
+  },
+  "provider": {
+    "kind": "pinned_local_osm_snapshot",
+    "name": "GPSART LocalOsmGraph",
+    "map_data_version": "bengaluru-central-osm-v3",
+    "snapshot_manifest": "crates/gpsart-routing/data/bengaluru-central-osm-v3.sha256",
+    "network_note": "No remote network latency or quota is represented; timeout and quota failures are deterministic provider-boundary injections."
+  },
+  "latency_milliseconds": {
+    "acknowledgement": { "p50": 0.302, "p95": 0.328, "p99": 0.331 },
+    "queue": { "p50": 1831.964, "p95": 10715.702, "p99": 10716.602 },
+    "provider": { "p50": 1781.960, "p95": 55577.953, "p99": 55643.207 },
+    "total": { "p50": 1793.065, "p95": 55590.022, "p99": 55653.724 }
+  },
+  "outcomes": {
+    "match": 4,
+    "no_match": 10,
+    "cancelled": 2,
+    "provider_timeout": 2,
+    "provider_quota": 2,
+    "provider_error": 0
+  },
+  "quality": {
+    "strong_match": 0,
+    "approximate_match": 4,
+    "not_applicable": 16
+  },
+  "provider_calls": {
+    "zero": 2,
+    "one": 13,
+    "two_to_ten": 0,
+    "over_ten": 5
+  },
+  "release_decisions": [
+    {
+      "gate": "accepted_job_acknowledgement_p95",
+      "target": "at most 1000 ms",
+      "observed": "0.328 ms",
+      "passed": true,
+      "rationale": "The in-process pinned harness acknowledged 95% of submitted cases within the one-second target."
+    },
+    {
+      "gate": "benchmark_termination_p95",
+      "target": "at most 30000 ms",
+      "observed": "55590.022 ms",
+      "passed": false,
+      "rationale": "The four-core pilot machine saturated under 20 simultaneous fitting searches. Release requires capacity/algorithm remediation or an explicit non-release decision; the miss is not hidden by the 1.793-second median."
+    },
+    {
+      "gate": "benchmark_hard_maximum",
+      "target": "at most 60000 ms",
+      "observed": "55653.724 ms",
+      "passed": true,
+      "rationale": "All 20 cases terminated below the immutable 60-second maximum."
+    }
+  ]
+}

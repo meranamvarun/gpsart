@@ -53,24 +53,92 @@ impl WorkerDependencies {
             }),
         }
     }
+
+    pub fn for_test_with_check_failures(
+        checks: Arc<AtomicUsize>,
+        leases: Arc<AtomicUsize>,
+        failures_before_ready: usize,
+    ) -> Self {
+        Self {
+            check: Arc::new(move || {
+                let attempt = checks.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    if attempt < failures_before_ready {
+                        Err(WorkerError::DependencyUnavailable)
+                    } else {
+                        Ok(())
+                    }
+                })
+            }),
+            take_work: Arc::new(move || {
+                leases.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+        }
+    }
+
+    pub fn for_test_with_work_failures(
+        checks: Arc<AtomicUsize>,
+        work_attempts: Arc<AtomicUsize>,
+        failures_before_work: usize,
+    ) -> Self {
+        Self {
+            check: Arc::new(move || {
+                checks.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            take_work: Arc::new(move || {
+                let attempt = work_attempts.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    if attempt < failures_before_work {
+                        Err(WorkerError::JobStateUnavailable)
+                    } else {
+                        Ok(())
+                    }
+                })
+            }),
+        }
+    }
 }
 
 pub async fn run_until_shutdown(
     dependencies: WorkerDependencies,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), WorkerError> {
-    (dependencies.check)().await?;
-    loop {
-        if *shutdown.borrow() {
-            return Ok(());
-        }
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() { return Ok(()); }
+    'reconnect: loop {
+        loop {
+            match (dependencies.check)().await {
+                Ok(()) => break,
+                Err(WorkerError::DependencyUnavailable | WorkerError::JobStateUnavailable) => {
+                    if *shutdown.borrow() {
+                        return Ok(());
+                    }
+                    tokio::select! {
+                        changed = shutdown.changed() => {
+                            if changed.is_err() || *shutdown.borrow() { return Ok(()); }
+                        }
+                        _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+                    }
+                }
+                Err(error) => return Err(error),
             }
-            _ = tokio::time::sleep(Duration::from_millis(250)) => {
-                if *shutdown.borrow() { return Ok(()); }
-                (dependencies.take_work)().await?;
+        }
+        loop {
+            if *shutdown.borrow() {
+                return Ok(());
+            }
+            tokio::select! {
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() { return Ok(()); }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(250)) => {
+                    if *shutdown.borrow() { return Ok(()); }
+                    match (dependencies.take_work)().await {
+                        Ok(()) => {}
+                        Err(WorkerError::DependencyUnavailable | WorkerError::JobStateUnavailable) => continue 'reconnect,
+                        Err(error) => return Err(error),
+                    }
+                }
             }
         }
     }
