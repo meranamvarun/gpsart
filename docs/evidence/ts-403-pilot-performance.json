@@ -1,6 +1,7 @@
 {
   "schema_version": "gpsart-pilot-report-v1",
   "measured_at": "2026-10-11",
+  "measurement_note": "Independent QA reran the workload after INC-047 corrected total latency to include queue delay. Timings replace the understated implementation run and vary with local machine contention.",
   "configuration": "ops/performance/ts403-workload.json",
   "command": "node scripts/cargo.mjs test -p gpsart-routing --test pilot_load -- --ignored --nocapture",
   "sample_count": 20,
@@ -18,10 +19,10 @@
     "network_note": "No remote network latency or quota is represented; timeout and quota failures are deterministic provider-boundary injections."
   },
   "latency_milliseconds": {
-    "acknowledgement": { "p50": 0.302, "p95": 0.328, "p99": 0.331 },
-    "queue": { "p50": 1831.964, "p95": 10715.702, "p99": 10716.602 },
-    "provider": { "p50": 1781.960, "p95": 55577.953, "p99": 55643.207 },
-    "total": { "p50": 1793.065, "p95": 55590.022, "p99": 55653.724 }
+    "acknowledgement": { "p50": 0.071, "p95": 0.103, "p99": 0.137 },
+    "queue": { "p50": 5228.668, "p95": 10402.090, "p99": 10744.827 },
+    "provider": { "p50": 2178.733, "p95": 65093.563, "p99": 66109.187 },
+    "total": { "p50": 5737.568, "p95": 68886.270, "p99": 75507.120 }
   },
   "outcomes": {
     "match": 4,
@@ -39,30 +40,30 @@
   "provider_calls": {
     "zero": 2,
     "one": 13,
-    "two_to_ten": 0,
-    "over_ten": 5
+    "two_to_ten": 1,
+    "over_ten": 4
   },
   "release_decisions": [
     {
       "gate": "accepted_job_acknowledgement_p95",
       "target": "at most 1000 ms",
-      "observed": "0.328 ms",
+      "observed": "0.103 ms",
       "passed": true,
       "rationale": "The in-process pinned harness acknowledged 95% of submitted cases within the one-second target."
     },
     {
       "gate": "benchmark_termination_p95",
       "target": "at most 30000 ms",
-      "observed": "55590.022 ms",
+      "observed": "68886.270 ms",
       "passed": false,
-      "rationale": "The four-core pilot machine saturated under 20 simultaneous fitting searches. Release requires capacity/algorithm remediation or an explicit non-release decision; the miss is not hidden by the 1.793-second median."
+      "rationale": "The four-core pilot machine saturated under 20 simultaneous fitting searches. Release requires capacity/algorithm remediation or an explicit non-release decision; the miss is not hidden by the 5.738-second median."
     },
     {
       "gate": "benchmark_hard_maximum",
       "target": "at most 60000 ms",
-      "observed": "55653.724 ms",
-      "passed": true,
-      "rationale": "All 20 cases terminated below the immutable 60-second maximum."
+      "observed": "75507.120 ms",
+      "passed": false,
+      "rationale": "The slowest reviewed case exceeded the immutable 60-second maximum after end-to-end latency was corrected to include queue delay."
     }
   ]
 }

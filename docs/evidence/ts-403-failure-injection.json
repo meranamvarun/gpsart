@@ -20,7 +20,7 @@
       "passed": true,
       "checks": [
         "pilot_load injects two deterministic DeadlineExceeded provider results and records two provider_timeout outcomes",
-        "provider timeout cases publish no candidate and all 20 tasks terminate below the 60-second cap"
+        "provider timeout cases publish no candidate and remain separately classified from no-match and success"
       ]
     },
     "provider_quota": {

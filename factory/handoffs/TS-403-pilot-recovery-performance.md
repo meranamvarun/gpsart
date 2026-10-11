@@ -7,7 +7,7 @@
 
 Inputs live at `ops/performance/ts403-workload.json`. Measured output is `docs/evidence/ts-403-pilot-performance.json`; recovery evidence is `docs/evidence/ts-403-failure-injection.json`.
 
-The release-significant finding is a failed 30-second p95 termination target (55.590 seconds) under 20-way load on the recorded four-core machine. The hard 60-second per-case maximum and acknowledgement target passed in the recorded run. TS-404 must carry the p95 miss into its release decision; it may not average it away.
+The release-significant finding is a failed 30-second p95 termination target (68.886 seconds) and failed 60-second hard maximum (75.507 seconds) under 20-way load on the recorded four-core machine. The acknowledgement target passed. These corrected independent-QA measurements include queue delay; TS-404 must carry both performance misses into its release decision and may not average them away.
 
 Verification:
 

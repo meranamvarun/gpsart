@@ -216,7 +216,7 @@ async fn execute(
         acknowledgement_us,
         queue_us,
         provider_us: provider.elapsed_micros.load(Ordering::Relaxed),
-        total_us: started.elapsed().as_micros() as u64,
+        total_us: submitted.elapsed().as_micros() as u64,
         provider_calls: provider.calls.load(Ordering::Relaxed),
         outcome: outcome_name,
         quality,
@@ -248,6 +248,10 @@ async fn twenty_concurrent_pinned_jobs_report_truthful_latency_and_outcomes() {
     }
     assert_eq!(rows.len(), 20);
     assert!(rows.iter().all(|row| row.total_us > 0));
+    assert!(
+        rows.iter().all(|row| row.total_us >= row.queue_us),
+        "end-to-end total latency must include each job's queue delay"
+    );
     let count = |name| rows.iter().filter(|row| row.outcome == name).count();
     assert_eq!(count("cancelled"), 2);
     assert_eq!(count("provider_timeout"), 2);
