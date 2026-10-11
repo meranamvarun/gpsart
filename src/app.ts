@@ -41,6 +41,7 @@ let resuming = false;
 let renderedScreen: Screen | null = null;
 let dialogReturnFocus: HTMLElement | null = null;
 let lastAnnouncementKey = "";
+const designReviewEnabled = import.meta.env.DEV && import.meta.env.VITE_GPSART_DESIGN_REVIEW === "true";
 const savedRoutes = new IndexedDbSavedRouteRepository();
 let savedRouteList: SavedRouteList = { kind: "available", routes: Object.freeze([]), errors: Object.freeze([]) };
 
@@ -80,7 +81,7 @@ function announceOnce(key: string, message: string): void {
 function render(): void {
   leafletMap?.remove();
   leafletMap = null;
-  const screen = currentScreen(window.location.hash, document.body.dataset.screen);
+  const screen = currentScreen(window.location.hash, document.body.dataset.screen, designReviewEnabled);
   const sameScreen = renderedScreen === screen;
   const restoreFocus = sameScreen ? focusLocator() : null;
   const body = isStandaloneScreen(screen)
@@ -116,7 +117,7 @@ function showDeviceStorageMessage(message: string, error = false): void {
 
 async function refreshSavedRoutes(rerender = true): Promise<void> {
   savedRouteList = await savedRoutes.list();
-  if (rerender && currentScreen(window.location.hash, document.body.dataset.screen) === "saved") render();
+  if (rerender && currentScreen(window.location.hash, document.body.dataset.screen, designReviewEnabled) === "saved") render();
 }
 
 function requestForSnapshot(requestRevision: number): RouteRequest | null {
@@ -272,7 +273,7 @@ function bindRouteMap(screen: Screen): void {
 }
 
 function showScreen(screen: Screen): void {
-  if (currentScreen(window.location.hash, document.body.dataset.screen) === screen) render();
+  if (currentScreen(window.location.hash, document.body.dataset.screen, designReviewEnabled) === screen) render();
   else navigate(screen);
 }
 
@@ -303,7 +304,7 @@ function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
     const loadingState = beginCandidateLoad(state, requestRevision);
     if (loadingState !== state) {
       state = loadingState;
-      void fetchRouteCandidates(completed.resultIds).then((result) => {
+      void fetchRouteCandidates({ jobId: completed.jobId, requestRevision, resultIds: completed.resultIds }).then((result) => {
         state = acceptCandidateLoad(state, requestRevision, result);
         showScreen("results");
       });

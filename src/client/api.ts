@@ -48,10 +48,19 @@ export type CandidateSnapshotLoad =
   | { readonly kind: "unavailable" }
   | { readonly kind: "invalid_response" };
 
+export type AuthorizedCandidateResults = Readonly<{
+  jobId: string;
+  requestRevision: number;
+  resultIds: readonly string[];
+}>;
+
 export async function fetchRouteCandidates(
-  resultIds: readonly string[],
+  authorized: AuthorizedCandidateResults,
   fetcher: typeof fetch = fetch,
 ): Promise<CandidateSnapshotLoad> {
+  const { jobId, requestRevision, resultIds } = authorized;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(jobId)
+    || !Number.isSafeInteger(requestRevision) || requestRevision < 1) return { kind: "invalid_response" };
   const uniqueIds = [...new Set(resultIds)];
   if (uniqueIds.length < 1 || uniqueIds.length > 3 || uniqueIds.length !== resultIds.length) return { kind: "invalid_response" };
   let responses: Response[];
@@ -75,6 +84,8 @@ export async function fetchRouteCandidates(
   const snapshots = payloads.map(decodeRouteSnapshot);
   if (snapshots.some((snapshot) => snapshot === null)) return { kind: "invalid_response" };
   const decoded = snapshots as RouteSnapshot[];
-  if (decoded.some((snapshot, index) => snapshot.id !== uniqueIds[index])) return { kind: "invalid_response" };
+  if (decoded.some((snapshot, index) => snapshot.id !== uniqueIds[index]
+    || snapshot.generationJobId !== jobId
+    || snapshot.requestRevision !== requestRevision)) return { kind: "invalid_response" };
   return { kind: "available", snapshots: Object.freeze(decoded) };
 }

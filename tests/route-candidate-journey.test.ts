@@ -15,12 +15,13 @@ import { routeSnapshot, routeSnapshotPayload } from "./fixtures/route-snapshot.t
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 
 test("candidate snapshots are fetched exactly by result id and decoded atomically", async () => {
+  const jobId = "30000000-0000-4000-8000-000000000001";
   const ids = [
     "40000000-0000-4000-8000-000000000001",
     "40000000-0000-4000-8000-000000000002",
   ];
   const calls: Array<{ url: string; init?: RequestInit }> = [];
-  const result = await fetchRouteCandidates(ids, async (input, init) => {
+  const result = await fetchRouteCandidates({ jobId, requestRevision: 1, resultIds: ids }, async (input, init) => {
     const url = String(input);
     calls.push({ url, init });
     const payload = structuredClone(routeSnapshotPayload());
@@ -40,12 +41,25 @@ test("candidate snapshots are fetched exactly by result id and decoded atomicall
 
 test("a missing or malformed route never becomes a partial comparison", async () => {
   const ids = ["40000000-0000-4000-8000-000000000001", "40000000-0000-4000-8000-000000000002"];
-  const missing = await fetchRouteCandidates(ids, async (input) => String(input).endsWith("2") ? json({}, 404) : json(routeSnapshotPayload()));
+  const context = { jobId: "30000000-0000-4000-8000-000000000001", requestRevision: 1, resultIds: ids };
+  const missing = await fetchRouteCandidates(context, async (input) => String(input).endsWith("2") ? json({}, 404) : json(routeSnapshotPayload()));
   assert.deepEqual(missing, { kind: "unavailable" });
-  const malformed = await fetchRouteCandidates([ids[0]!], async () => json({ ...routeSnapshotPayload(), geometry: null }));
+  const one = { ...context, resultIds: [ids[0]!] };
+  const malformed = await fetchRouteCandidates(one, async () => json({ ...routeSnapshotPayload(), geometry: null }));
   assert.deepEqual(malformed, { kind: "invalid_response" });
-  const invalidJson = await fetchRouteCandidates([ids[0]!], async () => new Response("{bad json", { status: 200 }));
+  const invalidJson = await fetchRouteCandidates(one, async () => new Response("{bad json", { status: 200 }));
   assert.deepEqual(invalidJson, { kind: "invalid_response" });
+});
+
+test("candidate snapshots are authorized for the exact completed job and revision", async () => {
+  const resultId = "40000000-0000-4000-8000-000000000001";
+  const expected = { jobId: "30000000-0000-4000-8000-000000000001", requestRevision: 1, resultIds: [resultId] };
+  for (const payload of [
+    { ...routeSnapshotPayload(), generation_job_id: "30000000-0000-4000-8000-000000000099" },
+    { ...routeSnapshotPayload(), request_revision: 2 },
+  ]) {
+    assert.deepEqual(await fetchRouteCandidates(expected, async () => json(payload)), { kind: "invalid_response" });
+  }
 });
 
 test("loaded candidates drive result cards, details, and selected route map", () => {
