@@ -127,8 +127,40 @@ try {
     await page.close();
   }
 
+  for (const surface of ["catalogue", "saved", "results", "login"]) {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 360, height: 800, deviceScaleFactor: 1 });
+    await page.goto(`${origin}/#/${surface}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#content");
+    await page.addScriptTag({ path: path.join(root, "node_modules", "axe-core", "axe.min.js") });
+    const audit = await page.evaluate(async () => {
+      const axeResult = await globalThis.axe.run(document, {
+        runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"] },
+      });
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+        overflowingElements: [...document.querySelectorAll("body *")].flatMap((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.left < -0.5 || rect.right > window.innerWidth + 0.5
+            ? [{ element: `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ""}${element.className && typeof element.className === "string" ? `.${element.className.trim().replace(/\s+/g, ".")}` : ""}`, left: rect.left, right: rect.right }]
+            : [];
+        }).slice(0, 12),
+        violations: axeResult.violations.map(({ id, impact, help, nodes }) => ({
+          id, impact, help,
+          nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })),
+        })),
+      };
+    });
+    assert.ok(audit.documentWidth <= audit.viewportWidth, `${surface} has page-level horizontal overflow (${audit.documentWidth} > ${audit.viewportWidth}): ${JSON.stringify(audit.overflowingElements)}`);
+    const blocking = audit.violations.filter(({ impact }) => impact === "serious" || impact === "critical");
+    assert.deepEqual(blocking, [], `${surface} has serious or critical axe findings`);
+    report.push({ surface, viewport: { name: "mobile-360", width: 360, height: 800 }, ...audit, blockingViolations: blocking.length });
+    await page.close();
+  }
+
   await writeFile(path.join(evidence, "ts-304-axe-report.json"), `${JSON.stringify({ standard: "axe-core WCAG 2 A/AA, 2.1 AA, 2.2 AA", report }, null, 2)}\n`);
-  console.log(`TS-304 accessibility audit passed for ${viewports.map(({ width }) => `${width}px`).join(", ")}; no serious or critical axe findings.`);
+  console.log(`TS-304 accessibility audit passed for planner widths ${viewports.map(({ width }) => `${width}px`).join(", ")} and catalogue/saved/results/login surfaces; no serious or critical axe findings.`);
 } finally {
   await browser?.close();
   await new Promise((resolve) => server.close(resolve));

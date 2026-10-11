@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { renderScreen } from "../src/app/screen-controller.ts";
+import { renderMap } from "../src/app/map.ts";
 import { initialState } from "../src/app/state.ts";
 import type { PlannerWorkflowSnapshot } from "../src/client/planner-workflow.ts";
 import { routeSnapshot } from "./fixtures/route-snapshot.ts";
@@ -77,6 +78,8 @@ test("responsive shell keeps controls reachable and honours reduced motion", asy
 
   assert.match(css, /@media\(max-width:700px\)[\s\S]*\.workspace[^}]*width:100%/);
   assert.match(css, /\.primary,.secondary,.danger\{[^}]*min-height:48px/);
+  assert.match(css, /\.auth-form\{[^}]*min-width:0/);
+  assert.match(css, /\.or\{color:var\(--muted\)\}/);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)[\s\S]*animation:none!important/);
   assert.doesNotMatch(css, /html,body,#app\{[^}]*overflow-x:hidden/);
 });
@@ -98,4 +101,11 @@ test("saved-route rename is a labelled dialog with field help", () => {
   assert.match(markup, /<dialog id="rename-route-dialog"[^>]*aria-labelledby="rename-route-title"/);
   assert.match(markup, /<label for="rename-route-name">Route name<\/label>/);
   assert.match(markup, /id="rename-route-name"[^>]*aria-describedby="rename-route-help"/);
+});
+
+test("every map surface gives the north indicator a valid image role and name", () => {
+  for (const screen of ["planner", "catalogue", "saved", "results"] as const) {
+    const markup = renderMap(screen, initialState());
+    assert.match(markup, /class="north" role="img" aria-label="North(?:, map is north up)?"/, screen);
+  }
 });

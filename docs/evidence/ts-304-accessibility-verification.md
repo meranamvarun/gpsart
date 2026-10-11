@@ -9,7 +9,7 @@ Verified on 2026-10-06 against the production client build.
 3. Invalid planner fields receive `aria-invalid`, field-specific `role="alert"` messages, and matching `aria-describedby` references. Error text begins with “Error:” visually, while selected controls expose `aria-pressed`, `aria-selected`, or native checked state.
 4. The native modal rename dialog focuses its labelled input on open and restores focus to its opener on close. The mobile panel remains a normal document region rather than a focus trap. Job stages are exposed as a named step list; a persistent polite announcer changes only when the observed job stage changes.
 5. Exact latitude/longitude entry, on-demand geolocation, and search selection remain available without clicking the map. Candidate details retain the complete traversal list and structured text instructions when map tiles fail.
-6. `axe-core` WCAG 2 A/AA, 2.1 AA, and 2.2 AA checks reported zero serious or critical findings at all three widths. The keyboard smoke confirmed the skip link is first, planner controls are reachable, arrow keys move both selection and focus between tabs, and focus remains visibly outlined. Chromium’s platform accessibility tree exposed “Starting point” as a textbox, “Shapes”/“Text” as tabs, and activity choices as buttons, providing the screen-reader smoke for names and roles.
+6. `axe-core` WCAG 2 A/AA, 2.1 AA, and 2.2 AA checks reported zero serious or critical findings at all three planner widths and on the materially distinct catalogue, saved, results, and login surfaces at 360 px. The keyboard smoke confirmed the skip link is first, planner controls are reachable, arrow keys move both selection and focus between tabs, and focus remains visibly outlined. Chromium’s platform accessibility tree exposed “Starting point” as a textbox, “Shapes”/“Text” as tabs, and activity choices as buttons, providing the screen-reader smoke for names and roles.
 
 ## Evidence
 
@@ -18,7 +18,7 @@ Verified on 2026-10-06 against the production client build.
 - `docs/evidence/ts-304-desktop-1440.png`
 - `docs/evidence/ts-304-axe-report.json` (includes viewport metrics, findings, keyboard order, tab behavior, and the accessibility-tree sample)
 
-The screenshots were visually inspected for clipped content, horizontal overflow, unreachable actions, and unintended visual-language changes. The 360 px view stacks the map and planner, while the 768 px and desktop views keep the planner and map side by side.
+The screenshots were visually inspected for clipped content, horizontal overflow, unreachable actions, and unintended visual-language changes. The 360 px view stacks the map and planner, while the 768 px and desktop views keep the planner and map side by side. Independent QA additionally forced a real saved-route state and caught the fallback north-indicator role defect; the permanent audit now covers every materially distinct surface and also prevents recurrence of mobile login overflow and contrast defects.
 
 ## Commands
 

@@ -11,7 +11,7 @@ Planner validation uses `start-error` and `distance-error`, referenced from the 
 
 The saved-route rename action uses the native `rename-route-dialog`, focuses `rename-route-name`, and returns focus to the rename button after close. Mobile panels are non-modal document content and do not trap focus. Route generation uses a named step list with `aria-current="step"`; the persistent `#announcer` emits a polite update only for a newly observed job/stage key.
 
-The responsive contract covers 360, 768, and 1440 px without page-level horizontal overflow. Muted text and Leaflet attribution links meet the automated contrast/link-distinction checks, and reduced-motion disables animation.
+The responsive contract covers 360, 768, and 1440 px without page-level horizontal overflow. The production audit also exercises catalogue, saved, results, and login surfaces at 360 px. Muted text, the login separator, and Leaflet attribution links meet the automated contrast/link-distinction checks; mobile auth content can shrink below its desktop intrinsic width; every north indicator has image semantics; and reduced-motion disables animation.
 
 Verify with:
 

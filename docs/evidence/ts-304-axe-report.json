@@ -130,6 +130,82 @@
       "violations": [],
       "blockingViolations": 0,
       "assistiveSmoke": null
+    },
+    {
+      "surface": "catalogue",
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "overflowingElements": [
+        {
+          "element": "div#announcer.sr-only",
+          "left": -1,
+          "right": 0
+        }
+      ],
+      "violations": [],
+      "blockingViolations": 0
+    },
+    {
+      "surface": "saved",
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "overflowingElements": [
+        {
+          "element": "div#announcer.sr-only",
+          "left": -1,
+          "right": 0
+        }
+      ],
+      "violations": [],
+      "blockingViolations": 0
+    },
+    {
+      "surface": "results",
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "overflowingElements": [
+        {
+          "element": "div#announcer.sr-only",
+          "left": -1,
+          "right": 0
+        }
+      ],
+      "violations": [],
+      "blockingViolations": 0
+    },
+    {
+      "surface": "login",
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "overflowingElements": [
+        {
+          "element": "div#announcer.sr-only",
+          "left": -1,
+          "right": 0
+        }
+      ],
+      "violations": [],
+      "blockingViolations": 0
     }
   ]
 }
