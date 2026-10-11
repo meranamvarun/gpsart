@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 async-trait.workspace = true
 gpsart-config = { path = "../gpsart-config" }
+gpsart-observability = { path = "../gpsart-observability" }
 gpsart-persistence = { path = "../gpsart-persistence" }
 thiserror.workspace = true
 tokio.workspace = true

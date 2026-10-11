@@ -1,3 +1,4 @@
+use gpsart_observability::{Correlation, MetricEvent, MetricName};
 use gpsart_persistence::jobs::{
     JobError, JobLease, PostgresJobCoordinator, PostgresProviderCallPermit,
 };
@@ -9,7 +10,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use thiserror::Error;
 use tokio::sync::watch;
@@ -125,19 +126,38 @@ pub async fn run_provider_call<T>(
     required_budget: Duration,
     operation: impl FnOnce() -> tokio::task::JoinHandle<T>,
 ) -> Result<Option<T>, WorkerError> {
-    let Some(permit) = gate
-        .reserve(lease, required_budget)
-        .await
-        .map_err(|_| WorkerError::JobStateUnavailable)?
+    let correlation = Correlation::for_job(lease.job_id).with_attempt(lease.attempt);
+    let Some(permit) = gate.reserve(lease, required_budget).await.map_err(|_| {
+        MetricEvent::count(MetricName::Errors, correlation, 1, None)
+            .with_result_class("job_state_unavailable")
+            .emit();
+        WorkerError::JobStateUnavailable
+    })?
     else {
         return Ok(None);
     };
+    let started = Instant::now();
     let task = operation();
-    permit
-        .commit()
-        .await
-        .map_err(|_| WorkerError::JobStateUnavailable)?;
-    task.await
-        .map(Some)
-        .map_err(|_| WorkerError::ProviderTaskFailed)
+    permit.commit().await.map_err(|_| {
+        MetricEvent::count(MetricName::Errors, correlation, 1, None)
+            .with_result_class("job_state_unavailable")
+            .emit();
+        WorkerError::JobStateUnavailable
+    })?;
+    MetricEvent::count(MetricName::ProviderCalls, correlation, 1, None).emit();
+    let result = task.await;
+    MetricEvent::duration(
+        MetricName::ProviderLatency,
+        correlation,
+        started.elapsed(),
+        None,
+    )
+    .with_result_class(if result.is_ok() { "ok" } else { "failed" })
+    .emit();
+    result.map(Some).map_err(|_| {
+        MetricEvent::count(MetricName::ProviderFailures, correlation, 1, None)
+            .with_result_class("provider_task_failed")
+            .emit();
+        WorkerError::ProviderTaskFailed
+    })
 }

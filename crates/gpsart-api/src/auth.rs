@@ -13,6 +13,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use uuid::Uuid;
 
+use gpsart_observability::{Correlation, MetricEvent, MetricName};
 pub use gpsart_persistence::PrivateResourceKind;
 
 pub const SESSION_COOKIE: &str = "gpsart_guest";
@@ -42,7 +43,17 @@ pub async fn run_cleanup_until_shutdown<S: GuestSessionStore + 'static>(
                         retry_required = report.retry_required,
                         "guest cleanup completed"
                     ),
-                    Err(_) => tracing::warn!("guest cleanup failed; retrying on the next interval"),
+                    Err(_) => {
+                        MetricEvent::count(
+                            MetricName::CleanupFailure,
+                            Correlation::system(),
+                            1,
+                            None,
+                        )
+                        .with_result_class("storage_unavailable")
+                        .emit();
+                        tracing::warn!("guest cleanup failed; retrying on the next interval");
+                    }
                 }
             }
         }

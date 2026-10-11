@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "title": "GPSART pilot operations",
+  "source": "operational_metric structured events",
+  "allowed_dimensions": [
+    "activity",
+    "distance_bucket",
+    "design_category",
+    "profile_version",
+    "template_version",
+    "map_data_version",
+    "algorithm_version",
+    "result_class"
+  ],
+  "panels": [
+    {
+      "title": "Accepted-job latency percentiles",
+      "metrics": ["acknowledgement_latency_ms", "queue_delay_ms", "search_latency_ms", "provider_latency_ms", "total_latency_ms"],
+      "query": "histogram_quantile([0.50,0.95,0.99], metric_duration_ms) by (metric,activity,distance_bucket,design_category)"
+    },
+    {
+      "title": "Terminal result distribution",
+      "metrics": ["terminal_outcome_total", "cancellation_total", "timeout_total"],
+      "query": "sum(rate(metric_count[5m])) by (metric,result_class,activity,design_category)"
+    },
+    {
+      "title": "Provider use and candidates",
+      "metrics": ["provider_calls_total", "candidates_returned_total"],
+      "query": "sum(rate(metric_count[5m])) by (metric,result_class,activity,distance_bucket)"
+    }
+  ]
+}

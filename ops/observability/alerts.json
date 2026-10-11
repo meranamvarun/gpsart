@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "queue_backlog",
+      "query": "max_over_time(queue_backlog[5m]) > 20",
+      "for_seconds": 300,
+      "runbook": "docs/runbooks/observability-alerts.md#queue-backlog"
+    },
+    {
+      "id": "stuck_leases",
+      "query": "max_over_time(stuck_leases[5m]) > 0",
+      "for_seconds": 120,
+      "runbook": "docs/runbooks/observability-alerts.md#stuck-leases"
+    },
+    {
+      "id": "provider_failure_rate",
+      "query": "sum(rate(provider_failures_total[5m])) / clamp_min(sum(rate(provider_calls_total[5m])), 1) > 0.10",
+      "for_seconds": 300,
+      "runbook": "docs/runbooks/observability-alerts.md#provider-failures"
+    },
+    {
+      "id": "error_rate",
+      "query": "sum(rate(errors_total[5m])) / clamp_min(sum(rate(terminal_outcome_total[5m])), 1) > 0.05",
+      "for_seconds": 300,
+      "runbook": "docs/runbooks/observability-alerts.md#error-rate"
+    },
+    {
+      "id": "timeout_rate",
+      "query": "sum(rate(timeout_total[5m])) / clamp_min(sum(rate(terminal_outcome_total[5m])), 1) > 0.05",
+      "for_seconds": 300,
+      "runbook": "docs/runbooks/observability-alerts.md#timeout-rate"
+    },
+    {
+      "id": "cleanup_failure",
+      "query": "increase(cleanup_failures_total[10m]) > 0",
+      "for_seconds": 60,
+      "runbook": "docs/runbooks/observability-alerts.md#cleanup-failure"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ use gpsart_domain::templates::{
     Category, OrientationRule, TraversalPart, VersionedTemplate, embedded_catalogue,
 };
 use gpsart_domain::{Metres, RouteCandidateProfile, RouteRequestProfile};
+use gpsart_observability::{Correlation, MetricEvent, MetricName, RouteDimensions};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::ops::Deref;
@@ -235,6 +236,20 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
             .await
     }
 
+    pub async fn heart_observed(
+        &self,
+        template: &VersionedTemplate,
+        request: &HeartSearchRequest,
+        config: &HeartSearchConfig,
+        correlation: Correlation,
+        dimensions: RouteDimensions,
+    ) -> Result<MatchOutcome, CandidateError> {
+        let started = Instant::now();
+        let result = self.heart(template, request, config).await;
+        emit_search_metric(correlation, dimensions, started.elapsed(), &result);
+        result
+    }
+
     pub async fn heart_with_control(
         &self,
         template: &VersionedTemplate,
@@ -259,6 +274,20 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
         let control = AttemptControl::with_timeout(config.wall_time, config.max_provider_calls);
         self.search_with_control(template, request, config, &control, SearchKind::CuratedText)
             .await
+    }
+
+    pub async fn curated_text_observed(
+        &self,
+        template: &VersionedTemplate,
+        request: &CuratedTextSearchRequest,
+        config: &CuratedTextSearchConfig,
+        correlation: Correlation,
+        dimensions: RouteDimensions,
+    ) -> Result<MatchOutcome, CandidateError> {
+        let started = Instant::now();
+        let result = self.curated_text(template, request, config).await;
+        emit_search_metric(correlation, dimensions, started.elapsed(), &result);
+        result
     }
 
     pub async fn curated_text_with_control(
@@ -377,6 +406,29 @@ impl<'a, P: RouteProvider, A: AnchorMatch> CandidateSearch<'a, P, A> {
         }
         Ok(MatchOutcome::NoMatch)
     }
+}
+
+fn emit_search_metric(
+    correlation: Correlation,
+    dimensions: RouteDimensions,
+    elapsed: Duration,
+    result: &Result<MatchOutcome, CandidateError>,
+) {
+    let result_class = match result {
+        Ok(MatchOutcome::Match(_)) => "match",
+        Ok(MatchOutcome::NoMatch) => "no_match",
+        Err(CandidateError::Cancelled) => "cancelled",
+        Err(CandidateError::InvalidRequest) => "invalid_request",
+        Err(CandidateError::Routing(_)) => "provider_error",
+    };
+    MetricEvent::duration(
+        MetricName::SearchLatency,
+        correlation,
+        elapsed,
+        Some(dimensions),
+    )
+    .with_result_class(result_class)
+    .emit();
 }
 
 fn validate_inputs(

@@ -7,8 +7,10 @@ const sources = [
   "../crates/gpsart-api/src/lib.rs",
   "../crates/gpsart-worker/src/main.rs",
   "../crates/gpsart-worker/src/lib.rs",
+  "../crates/gpsart-observability/src/lib.rs",
   "../crates/gpsart-persistence/src/lib.rs",
   "../crates/gpsart-persistence/src/jobs.rs",
+  "../crates/gpsart-routing/src/heart.rs",
 ];
 
 test("structured application logs cannot emit protected route or credential fields", async () => {

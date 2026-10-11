@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 async-trait.workspace = true
 gpsart-domain = { path = "../gpsart-domain" }
+gpsart-observability = { path = "../gpsart-observability" }
 gpsart-routing = { path = "../gpsart-routing" }
 gpsart-config = { path = "../gpsart-config" }
 serde.workspace = true

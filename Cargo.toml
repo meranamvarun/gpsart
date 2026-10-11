@@ -4,6 +4,7 @@ members = [
   "crates/gpsart-api",
   "crates/gpsart-config",
   "crates/gpsart-domain",
+  "crates/gpsart-observability",
   "crates/gpsart-persistence",
   "crates/gpsart-routing",
   "crates/gpsart-worker",

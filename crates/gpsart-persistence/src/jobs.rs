@@ -1,4 +1,5 @@
 use gpsart_config::WorkloadLimits;
+use gpsart_observability::{Correlation, MetricEvent, MetricName};
 use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use std::{
     collections::HashMap,
@@ -604,13 +605,25 @@ impl PostgresJobCoordinator {
         lease_for: Duration,
     ) -> Result<Option<JobLease>, JobError> {
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
+        let queue_health = sqlx::query("SELECT count(*) FILTER (WHERE state='queued') AS backlog, count(*) FILTER (WHERE state='running' AND lease_expires_at <= $1) AS stuck FROM generation_jobs WHERE state IN ('queued','running')")
+            .bind(OffsetDateTime::from(now))
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
+        let backlog: i64 = queue_health
+            .try_get("backlog")
+            .map_err(|_| JobError::Unavailable)?;
+        let stuck: i64 = queue_health
+            .try_get("stuck")
+            .map_err(|_| JobError::Unavailable)?;
         sqlx::query("WITH terminal AS (UPDATE generation_jobs SET state=(CASE WHEN deadline_at <= $1 THEN 'timed_out' ELSE 'failed' END)::generation_job_state, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL, status_version=status_version+1 WHERE state IN ('queued','running') AND (lease_expires_at IS NULL OR lease_expires_at <= $1) AND (deadline_at <= $1 OR attempt_count >= max_attempts) RETURNING id,state) INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) SELECT id,state::text::generation_terminal_outcome,CASE WHEN state='timed_out' THEN 'timed_out' ELSE 'attempts_exhausted' END,state='timed_out' FROM terminal")
             .bind(OffsetDateTime::from(now)).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
-        let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', stage=CASE WHEN j.state='queued' THEN 'checking_roads' ELSE j.stage END, status_version=status_version+1, started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at")
+        let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', stage=CASE WHEN j.state='queued' THEN 'checking_roads' ELSE j.stage END, status_version=status_version+1, started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at,j.queued_at")
             .bind(OffsetDateTime::from(now)).bind(worker).bind(OffsetDateTime::from(now + lease_for))
             .fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         let Some(row) = row else {
             tx.commit().await.map_err(|_| JobError::Unavailable)?;
+            emit_queue_health(backlog, stuck);
             return Ok(None);
         };
         let job_id: Uuid = row.try_get("id").map_err(|_| JobError::Unavailable)?;
@@ -620,9 +633,21 @@ impl PostgresJobCoordinator {
         let expires: OffsetDateTime = row
             .try_get("lease_expires_at")
             .map_err(|_| JobError::Unavailable)?;
+        let queued_at: OffsetDateTime = row
+            .try_get("queued_at")
+            .map_err(|_| JobError::Unavailable)?;
         sqlx::query("INSERT INTO job_attempts (id,generation_job_id,attempt_number,worker_id) VALUES ($1,$2,$3,$4)")
             .bind(Uuid::new_v4()).bind(job_id).bind(attempt).bind(worker).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
+        emit_queue_health(backlog, stuck);
+        MetricEvent::duration(
+            MetricName::QueueDelay,
+            Correlation::for_job(job_id).with_attempt(attempt as u32),
+            now.duration_since(SystemTime::from(queued_at))
+                .unwrap_or_default(),
+            None,
+        )
+        .emit();
         Ok(Some(JobLease {
             job_id,
             worker_id: worker,
@@ -834,6 +859,14 @@ impl PostgresJobCoordinator {
         sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code) VALUES ($1,'cancelled','cancelled')")
             .bind(job_id).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
+        MetricEvent::count(
+            MetricName::Cancellation,
+            Correlation::for_job(job_id),
+            1,
+            None,
+        )
+        .with_result_class("cancelled")
+        .emit();
         Ok(JobState::Cancelled)
     }
 
@@ -845,7 +878,7 @@ impl PostgresJobCoordinator {
     ) -> Result<JobState, JobError> {
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
         let row = sqlx::query(
-            "SELECT state::text AS state, deadline_at FROM generation_jobs WHERE id=$1 FOR UPDATE",
+            "SELECT state::text AS state, deadline_at, queued_at FROM generation_jobs WHERE id=$1 FOR UPDATE",
         )
         .bind(lease.job_id)
         .fetch_optional(&mut *tx)
@@ -867,6 +900,10 @@ impl PostgresJobCoordinator {
         }
         let deadline_at = SystemTime::from(
             row.try_get::<OffsetDateTime, _>("deadline_at")
+                .map_err(|_| JobError::Unavailable)?,
+        );
+        let queued_at = SystemTime::from(
+            row.try_get::<OffsetDateTime, _>("queued_at")
                 .map_err(|_| JobError::Unavailable)?,
         );
         let (next, public_code, budget_exhausted, result_ids) = match completion {
@@ -938,11 +975,54 @@ impl PostgresJobCoordinator {
         sqlx::query("UPDATE job_attempts SET finished_at=$1,result_code=$2 WHERE generation_job_id=$3 AND attempt_number=$4")
             .bind(OffsetDateTime::from(now)).bind(state_name).bind(lease.job_id).bind(lease.attempt as i32).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted,result_ids) VALUES ($1,$2::generation_terminal_outcome,$3,$4,$5)")
-            .bind(lease.job_id).bind(state_name).bind(public_code.as_str()).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at).bind(result_ids)
+            .bind(lease.job_id).bind(state_name).bind(public_code.as_str()).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at).bind(&result_ids)
             .execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
+        let correlation = Correlation::for_job(lease.job_id).with_attempt(lease.attempt);
+        MetricEvent::duration(
+            MetricName::TotalLatency,
+            correlation,
+            now.duration_since(queued_at).unwrap_or_default(),
+            None,
+        )
+        .with_result_class(public_code.as_str())
+        .emit();
+        MetricEvent::count(MetricName::TerminalOutcome, correlation, 1, None)
+            .with_result_class(public_code.as_str())
+            .emit();
+        MetricEvent::count(
+            MetricName::CandidatesReturned,
+            correlation,
+            result_ids.len() as u64,
+            None,
+        )
+        .with_result_class(public_code.as_str())
+        .emit();
+        if matches!(next, JobState::TimedOut) {
+            MetricEvent::count(MetricName::Timeout, correlation, 1, None)
+                .with_result_class("timed_out")
+                .emit();
+        }
         Ok(next)
     }
+}
+
+fn emit_queue_health(backlog: i64, stuck: i64) {
+    let correlation = Correlation::system();
+    MetricEvent::count(
+        MetricName::QueueBacklog,
+        correlation,
+        backlog.max(0) as u64,
+        None,
+    )
+    .emit();
+    MetricEvent::count(
+        MetricName::StuckLeases,
+        correlation,
+        stuck.max(0) as u64,
+        None,
+    )
+    .emit();
 }
 
 fn parse_state(state: &str) -> Result<JobState, JobError> {

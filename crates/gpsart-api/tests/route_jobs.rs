@@ -174,8 +174,13 @@ async fn creation_is_validated_owned_and_idempotent() {
     let start = Uuid::new_v4();
     let first = post(&app, &cookie, &csrf, body("key", 5_000, start)).await;
     assert_eq!(first.status(), 202);
+    let correlation_id = first.headers()["x-correlation-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
     let first_body: serde_json::Value =
         serde_json::from_slice(&first.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(correlation_id, first_body["job_id"]);
     let repeat = post(&app, &cookie, &csrf, body("key", 5_000, start)).await;
     let repeat_body: serde_json::Value =
         serde_json::from_slice(&repeat.into_body().collect().await.unwrap().to_bytes()).unwrap();

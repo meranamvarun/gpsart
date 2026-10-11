@@ -16,6 +16,9 @@ use gpsart_domain::{
         StartResolverProvider,
     },
 };
+use gpsart_observability::{
+    Correlation, DesignCategory, DistanceBucket, MetricEvent, MetricName, RouteDimensions,
+};
 use gpsart_persistence::jobs::{
     JobError, JobOutcomeCode, JobState, JobStatusSnapshot, PostgresJobCoordinator,
     RouteJobSubmission, SUPPORTED_ALGORITHM_VERSION,
@@ -32,7 +35,7 @@ use sha2::{Digest, Sha256};
 use std::{
     future::Future,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 pub mod auth;
@@ -732,6 +735,7 @@ async fn create_route_job(
     headers: HeaderMap,
     body: Result<Json<CreateRouteJobBody>, JsonRejection>,
 ) -> axum::response::Response {
+    let acknowledgement_started = Instant::now();
     let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
         Ok(value) => value,
         Err(error) => return auth_error(error),
@@ -804,6 +808,21 @@ async fn create_route_job(
     if !template_within_limits {
         return job_error_response(JobError::InvalidInput);
     }
+    let dimensions = template.as_ref().and_then(|template| {
+        RouteDimensions::new(
+            body.profile.activity().as_str(),
+            DistanceBucket::from_metres(body.requested_distance_metres),
+            match template.definition.category {
+                Category::Shape => DesignCategory::Shape,
+                Category::Text => DesignCategory::Text,
+            },
+            body.profile.version().as_str(),
+            body.template_version.as_str(),
+            body.map_data_version.as_str(),
+            body.algorithm_version.as_str(),
+        )
+        .ok()
+    });
     let canonical = match serde_json::to_vec(&body) {
         Ok(value) => value,
         Err(_) => return job_error_response(JobError::InvalidInput),
@@ -833,14 +852,28 @@ async fn create_route_job(
         max_attempts: limits.max_candidate_attempts,
     };
     match state.jobs.submit(session.id, submission).await {
-        Ok(job_id) => (
-            StatusCode::ACCEPTED,
-            Json(RouteJobAccepted {
-                job_id,
-                request_revision: body.revision,
-            }),
-        )
-            .into_response(),
+        Ok(job_id) => {
+            MetricEvent::duration(
+                MetricName::AcknowledgementLatency,
+                Correlation::for_job(job_id),
+                acknowledgement_started.elapsed(),
+                dimensions,
+            )
+            .emit();
+            let mut response = (
+                StatusCode::ACCEPTED,
+                Json(RouteJobAccepted {
+                    job_id,
+                    request_revision: body.revision,
+                }),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                "x-correlation-id",
+                HeaderValue::from_str(&job_id.to_string()).expect("UUID is a valid header value"),
+            );
+            response
+        }
         Err(error) => job_error_response(error),
     }
 }

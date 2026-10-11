@@ -490,6 +490,7 @@ dependencies = [
  "getrandom 0.3.4",
  "gpsart-config",
  "gpsart-domain",
+ "gpsart-observability",
  "gpsart-persistence",
  "gpx",
  "http",
@@ -526,12 +527,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpsart-observability"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "gpsart-persistence"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "gpsart-config",
  "gpsart-domain",
+ "gpsart-observability",
  "gpsart-routing",
  "serde",
  "serde_json",
@@ -548,6 +560,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "gpsart-domain",
+ "gpsart-observability",
  "serde",
  "serde_json",
  "sha2",
@@ -561,6 +574,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "gpsart-config",
+ "gpsart-observability",
  "gpsart-persistence",
  "thiserror 2.0.21",
  "tokio",
