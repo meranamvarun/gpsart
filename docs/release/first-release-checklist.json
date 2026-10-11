@@ -1,0 +1,62 @@
+{
+  "schema_version": "gpsart-release-checklist-v1",
+  "recorded_at": "2026-10-11",
+  "decision": "no_go",
+  "decision_summary": "Release is blocked by missing held-out and browser evidence and by measured performance misses.",
+  "gates": [
+    {
+      "id": "held_out_benchmark",
+      "status": "blocked",
+      "evidence": ["docs/evidence/ts-404-held-out-benchmark.json"]
+    },
+    {
+      "id": "route_validity",
+      "status": "blocked",
+      "evidence": ["docs/evidence/ts-404-held-out-benchmark.json", "docs/evidence/ts-107-candidate-quality-verification.md"]
+    },
+    {
+      "id": "browser_journey",
+      "status": "blocked",
+      "evidence": ["docs/evidence/ts-404-browser-matrix.json", "docs/evidence/ts-304-accessibility-verification.md"]
+    },
+    {
+      "id": "provider_obligations",
+      "status": "passed",
+      "evidence": ["docs/release/provider-obligations.md", "tests/release-evidence-contract.test.mjs", "tests/fixtures/route-export.gpx"]
+    },
+    {
+      "id": "performance",
+      "status": "failed",
+      "evidence": ["docs/evidence/ts-403-pilot-performance.json", "docs/evidence/ts-403-recovery-performance-verification.md"]
+    },
+    {
+      "id": "accessibility",
+      "status": "passed",
+      "evidence": ["docs/evidence/ts-304-accessibility-verification.md", "docs/evidence/ts-304-axe-report.json"]
+    },
+    {
+      "id": "security_privacy",
+      "status": "passed",
+      "evidence": ["docs/privacy-retention-policy.md", "docs/evidence/ts-401-workload-retention-privacy-verification.md", "docs/evidence/ts-402-observability-verification.md"]
+    },
+    {
+      "id": "gpx_import",
+      "status": "passed",
+      "evidence": ["docs/evidence/ts-207-gpx-export-verification.md", "tests/fixtures/route-export.gpx"]
+    }
+  ],
+  "blockers": [
+    "Complete and independently review the required held-out benchmark.",
+    "Run and sign the manual real-route journey on all five browser targets.",
+    "Meet or explicitly re-authorize the 30-second p95 and 60-second maximum performance gates."
+  ],
+  "limitations": "docs/release/limitations.md",
+  "signatures": [
+    {
+      "role": "developer",
+      "identity": "codex/root",
+      "decision": "no_go",
+      "signed_at": "2026-10-11"
+    }
+  ]
+}

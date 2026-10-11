@@ -41,6 +41,8 @@ let resuming = false;
 let renderedScreen: Screen | null = null;
 let dialogReturnFocus: HTMLElement | null = null;
 let lastAnnouncementKey = "";
+const osmTileUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const osmAttribution = '<a href="https://www.openstreetmap.org/copyright">&copy; OpenStreetMap contributors</a>';
 const designReviewEnabled = import.meta.env.DEV && import.meta.env.VITE_GPSART_DESIGN_REVIEW === "true";
 const savedRoutes = new IndexedDbSavedRouteRepository();
 let savedRouteList: SavedRouteList = { kind: "available", routes: Object.freeze([]), errors: Object.freeze([]) };
@@ -227,8 +229,8 @@ function bindPlannerMap(screen: Screen): void {
     ? [proposedStart.point.latitude, proposedStart.point.longitude]
     : [12.9716, 77.5946];
   leafletMap = L.map(element, { center, zoom: proposedStart ? 15 : 12, zoomControl: true });
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors",
+  L.tileLayer(osmTileUrl, {
+    attribution: osmAttribution,
     maxZoom: 19,
   }).addTo(leafletMap);
   if (proposedStart) {
@@ -250,8 +252,8 @@ function bindRouteMap(screen: Screen): void {
   const center = model.highlighted.trace[0]!;
   leafletMap = L.map(element, { center: [center.latitude, center.longitude], zoom: 15, zoomControl: true });
   const status = document.querySelector<HTMLElement>("#base-map-status");
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors",
+  L.tileLayer(osmTileUrl, {
+    attribution: osmAttribution,
     maxZoom: 19,
   }).on("tileerror", baseMapTileErrorHandler(status)).addTo(leafletMap);
   for (const alternative of model.alternatives) {

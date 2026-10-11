@@ -35,13 +35,16 @@ export function routeExportFilename(snapshot: RouteSnapshot): string {
 
 export function exportRouteSnapshotGpx(snapshot: RouteSnapshot): string {
   const routeId = xml(snapshot.id);
+  const copyright = snapshot.provenance.attribution === undefined
+    ? ""
+    : `    <copyright author="${xml(snapshot.provenance.attribution)}"></copyright>\n`;
   const points = snapshot.trace.map(({ latitude, longitude }) => `      <trkpt lat="${coordinate(latitude)}" lon="${coordinate(longitude)}"></trkpt>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="GPSART" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 https://www.topografix.com/GPX/1/1/gpx.xsd">
   <metadata>
     <name>GPSART planned route ${routeId}</name>
     <desc>Planned route from immutable snapshot route-candidate-snapshot-v1; not a recorded activity.</desc>
-  </metadata>
+${copyright}  </metadata>
   <trk>
     <name>GPSART ${xml(snapshot.versions.templateId)}@${snapshot.versions.template} planned route</name>
     <desc>Exact ordered traversal including connectors and retraced sections.</desc>

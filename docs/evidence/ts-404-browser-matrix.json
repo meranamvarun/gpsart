@@ -1,0 +1,42 @@
+{
+  "schema_version": "gpsart-browser-journey-matrix-v1",
+  "recorded_at": "2026-10-11",
+  "journey": "anonymous manual start to real route to GPX import",
+  "targets": [
+    {
+      "browser": "Chrome",
+      "status": "partial_automated_only",
+      "evidence": ["docs/evidence/ts-304-accessibility-verification.md"],
+      "gap": "Responsive and accessibility automation exists, but no signed manual real-provider journey was run."
+    },
+    {
+      "browser": "Firefox",
+      "status": "not_run",
+      "evidence": [],
+      "gap": "No signed manual journey evidence."
+    },
+    {
+      "browser": "Safari",
+      "status": "unavailable_on_recorded_windows_host",
+      "evidence": [],
+      "gap": "Requires a current Safari environment and a signed manual journey."
+    },
+    {
+      "browser": "Mobile Chrome",
+      "status": "emulation_only",
+      "evidence": ["docs/evidence/ts-304-mobile-360.png"],
+      "gap": "Viewport automation is not an actual-device real-provider journey."
+    },
+    {
+      "browser": "Mobile Safari",
+      "status": "unavailable_on_recorded_windows_host",
+      "evidence": [],
+      "gap": "Requires a current iOS Safari environment and a signed manual journey."
+    }
+  ],
+  "release_gate_passed": false,
+  "blockers": [
+    "No target has a completed signed manual start-to-route-to-GPX journey.",
+    "Safari and mobile Safari were unavailable on the recorded Windows verification host."
+  ]
+}

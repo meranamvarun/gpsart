@@ -1,0 +1,38 @@
+{
+  "schema_version": "gpsart-held-out-benchmark-v1",
+  "recorded_at": "2026-10-11",
+  "requirements": {
+    "feasible_total": 50,
+    "shape_minimum": 20,
+    "text_minimum": 20,
+    "difficult_minimum": 20,
+    "qualifying_rate_minimum": 0.8,
+    "blind_reviewers_per_case": 3,
+    "recognitions_required": 2
+  },
+  "observed": {
+    "independently_reviewed_feasible": 0,
+    "shape_cases": 0,
+    "text_cases": 0,
+    "difficult_or_no_match_cases": 0,
+    "blind_reviewers_per_case": 0,
+    "shape_qualifying_rate": null,
+    "text_qualifying_rate": null,
+    "invalid_returned_routes": null
+  },
+  "available_non_qualifying_evidence": {
+    "calibrated_pilot_cases": 2,
+    "description": "The heart and HI pilot fixtures exercise routing and quality checks, but they are neither a held-out set nor independently reviewed by three blind reviewers.",
+    "paths": [
+      "docs/evidence/ts-107-benchmark-results.json",
+      "docs/evidence/ts-107-candidate-quality-verification.md"
+    ]
+  },
+  "release_gate_passed": false,
+  "blockers": [
+    "No independently reviewed 50-case held-out set is present.",
+    "No case has a recorded two-of-three blind-review decision.",
+    "Shape and text recognition rates cannot be calculated.",
+    "Route-validity assertions cannot be applied to missing held-out outputs."
+  ]
+}

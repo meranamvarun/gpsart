@@ -16,7 +16,7 @@ export function routeSnapshotPayload() {
     qualifications: { legality_version: "candidate-legality-v1", route_use_advisory_version: "route-use-advisory-v1", access_verified: true, direction_verified: true, turns_verified: true },
     versions: { snapshot: "route-candidate-snapshot-v1", request: "route-request-v1", profile: "walking-v1", template_id: "heart", template: 1, template_hash: "f".repeat(64), algorithm: "algorithm-v1", routing_data: "map-v1", routing_policy: "osm-pedestrian-policy-v2", candidate: 1 },
     generated_at_epoch_seconds: 1800000000,
-    provenance: { routing_provider: "controlled-local-osm" },
+    provenance: { routing_provider: "controlled-local-osm", attribution: "OpenStreetMap contributors" },
     start: [77.6, 12.9],
     finish: [77.6, 12.9],
     duration_seconds: 720,

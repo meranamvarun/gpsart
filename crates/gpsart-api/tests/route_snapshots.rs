@@ -272,6 +272,8 @@ async fn owned_route_exports_exact_gpx_with_safe_download_headers() {
         format!("attachment; filename=\"gpsart-heart-{id}-v1.gpx\"")
     );
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let exported = std::str::from_utf8(&bytes).expect("GPX export is UTF-8");
+    assert!(exported.contains("OpenStreetMap contributors"));
     assert_eq!(
         bytes.as_ref(),
         include_bytes!("../../../tests/fixtures/route-export.gpx")
