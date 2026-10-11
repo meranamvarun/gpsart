@@ -19,3 +19,14 @@ Verified 2026-10-11.
 - `npm run factory:verify`: passed, including Rust format/clippy/tests/build, frontend tests, Sites tests, production build, and bundle scan.
 
 The API integration suites independently exercise authorized guest job status and owner-scoped route snapshot endpoints. The browser boundary test exercises the same decoded terminal-job and snapshot contracts without introducing a client fixture path into production code.
+
+## Independent QA
+
+Independent QA reviewed `fd888c1..45a05bb` and the current worktree on 2026-10-11. Source and production-output inspection found no public query/hash activation path, unauthorized live candidate state entry, production fixture ID, fabricated route geometry or metrics, timed success, or sample GPX action.
+
+- Focused TypeScript boundary suites: 11 passed.
+- Bundle-scanner and visual-shell regression suites: 3 passed.
+- Production build and emitted `dist/client` scan: passed.
+- `npm run factory:verify`: passed, including Rust formatting, strict Clippy, workspace tests/build, frontend tests, Sites checks, typecheck, production build, and bundle scan.
+
+All five TS-305 acceptance criteria are approved without QA code changes or incident records.
