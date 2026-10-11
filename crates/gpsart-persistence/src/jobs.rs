@@ -156,6 +156,13 @@ pub struct JobLease {
     pub lease_expires_at: SystemTime,
 }
 
+struct AutomaticTerminalMetric {
+    job_id: Uuid,
+    attempt: i32,
+    queued_at: SystemTime,
+    outcome: JobOutcomeCode,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Completion {
     Succeeded {
@@ -616,14 +623,36 @@ impl PostgresJobCoordinator {
         let stuck: i64 = queue_health
             .try_get("stuck")
             .map_err(|_| JobError::Unavailable)?;
-        sqlx::query("WITH terminal AS (UPDATE generation_jobs SET state=(CASE WHEN deadline_at <= $1 THEN 'timed_out' ELSE 'failed' END)::generation_job_state, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL, status_version=status_version+1 WHERE state IN ('queued','running') AND (lease_expires_at IS NULL OR lease_expires_at <= $1) AND (deadline_at <= $1 OR attempt_count >= max_attempts) RETURNING id,state) INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) SELECT id,state::text::generation_terminal_outcome,CASE WHEN state='timed_out' THEN 'timed_out' ELSE 'attempts_exhausted' END,state='timed_out' FROM terminal")
-            .bind(OffsetDateTime::from(now)).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
+        let terminal_rows = sqlx::query("WITH terminal AS (UPDATE generation_jobs SET state=(CASE WHEN deadline_at <= $1 THEN 'timed_out' ELSE 'failed' END)::generation_job_state, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL, status_version=status_version+1 WHERE state IN ('queued','running') AND (lease_expires_at IS NULL OR lease_expires_at <= $1) AND (deadline_at <= $1 OR attempt_count >= max_attempts) RETURNING id,state,queued_at,attempt_count), outcomes AS (INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted) SELECT id,state::text::generation_terminal_outcome,CASE WHEN state='timed_out' THEN 'timed_out' ELSE 'attempts_exhausted' END,state='timed_out' FROM terminal RETURNING generation_job_id) SELECT terminal.id,terminal.state::text AS state,terminal.queued_at,terminal.attempt_count FROM terminal JOIN outcomes ON outcomes.generation_job_id=terminal.id")
+            .bind(OffsetDateTime::from(now)).fetch_all(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
+        let terminal_metrics = terminal_rows
+            .iter()
+            .map(|row| {
+                let state: String = row.try_get("state").map_err(|_| JobError::Unavailable)?;
+                Ok(AutomaticTerminalMetric {
+                    job_id: row.try_get("id").map_err(|_| JobError::Unavailable)?,
+                    attempt: row
+                        .try_get("attempt_count")
+                        .map_err(|_| JobError::Unavailable)?,
+                    queued_at: SystemTime::from(
+                        row.try_get::<OffsetDateTime, _>("queued_at")
+                            .map_err(|_| JobError::Unavailable)?,
+                    ),
+                    outcome: if state == "timed_out" {
+                        JobOutcomeCode::TimedOut
+                    } else {
+                        JobOutcomeCode::AttemptsExhausted
+                    },
+                })
+            })
+            .collect::<Result<Vec<_>, JobError>>()?;
         let row = sqlx::query("WITH claimable AS (SELECT id FROM generation_jobs WHERE state IN ('queued','running') AND deadline_at > $1 AND attempt_count < max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE generation_jobs j SET state='running', stage=CASE WHEN j.state='queued' THEN 'checking_roads' ELSE j.stage END, status_version=status_version+1, started_at=COALESCE(started_at,$1), lease_owner=$2, lease_expires_at=$3, attempt_count=attempt_count+1 FROM claimable WHERE j.id=claimable.id RETURNING j.id,j.attempt_count,j.lease_expires_at,j.queued_at")
             .bind(OffsetDateTime::from(now)).bind(worker).bind(OffsetDateTime::from(now + lease_for))
             .fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         let Some(row) = row else {
             tx.commit().await.map_err(|_| JobError::Unavailable)?;
             emit_queue_health(backlog, stuck);
+            emit_automatic_terminal_metrics(&terminal_metrics, now);
             return Ok(None);
         };
         let job_id: Uuid = row.try_get("id").map_err(|_| JobError::Unavailable)?;
@@ -640,6 +669,7 @@ impl PostgresJobCoordinator {
             .bind(Uuid::new_v4()).bind(job_id).bind(attempt).bind(worker).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
         emit_queue_health(backlog, stuck);
+        emit_automatic_terminal_metrics(&terminal_metrics, now);
         MetricEvent::duration(
             MetricName::QueueDelay,
             Correlation::for_job(job_id).with_attempt(attempt as u32),
@@ -844,7 +874,7 @@ impl PostgresJobCoordinator {
         now: SystemTime,
     ) -> Result<JobState, JobError> {
         let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
-        let row = sqlx::query("SELECT state::text AS state FROM generation_jobs WHERE id=$1 AND guest_session_id=$2 FOR UPDATE")
+        let row = sqlx::query("SELECT state::text AS state,queued_at,attempt_count FROM generation_jobs WHERE id=$1 AND guest_session_id=$2 FOR UPDATE")
             .bind(job_id).bind(owner).fetch_optional(&mut *tx).await.map_err(|_| JobError::Unavailable)?.ok_or(JobError::NotFound)?;
         let state: String = row.try_get("state").map_err(|_| JobError::Unavailable)?;
         if matches!(
@@ -854,19 +884,27 @@ impl PostgresJobCoordinator {
             tx.commit().await.map_err(|_| JobError::Unavailable)?;
             return parse_state(&state);
         }
+        let queued_at = SystemTime::from(
+            row.try_get::<OffsetDateTime, _>("queued_at")
+                .map_err(|_| JobError::Unavailable)?,
+        );
+        let attempt: i32 = row
+            .try_get("attempt_count")
+            .map_err(|_| JobError::Unavailable)?;
         sqlx::query("UPDATE generation_jobs SET state='cancelled', status_version=status_version+1, cancellation_requested_at=$1, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL WHERE id=$2")
             .bind(OffsetDateTime::from(now)).bind(job_id).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code) VALUES ($1,'cancelled','cancelled')")
             .bind(job_id).execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
-        MetricEvent::count(
-            MetricName::Cancellation,
-            Correlation::for_job(job_id),
-            1,
-            None,
-        )
-        .with_result_class("cancelled")
-        .emit();
+        let correlation = correlation_for_attempt(job_id, attempt);
+        for event in terminal_metric_events(
+            correlation,
+            now.duration_since(queued_at).unwrap_or_default(),
+            JobOutcomeCode::Cancelled,
+            0,
+        ) {
+            event.emit();
+        }
         Ok(JobState::Cancelled)
     }
 
@@ -978,32 +1016,71 @@ impl PostgresJobCoordinator {
             .bind(lease.job_id).bind(state_name).bind(public_code.as_str()).bind(budget_exhausted || matches!(next, JobState::Succeeded) && now >= deadline_at).bind(&result_ids)
             .execute(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
         tx.commit().await.map_err(|_| JobError::Unavailable)?;
-        let correlation = Correlation::for_job(lease.job_id).with_attempt(lease.attempt);
-        MetricEvent::duration(
-            MetricName::TotalLatency,
-            correlation,
+        for event in terminal_metric_events(
+            Correlation::for_job(lease.job_id).with_attempt(lease.attempt),
             now.duration_since(queued_at).unwrap_or_default(),
-            None,
-        )
-        .with_result_class(public_code.as_str())
-        .emit();
+            public_code,
+            result_ids.len() as u64,
+        ) {
+            event.emit();
+        }
+        Ok(next)
+    }
+}
+
+fn correlation_for_attempt(job_id: Uuid, attempt: i32) -> Correlation {
+    let correlation = Correlation::for_job(job_id);
+    u32::try_from(attempt)
+        .ok()
+        .filter(|value| *value > 0)
+        .map_or(correlation, |value| correlation.with_attempt(value))
+}
+
+fn terminal_metric_events(
+    correlation: Correlation,
+    total_latency: Duration,
+    outcome: JobOutcomeCode,
+    candidates_returned: u64,
+) -> Vec<MetricEvent> {
+    let result_class = outcome.as_str();
+    let mut events = vec![
+        MetricEvent::duration(MetricName::TotalLatency, correlation, total_latency, None)
+            .with_result_class(result_class),
         MetricEvent::count(MetricName::TerminalOutcome, correlation, 1, None)
-            .with_result_class(public_code.as_str())
-            .emit();
+            .with_result_class(result_class),
         MetricEvent::count(
             MetricName::CandidatesReturned,
             correlation,
-            result_ids.len() as u64,
+            candidates_returned,
             None,
         )
-        .with_result_class(public_code.as_str())
-        .emit();
-        if matches!(next, JobState::TimedOut) {
+        .with_result_class(result_class),
+    ];
+    if outcome == JobOutcomeCode::Cancelled {
+        events.push(
+            MetricEvent::count(MetricName::Cancellation, correlation, 1, None)
+                .with_result_class(result_class),
+        );
+    }
+    if outcome == JobOutcomeCode::TimedOut {
+        events.push(
             MetricEvent::count(MetricName::Timeout, correlation, 1, None)
-                .with_result_class("timed_out")
-                .emit();
+                .with_result_class(result_class),
+        );
+    }
+    events
+}
+
+fn emit_automatic_terminal_metrics(rows: &[AutomaticTerminalMetric], now: SystemTime) {
+    for row in rows {
+        for event in terminal_metric_events(
+            correlation_for_attempt(row.job_id, row.attempt),
+            now.duration_since(row.queued_at).unwrap_or_default(),
+            row.outcome,
+            0,
+        ) {
+            event.emit();
         }
-        Ok(next)
     }
 }
 
@@ -1063,5 +1140,40 @@ fn parse_outcome_code(code: &str) -> Result<JobOutcomeCode, JobError> {
         "timed_out" => Ok(JobOutcomeCode::TimedOut),
         "legacy_unknown" => Ok(JobOutcomeCode::LegacyUnknown),
         _ => Err(JobError::Unavailable),
+    }
+}
+
+#[cfg(test)]
+mod observability_tests {
+    use super::*;
+
+    #[test]
+    fn every_terminal_path_builds_the_complete_metric_family() {
+        let correlation = Correlation::for_job(Uuid::new_v4()).with_attempt(2);
+        let metrics = terminal_metric_events(
+            correlation,
+            Duration::from_secs(3),
+            JobOutcomeCode::Cancelled,
+            0,
+        );
+        let names = metrics.iter().map(|event| event.metric).collect::<Vec<_>>();
+
+        assert!(names.contains(&MetricName::TotalLatency));
+        assert!(names.contains(&MetricName::TerminalOutcome));
+        assert!(names.contains(&MetricName::CandidatesReturned));
+        assert!(names.contains(&MetricName::Cancellation));
+        assert!(!names.contains(&MetricName::Timeout));
+
+        let timeout = terminal_metric_events(
+            correlation,
+            Duration::from_secs(60),
+            JobOutcomeCode::TimedOut,
+            0,
+        );
+        assert!(
+            timeout
+                .iter()
+                .any(|event| event.metric == MetricName::Timeout)
+        );
     }
 }

@@ -96,4 +96,31 @@ fn representative_coordinate_payloads_are_redacted_before_the_logging_sink() {
     assert!(!encoded.contains("51.5074"));
     assert!(!encoded.contains("-0.1278"));
     assert!(encoded.contains("redacted_invalid_result_class"));
+
+    let disguised = MetricEvent::count(MetricName::Errors, correlation, 1, None)
+        .with_result_class("lat51.5074-lon0.1278");
+    let encoded = serde_json::to_string(&disguised).unwrap();
+    assert!(!encoded.contains("51.5074"));
+    assert!(!encoded.contains("0.1278"));
+    assert!(encoded.contains("redacted_invalid_result_class"));
+}
+
+#[test]
+fn result_classes_are_a_closed_low_cardinality_set() {
+    let correlation = Correlation::for_job(Uuid::new_v4());
+    let known = MetricEvent::count(MetricName::Errors, correlation, 1, None)
+        .with_result_class("provider_unavailable");
+    let unknown = MetricEvent::count(MetricName::Errors, correlation, 1, None)
+        .with_result_class("deployment-specific-label-47392");
+
+    assert!(
+        serde_json::to_string(&known)
+            .unwrap()
+            .contains("provider_unavailable")
+    );
+    assert!(
+        serde_json::to_string(&unknown)
+            .unwrap()
+            .contains("redacted_invalid_result_class")
+    );
 }

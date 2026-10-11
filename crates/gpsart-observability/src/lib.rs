@@ -58,13 +58,13 @@ impl DesignCategory {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RouteDimensions {
-    pub activity: String,
-    pub distance_bucket: DistanceBucket,
-    pub design_category: DesignCategory,
-    pub profile_version: String,
-    pub template_version: String,
-    pub map_data_version: String,
-    pub algorithm_version: String,
+    activity: String,
+    distance_bucket: DistanceBucket,
+    design_category: DesignCategory,
+    profile_version: String,
+    template_version: String,
+    map_data_version: String,
+    algorithm_version: String,
 }
 
 impl RouteDimensions {
@@ -209,9 +209,9 @@ pub struct MetricEvent {
     pub correlation: Correlation,
     pub value: MetricValue,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub dimensions: Option<RouteDimensions>,
+    dimensions: Option<RouteDimensions>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result_class: Option<String>,
+    result_class: Option<String>,
 }
 
 impl MetricEvent {
@@ -248,7 +248,7 @@ impl MetricEvent {
     }
 
     pub fn with_result_class(mut self, result_class: &str) -> Self {
-        self.result_class = Some(if is_machine_identifier(result_class) {
+        self.result_class = Some(if is_allowed_result_class(result_class) {
             result_class.to_owned()
         } else {
             "redacted_invalid_result_class".to_owned()
@@ -286,4 +286,30 @@ impl MetricEvent {
             "operational metric"
         );
     }
+}
+
+fn is_allowed_result_class(value: &str) -> bool {
+    matches!(
+        value,
+        "ok" | "failed"
+            | "match"
+            | "no_match"
+            | "cancelled"
+            | "timed_out"
+            | "invalid_request"
+            | "provider_error"
+            | "provider_task_failed"
+            | "provider_unavailable"
+            | "job_state_unavailable"
+            | "storage_unavailable"
+            | "succeeded"
+            | "unsupported_coverage"
+            | "no_routable_access"
+            | "disconnected_network"
+            | "insufficient_visual_match"
+            | "outside_distance"
+            | "exhausted_budget"
+            | "attempts_exhausted"
+            | "legacy_unknown"
+    )
 }
