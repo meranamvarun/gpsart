@@ -7,6 +7,7 @@ use gpsart_api::{
     Readiness, app_with_auth,
     auth::{
         AuthError, InMemorySessionStore, PrivateResourceKind, SessionPolicy, authorize_resource,
+        run_cleanup_until_shutdown,
     },
 };
 use http_body_util::BodyExt;
@@ -14,6 +15,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
+use tokio::sync::watch;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -327,4 +329,26 @@ async fn rotation_replaces_and_revokes_the_previous_credential() {
         2,
         "rotation preserves only digests for audit/cleanup; the old record is revoked"
     );
+}
+
+#[tokio::test]
+async fn production_cleanup_loop_runs_and_stops_on_shutdown() {
+    let store = Arc::new(InMemorySessionStore::default());
+    store.insert_expired_for_test().await;
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let cleanup = tokio::spawn(run_cleanup_until_shutdown(
+        store.clone(),
+        Duration::from_millis(5),
+        shutdown_rx,
+    ));
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while store.session_count().await != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cleanup loop should process expired work");
+    shutdown_tx.send(true).unwrap();
+    cleanup.await.unwrap();
 }

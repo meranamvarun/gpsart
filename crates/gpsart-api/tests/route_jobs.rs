@@ -249,6 +249,15 @@ async fn creation_is_validated_owned_and_idempotent() {
             .status(),
         400
     );
+    let mut overflowing_tolerance: serde_json::Value =
+        serde_json::from_str(&body("overflowing-tolerance", 5_000, start)).unwrap();
+    overflowing_tolerance["distance_tolerance_metres"] = serde_json::json!(i32::MAX);
+    assert_eq!(
+        post(&app, &cookie, &csrf, overflowing_tolerance.to_string())
+            .await
+            .status(),
+        400
+    );
 
     let limited = post(&app, &cookie, &csrf, body("rate-limited", 5_000, start)).await;
     assert_eq!(limited.status(), 429);

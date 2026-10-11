@@ -513,8 +513,8 @@ impl PostgresJobCoordinator {
             || !(1_000..=self.limits.max_distance_metres).contains(&input.requested_distance_metres)
             || input.distance_tolerance_metres < 0
             || !self.limits.allowed_tolerance_percent.iter().any(|percent| {
-                (input.distance_tolerance_metres * 100
-                    - input.requested_distance_metres * i32::from(*percent))
+                (i64::from(input.distance_tolerance_metres) * 100
+                    - i64::from(input.requested_distance_metres) * i64::from(*percent))
                 .abs()
                     <= 50
             })

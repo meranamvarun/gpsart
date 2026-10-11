@@ -1,4 +1,4 @@
-use gpsart_api::auth::SessionPolicy;
+use gpsart_api::auth::{SessionPolicy, run_cleanup_until_shutdown};
 use gpsart_config::{AppConfig, init_tracing};
 use gpsart_domain::starts::{
     ConfiguredNetworkPoint, ConfiguredNetworkProvider, Coverage, StartResolver,
@@ -8,6 +8,7 @@ use gpsart_persistence::routes::PostgresRouteSnapshotStore;
 use gpsart_persistence::{DependencyProbe, PostgresProbe};
 use gpsart_persistence::{PostgresGuestSessionStore, PostgresResolvedStartStore};
 use std::{error::Error, sync::Arc, time::Duration};
+use tokio::sync::watch;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -38,6 +39,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     let sessions =
         Arc::new(PostgresGuestSessionStore::connect(config.database_url.expose()).await?);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let cleanup_task = tokio::spawn(run_cleanup_until_shutdown(
+        sessions.clone(),
+        Duration::from_secs(30),
+        shutdown_rx.clone(),
+    ));
     let jobs = PostgresJobCoordinator::connect_with_limits(
         config.database_url.expose(),
         config.workload_limits.clone(),
@@ -62,12 +69,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         routes,
         config.workload_limits,
     );
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("shutdown requested");
+    let signal_tx = shutdown_tx.clone();
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        tracing::info!("shutdown requested");
+        let _ = signal_tx.send(true);
+    });
+    let mut server_shutdown = shutdown_rx;
+    let server_result = axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            while !*server_shutdown.borrow() && server_shutdown.changed().await.is_ok() {}
         })
-        .await?;
+        .await;
+    let _ = shutdown_tx.send(true);
+    let _ = cleanup_task.await;
+    server_result?;
     Ok(())
 }
 

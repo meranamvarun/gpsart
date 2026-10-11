@@ -22,7 +22,7 @@ PostgreSQL admission takes a deployment-wide advisory lock, checks idempotent re
 
 ## Cleanup and deletion
 
-Cleanup processes at most 100 expired request families per transaction. It deletes snapshots/candidates before jobs and immutable requests, then removes unreferenced expired starts and expired sessions. A request family protected by a non-expired worker lease is skipped. Each run records only counts and whether another batch is required; retry is scheduled after 30 seconds. Cleanup never materializes route geometry.
+The API process runs cleanup immediately at startup and every 30 seconds until graceful shutdown. Cleanup processes at most 100 expired request families per transaction. It deletes snapshots/candidates before jobs and immutable requests, then removes unreferenced expired starts and only then sessions with no remaining precise records. A request family protected by a non-expired worker lease is skipped. Each run records only counts and whether another batch is required; retry is scheduled after 30 seconds. Cleanup never materializes route geometry.
 
 Unsaved requests and candidates receive an expiry no later than 24 hours after acceptance. Device-saved routes are browser-owned and unaffected by server cleanup.
 

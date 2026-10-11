@@ -626,6 +626,41 @@ async fn cleanup_is_batched_and_never_deletes_work_behind_an_active_lease() {
     assert!(!deleted.retry_required);
 
     sqlx::raw_sql(
+        r#"
+        INSERT INTO guest_sessions (id, token_hash, created_at, expires_at, cleanup_after)
+        VALUES ('00000000-0000-0000-0000-000000000099', decode(repeat('99',32),'hex'), now()-interval '3 days', now()-interval '2 days', now()-interval '1 day');
+        INSERT INTO resolved_starts (id, guest_session_id, requested_pin, confirmed_start, profile_version, coverage_policy_version, map_data_version, created_at, expires_at)
+        SELECT md5('start-' || value::text)::uuid, '00000000-0000-0000-0000-000000000099', ST_SetSRID(ST_MakePoint(10,10),4326), ST_SetSRID(ST_MakePoint(10,10),4326), 'walking-v1', 'coverage-v1', 'map-v1', now()-interval '2 days', now()-interval '1 day' FROM generate_series(1,101) value;
+        INSERT INTO planning_requests (id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash, requested_pin, requested_distance_metres, distance_tolerance_metres, activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version, map_data_version, algorithm_version, return_to_start, created_at, expires_at)
+        SELECT md5('request-' || value::text)::uuid, '00000000-0000-0000-0000-000000000099', md5('start-' || value::text)::uuid, value, 'batch-' || value::text, decode(md5(value::text) || md5(value::text),'hex'), ST_SetSRID(ST_MakePoint(10,10),4326), 5000, 250, '{}', 'walking-v1', 'coverage-v1', 'heart', '1', 'map-v1', 'algorithm-v1', true, now()-interval '2 days', now()-interval '1 day' FROM generate_series(1,101) value;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let first_family_batch = store
+        .cleanup_expired_sessions(SystemTime::now())
+        .await
+        .unwrap();
+    assert_eq!(first_family_batch.deleted_sessions, 0);
+    assert!(first_family_batch.retry_required);
+    let remaining_families: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM planning_requests WHERE guest_session_id='00000000-0000-0000-0000-000000000099'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        remaining_families, 1,
+        "session cascades must not bypass the 100-family batch cap"
+    );
+    let final_family_batch = store
+        .cleanup_expired_sessions(SystemTime::now())
+        .await
+        .unwrap();
+    assert_eq!(final_family_batch.deleted_sessions, 1);
+
+    sqlx::raw_sql(
         "INSERT INTO guest_sessions (id, token_hash, created_at, expires_at, cleanup_after) SELECT md5(value::text)::uuid, decode(lpad(to_hex(value),64,'0'),'hex'), now()-interval '3 days', now()-interval '2 days', now()-interval '1 day' FROM generate_series(1,101) value",
     )
     .execute(&pool)

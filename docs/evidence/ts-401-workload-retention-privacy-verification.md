@@ -15,3 +15,4 @@ Verified 2026-10-11.
 - Focused configuration, API abuse, guest-session, migration, cleanup, and provider-budget tests passed. PostgreSQL-specific cases run when `DATABASE_URL` is available and skip explicitly otherwise.
 - Workspace strict clippy passed after implementation.
 - `npm run factory:verify` passed on 2026-10-11, including formatting, strict clippy, all workspace tests, all TypeScript/factory/visual/Sites tests, and the production build.
+- Independent QA reviewed `3f6f9c6..7953eb5`, reproduced and fixed the tolerance-overflow, unscheduled-cleanup, and session-cascade batching defects recorded as INC-042 through INC-044, and reran the full factory verification successfully.

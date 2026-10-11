@@ -10,7 +10,7 @@
 - `WorkloadLimits` owns the validated distance, tolerance, template, anchor, attempt, provider-call, payload, runtime, concurrency, submission-rate, and retention caps. Environment overrides may tighten limits but cannot extend runtime beyond 60 seconds, retention beyond 24 hours, or per-guest concurrency above deployment concurrency.
 - PostgreSQL admission serializes global decisions, returns an existing idempotent job before applying new-work limits, and returns `JobError::RateLimited { retry_after_seconds }` for rejected new work. The API maps that to `429`, `Retry-After`, and a machine-readable body.
 - Provider-call counts are durable on `generation_jobs` and increment inside the locked scheduling transaction.
-- Cleanup uses batches of 100, never deletes a request family behind a live lease, records count-only run evidence, and indicates whether another batch is required.
+- The API process invokes cleanup immediately and every 30 seconds until shutdown. Cleanup uses batches of 100, never deletes a request family behind a live lease or bypasses batching through session cascades, records count-only run evidence, and indicates whether another batch is required.
 - Production structured logs cannot contain protected coordinate, geometry, credential, cookie, token, or future custom-text fields. The detailed sink, backup, and provider-key policy is in `docs/privacy-retention-policy.md`.
 
 ## Verification

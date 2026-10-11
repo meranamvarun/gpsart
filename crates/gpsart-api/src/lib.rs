@@ -753,8 +753,8 @@ async fn create_route_job(
         || !(1_000..=limits.max_distance_metres).contains(&body.requested_distance_metres)
         || body.distance_tolerance_metres < 0
         || !limits.allowed_tolerance_percent.iter().any(|percent| {
-            (body.distance_tolerance_metres * 100
-                - body.requested_distance_metres * i32::from(*percent))
+            (i64::from(body.distance_tolerance_metres) * 100
+                - i64::from(body.requested_distance_metres) * i64::from(*percent))
             .abs()
                 <= 50
         })

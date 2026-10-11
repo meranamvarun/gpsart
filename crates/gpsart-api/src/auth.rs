@@ -5,17 +5,49 @@ use gpsart_persistence::{CleanupReport, GuestSessionRecord, GuestSessionStore, S
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    sync::RwLock,
+    sync::{Arc, RwLock},
     time::{Duration, SystemTime},
 };
 use subtle::ConstantTimeEq;
 use thiserror::Error;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 pub use gpsart_persistence::PrivateResourceKind;
 
 pub const SESSION_COOKIE: &str = "gpsart_guest";
 pub const CSRF_COOKIE: &str = "gpsart_csrf";
+
+pub async fn run_cleanup_until_shutdown<S: GuestSessionStore + 'static>(
+    store: Arc<S>,
+    interval: Duration,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            _ = ticker.tick() => {
+                match store.cleanup_expired_sessions(SystemTime::now()).await {
+                    Ok(report) => tracing::info!(
+                        deleted_sessions = report.deleted_sessions,
+                        deleted_jobs = report.deleted_jobs,
+                        deleted_candidates = report.deleted_candidates,
+                        deleted_starts = report.deleted_starts,
+                        retry_required = report.retry_required,
+                        "guest cleanup completed"
+                    ),
+                    Err(_) => tracing::warn!("guest cleanup failed; retrying on the next interval"),
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SessionPolicy {
