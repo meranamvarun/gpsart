@@ -77,6 +77,16 @@ try {
     if (viewport.width === 360) {
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForSelector("#plan-form");
+      const mobileSignIn = await page.evaluate(() => {
+        const control = document.querySelector('.signin');
+        const rect = control?.getBoundingClientRect();
+        return {
+          name: control?.textContent?.trim(),
+          visible: !!rect && rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.right <= window.innerWidth,
+        };
+      });
+      assert.deepEqual(mobileSignIn, { name: "Sign in", visible: true }, "mobile Sign in must have an accessible name and remain visible without overflowing");
+
       const focusOrder = [];
       for (let index = 0; index < 14; index += 1) {
         await page.keyboard.press("Tab");
@@ -88,7 +98,15 @@ try {
         }));
       }
       assert.equal(focusOrder[0], "Skip to content", "skip link must be first in keyboard focus order");
+      assert.ok(focusOrder.includes("Sign in"), "mobile Sign in must be keyboard reachable");
       assert.ok(focusOrder.some((name) => name.includes("Use my location")), "planner controls must be reachable by keyboard");
+
+      await page.focus('.signin');
+      await page.keyboard.press("Enter");
+      await page.waitForSelector('.auth-layout');
+      assert.equal(await page.evaluate(() => window.location.hash), "#/login", "mobile Sign in must navigate to login from the keyboard");
+      await page.goto(`${origin}/#/planner`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#plan-form");
 
       await page.focus("#design-tab-shapes");
       await page.keyboard.press("ArrowRight");
