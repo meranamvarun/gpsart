@@ -3,7 +3,7 @@ import type { CandidateSnapshotLoad } from "../client/api.ts";
 import { isCurrentResult, type RouteRequest, reviseRequest } from "../domain/planner.ts";
 import type { RouteSnapshot } from "../domain/route-snapshot.ts";
 import type { RouteJobStatus } from "../domain/job-status.ts";
-import type { DesignCategory } from "./catalogue.ts";
+import { previewsFor, type DesignCategory } from "./catalogue.ts";
 import type { DesignCatalogueLoad, DesignCatalogueState } from "../domain/design-template.ts";
 import type { SavedRoute } from "../client/saved-routes.ts";
 
@@ -133,6 +133,17 @@ export function canRetryCompletedAttempt(state: AppState): boolean {
 
 export function updateUi(state: AppState, changes: Partial<Pick<AppState, "signedIn" | "category" | "mapExpanded">>): AppState {
   return { ...state, ...changes };
+}
+
+export function selectDesignCategory(state: AppState, category: DesignCategory): AppState {
+  const visibleDesigns = previewsFor(category, state.catalogue);
+  if (visibleDesigns.some(({ name }) => name === state.request.design)) {
+    return updateUi(state, { category });
+  }
+  const replacement = visibleDesigns.find(({ enabled }) => enabled) ?? visibleDesigns[0];
+  return replacement
+    ? { ...updateRequest(state, { design: replacement.name }), category }
+    : updateUi(state, { category });
 }
 
 function sameRequest(left: RouteRequest, right: RouteRequest): boolean {

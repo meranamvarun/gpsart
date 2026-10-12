@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { renderScreen } from "../src/app/screen-controller.ts";
-import { acceptCatalogueLoad, initialState } from "../src/app/state.ts";
+import { acceptCatalogueLoad, initialState, selectDesignCategory, updateRequest } from "../src/app/state.ts";
 import type { PlannerWorkflowSnapshot } from "../src/client/planner-workflow.ts";
 
 test("generation progress is labelled with the active job request, not a newer edit", () => {
@@ -45,4 +45,34 @@ test("catalogue exposes selected state and explains disabled designs without cha
   assert.equal(state.request.start, original.request.start);
   assert.equal(state.request.activity, original.request.activity);
   assert.equal(state.request.distanceKm, original.request.distanceKm);
+});
+
+test("catalogue category changes keep the active design visible and aligned with the CTA", () => {
+  const loaded = acceptCatalogueLoad(initialState(), { kind: "available", designs: [
+    {
+      id: "heart", version: 1, status: "published", category: "shape", name: "Heart", accessibleName: "Heart route design",
+      complexityHint: "simple", previewSvg: "<svg></svg>", definitionHash: "a".repeat(64),
+    },
+    {
+      id: "HI", version: 1, status: "published", category: "text", name: "HI", accessibleName: "HI route design",
+      complexityHint: "moderate", previewSvg: "<svg></svg>", definitionHash: "b".repeat(64),
+    },
+  ] });
+
+  const textState = selectDesignCategory(loaded, "Text");
+  const textMarkup = renderScreen("catalogue", textState, { kind: "available", routes: [], errors: [] });
+  assert.equal(textState.request.design, "HI");
+  assert.match(textMarkup, /data-design="HI"[^>]*aria-pressed="true"/);
+  assert.match(textMarkup, />Use HI /);
+  assert.doesNotMatch(textMarkup, /Use Heart/);
+
+  const shapeState = selectDesignCategory(textState, "Shapes");
+  const shapeMarkup = renderScreen("catalogue", shapeState, { kind: "available", routes: [], errors: [] });
+  assert.equal(shapeState.request.design, "Heart");
+  assert.match(shapeMarkup, /data-design="Heart"[^>]*aria-pressed="true"/);
+  assert.match(shapeMarkup, />Use Heart /);
+  assert.doesNotMatch(shapeMarkup, /Use HI/);
+
+  const selectedTextState = updateRequest(textState, { design: "GO" });
+  assert.equal(selectDesignCategory(selectedTextState, "Text").request.design, "GO");
 });

@@ -17,7 +17,7 @@ import { baseMapTileErrorHandler, renderMap } from "./app/map.ts";
 import { currentScreen, navigate, type Screen } from "./app/router.ts";
 import { screenForWorkflow } from "./app/outcome-flow.ts";
 import { isStandaloneScreen, renderScreen } from "./app/screen-controller.ts";
-import { acceptCandidateLoad, acceptCatalogueLoad, beginCandidateLoad, initialState, openSavedRoute, recordCompletedAttempt, retryCompletedAttempt, selectCandidate, updateRequest, updateUi } from "./app/state.ts";
+import { acceptCandidateLoad, acceptCatalogueLoad, beginCandidateLoad, initialState, openSavedRoute, recordCompletedAttempt, retryCompletedAttempt, selectCandidate, selectDesignCategory, updateRequest, updateUi } from "./app/state.ts";
 import { isDesignEnabled } from "./app/catalogue.ts";
 import { buildCandidateComparison, routeMapModel } from "./app/route-presentation.ts";
 import type { DesignCategory } from "./app/catalogue.ts";
@@ -361,7 +361,7 @@ function bind(): void {
   }));
   document.querySelectorAll<HTMLButtonElement>("[data-category]").forEach((button) => button.addEventListener("click", () => {
     const category = button.dataset.category as DesignCategory | undefined;
-    if (category) { state = updateUi(state, { category }); render(); }
+    if (category) { state = selectDesignCategory(state, category); render(); }
   }));
   const categoryTabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"][data-category]')];
   categoryTabs.forEach((button, index) => button.addEventListener("keydown", (event) => {
@@ -372,7 +372,7 @@ function bind(): void {
         : (index + (event.key === "ArrowRight" ? 1 : -1) + categoryTabs.length) % categoryTabs.length;
     const category = categoryTabs[nextIndex]?.dataset.category as DesignCategory | undefined;
     if (category) {
-      state = updateUi(state, { category });
+      state = selectDesignCategory(state, category);
       render();
       document.querySelector<HTMLElement>(`#design-tab-${category.toLowerCase()}`)?.focus();
     }
