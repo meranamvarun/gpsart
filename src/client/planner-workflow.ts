@@ -1,4 +1,5 @@
 import { decodeRouteJobStatus, type RouteJobStatus } from "../domain/job-status.ts";
+import { decodeApiError, type ApiErrorCode } from "../domain/api-error.ts";
 import type { RouteRequest } from "../domain/planner.ts";
 import { decodeAcceptedRouteJob, decodeRouteJobError, type RouteJobErrorCode } from "../domain/route-job.ts";
 import type { ProposedStart } from "../domain/start-selection.ts";
@@ -33,7 +34,7 @@ export type WorkflowPhase =
   | "stale"
   | "error";
 
-export type WorkflowIssue = StartOutcomeCode | RouteJobErrorCode
+export type WorkflowIssue = StartOutcomeCode | RouteJobErrorCode | ApiErrorCode
   | "invalid_fields"
   | "active_job"
   | "invalid_response"
@@ -254,7 +255,7 @@ export class PlannerWorkflow {
     const payload = await responseJson(response);
     const terminalState = decodeCancellation(payload);
     if (!response.ok || !terminalState) {
-      this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(payload) ?? "invalid_response" });
+      this.update({ ...this.value, phase: "error", issue: decodeApiError(payload) ?? decodeRouteJobError(payload) ?? "invalid_response" });
       return;
     }
     if (terminalState !== "cancelled") {
@@ -330,7 +331,7 @@ export class PlannerWorkflow {
       const confirmationPayload = await responseJson(confirmation);
       if (!this.fenceAsyncStep(token, request.revision)) return;
       if (!confirmation.ok) {
-        this.update({ ...this.value, phase: "error", issue: decodeStartOutcome(confirmationPayload) ?? "invalid_response" });
+        this.update({ ...this.value, phase: "error", issue: decodeApiError(confirmationPayload) ?? decodeStartOutcome(confirmationPayload) ?? "invalid_response" });
         return;
       }
       const confirmed = decodeConfirmedStart(confirmationPayload);
@@ -489,7 +490,7 @@ export class PlannerWorkflow {
         this.pollDelay = Math.min(MAX_POLL_MILLISECONDS, this.pollDelay * 2);
         this.schedulePoll(token, this.pollDelay);
       } else {
-        this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(payload) ?? "invalid_response" });
+        this.update({ ...this.value, phase: "error", issue: decodeApiError(payload) ?? decodeRouteJobError(payload) ?? "invalid_response" });
       }
       return;
     }

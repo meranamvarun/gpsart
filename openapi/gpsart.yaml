@@ -74,6 +74,7 @@ paths:
           headers:
             ETag: { description: Durable status version validator, schema: { type: string } }
             Cache-Control: { description: Private revalidation policy, schema: { type: string, const: 'private, no-cache' } }
+        '400': { $ref: '#/components/responses/MalformedPathParameter' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/PrivateNotFound' }
         '503': { $ref: '#/components/responses/JobUnavailable' }
@@ -87,6 +88,7 @@ paths:
         - $ref: '#/components/parameters/CsrfCookie'
       responses:
         '200': { description: Current terminal state, content: { application/json: { schema: { type: object, required: [state], properties: { state: { type: string, enum: [succeeded, no_match, failed, cancelled, timed_out] } } } } } }
+        '400': { $ref: '#/components/responses/MalformedPathParameter' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/PrivateNotFound' }
@@ -126,6 +128,7 @@ paths:
                 duration_seconds: 720
                 instructions: [{ kind: depart, geometry_index: 0 }, { kind: via, geometry_index: 2 }, { kind: arrive, geometry_index: 4 }]
                 direction_markers: [{ traversal_index: 0, coordinate: [77.6, 12.9], direction: forward }, { traversal_index: 1, coordinate: [77.6, 12.901], direction: reverse }]
+        '400': { $ref: '#/components/responses/MalformedPathParameter' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/PrivateNotFound' }
         '503':
@@ -148,6 +151,7 @@ paths:
           content:
             application/gpx+xml:
               schema: { type: string, contentMediaType: application/gpx+xml }
+        '400': { $ref: '#/components/responses/MalformedPathParameter' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/PrivateNotFound' }
         '503':
@@ -364,11 +368,16 @@ paths:
               schema: { $ref: '#/components/schemas/ConfirmedStart' }
               example: { confirmed_start: { longitude: 77.2, latitude: 28.6 } }
         '400':
-          description: Malformed request
+          description: Malformed JSON request body or malformed UUID path parameter
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/StartError' }
-              example: { outcome: { code: invalid_request } }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/StartError' }
+                  - { $ref: '#/components/schemas/PathParameterError' }
+              examples:
+                body: { value: { outcome: { code: invalid_request } } }
+                path: { value: { code: invalid_path_parameter } }
         '401':
           description: Missing guest-session authorization
           content:
@@ -444,6 +453,7 @@ components:
       description: Session and CSRF cookie mutations. Multiple Set-Cookie fields may be returned.
       schema: { type: string }
   responses:
+    MalformedPathParameter: { description: UUID path parameter is malformed, content: { application/json: { schema: { $ref: '#/components/schemas/PathParameterError' }, example: { code: invalid_path_parameter } } } }
     InvalidJobRequest: { description: Complete request validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/JobError' }, example: { code: invalid_request } } } }
     PrivateNotFound: { description: Owned resource is absent, stale, or belongs to another session, content: { application/json: { schema: { $ref: '#/components/schemas/JobError' }, example: { code: not_found } } } }
     JobConflict: { description: Idempotency key or job state conflict, content: { application/json: { schema: { $ref: '#/components/schemas/JobError' }, example: { code: idempotency_conflict } } } }
@@ -467,6 +477,12 @@ components:
           schema: { $ref: '#/components/schemas/ApiError' }
           example: { code: authentication_unavailable }
   schemas:
+    PathParameterError:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, const: invalid_path_parameter }
     CreateRouteJob:
       type: object
       additionalProperties: false

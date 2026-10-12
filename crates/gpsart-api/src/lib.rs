@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use axum::{
     Json, Router,
     extract::rejection::JsonRejection,
-    extract::{DefaultBodyLimit, Path, Query, State},
-    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header, request::Parts},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -30,6 +30,7 @@ use gpsart_persistence::routes::{
 use gpsart_persistence::{
     DependencyProbe, GuestSessionStore, PostgresProbe, ResolvedStartRecord, ResolvedStartStore,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -44,6 +45,31 @@ use auth::{
     AuthError, InMemorySessionStore, SessionPolicy, authenticate, csrf_cookie,
     enforce_request_protection, expired_cookies, issue_session, rotate_session, session_cookie,
 };
+
+struct JsonUuidPath<T>(T);
+
+impl<S, T> FromRequestParts<S> for JsonUuidPath<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned + Send,
+{
+    type Rejection = axum::response::Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Path::<T>::from_request_parts(parts, state)
+            .await
+            .map(|Path(value)| Self(value))
+            .map_err(|_| malformed_path_response())
+    }
+}
+
+fn malformed_path_response() -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "code": "invalid_path_parameter" })),
+    )
+        .into_response()
+}
 
 #[async_trait]
 pub trait Readiness: Send + Sync + 'static {
@@ -675,7 +701,7 @@ async fn resolve_start(
 async fn confirm_start(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(id): Path<ResolutionId>,
+    JsonUuidPath(id): JsonUuidPath<ResolutionId>,
     body: Result<Json<ConfirmStartBody>, JsonRejection>,
 ) -> axum::response::Response {
     let Json(body) = match body {
@@ -905,7 +931,7 @@ struct RouteJobOutcomeBody {
 
 async fn get_route_job(
     State(state): State<AppState>,
-    Path(id): Path<uuid::Uuid>,
+    JsonUuidPath(id): JsonUuidPath<uuid::Uuid>,
     headers: HeaderMap,
 ) -> axum::response::Response {
     let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
@@ -960,7 +986,7 @@ struct RouteSnapshotBody {
 
 async fn get_route_snapshot(
     State(state): State<AppState>,
-    Path(id): Path<uuid::Uuid>,
+    JsonUuidPath(id): JsonUuidPath<uuid::Uuid>,
     headers: HeaderMap,
 ) -> axum::response::Response {
     let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
@@ -995,7 +1021,7 @@ async fn get_route_snapshot(
 
 async fn export_route_gpx(
     State(state): State<AppState>,
-    Path(id): Path<uuid::Uuid>,
+    JsonUuidPath(id): JsonUuidPath<uuid::Uuid>,
     headers: HeaderMap,
 ) -> axum::response::Response {
     let session = match authenticate(state.sessions.as_ref(), &headers, SystemTime::now()).await {
@@ -1078,7 +1104,7 @@ fn status_body(snapshot: JobStatusSnapshot) -> Result<RouteJobStatusBody, JobErr
 
 async fn cancel_route_job(
     State(state): State<AppState>,
-    Path(id): Path<uuid::Uuid>,
+    JsonUuidPath(id): JsonUuidPath<uuid::Uuid>,
     method: Method,
     headers: HeaderMap,
 ) -> axum::response::Response {
