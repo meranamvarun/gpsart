@@ -1,7 +1,7 @@
 # GPSART technical delivery backlog
 
-Status: initial implementation backlog<br>
-Prepared: 2 October 2026<br>
+Status: production-readiness backlog active<br>
+Prepared: 2 October 2026; production stages added 12 October 2026<br>
 Source: [Web App Epic for Routes That Draw Shapes and Text](problem-statement.md)
 
 This backlog translates the product stories and interactive prototype into engineering work. It is ordered to prove route feasibility before investing heavily in the production UI. The acceptance criteria below are technical evidence; the corresponding product-story acceptance criteria still apply.
@@ -64,6 +64,8 @@ The existing HTML/CSS prototype remains the visual reference while production mo
 | 2. Real vertical slice | A guest creates a real job, receives a route, inspects it, and exports the same traversal | TS-201–TS-207 |
 | 3. First-release planner | The full P0 catalogue, comparison, recovery, local save, responsive, and accessible flows work | TS-301–TS-305 |
 | 4. Pilot hardening | Privacy, limits, recovery, performance, provider obligations, and release evidence meet the epic gates | TS-401–TS-404 |
+| 5. Production implementation | The deployed stack generates real routes using reviewed data and has deploy, recovery, privacy, provider, and operational controls | TS-501–TS-509 |
+| 6. Independent release validation | Held-out quality and real-browser gates pass and an accountable release decision is signed | TS-601–TS-603 |
 
 `Blocked by` names technical prerequisites, not every related product story. Work within a stage can proceed in parallel after its prerequisites are satisfied.
 
@@ -560,6 +562,231 @@ Acceptance criteria:
 6. Unresolved coverage, browser, provider, algorithm, and quality limitations are documented next to the release decision.
 
 Evidence: signed release checklist linking benchmark, browser, importer, accessibility, security, performance, and provider-review artifacts.
+
+## Stage 5 — production implementation
+
+### TS-501 — Execute queued route jobs in the production worker
+
+**Priority:** P0<br>
+**Maps to:** production route generation and US05–US10<br>
+**Blocked by:** TS-107, TS-202, TS-205, TS-401, TS-402
+
+Replace the production worker's no-op work operation with the durable, fenced route-generation pipeline. This story owns the shared worker-to-persistence contract and must publish a handoff before dependent stories consume it.
+
+Acceptance criteria:
+
+1. The production worker claims queued PostgreSQL jobs, loads the exact immutable request revision and versioned template/profile/map inputs, and rejects missing or inconsistent inputs without generating a route.
+2. Heart and curated-text jobs invoke the real pinned routing implementation and persist only fully validated candidate snapshots; no fixture, straight-line, car-route, inferred access, or fabricated geometry can enter the production path.
+3. One successful attempt publishes one to three distinct candidate IDs and a terminal match outcome using lease-fenced writes; no-match and classified dependency/provider failures publish truthful terminal outcomes.
+4. Cancellation, deadline expiry, lease renewal/loss, bounded retry, provider-call budget exhaustion, process termination, and database reconnect stop or resume work without duplicate candidate publication or false success.
+5. Progress stages and privacy-safe metrics come from real execution and never expose exact coordinates, full traces, credentials, cookies, tokens, or custom text.
+6. Tests cover success, no-match, cancellation during routing, timeout, stale lease, duplicate delivery, worker restart, persistence failure, malformed stored input, and unknown version behavior against PostgreSQL.
+
+Evidence: focused worker/persistence integration suite, production-path dependency test proving `take_work` is not a no-op, and QA-reviewed worker contract handoff.
+
+### TS-502 — Prove the connected route-generation vertical slice
+
+**Priority:** P0<br>
+**Maps to:** P0 anonymous planner journey<br>
+**Blocked by:** TS-204, TS-206, TS-207, TS-305, TS-501
+
+Exercise the real browser/API/PostGIS/worker/routing path without injecting candidate fixtures.
+
+Acceptance criteria:
+
+1. A fresh anonymous session can load the catalogue, resolve and explicitly confirm a reviewed start, submit a job, observe real progress, receive a persisted candidate, inspect its exact route details, and export that same traversal as GPX.
+2. The test proves that the API response, stored snapshot, rendered geometry, route details, and GPX have the same job, request revision, candidate identity, coordinate order, distances, retracing, and immutable version pins.
+3. A second guest cannot read, cancel, export, or infer the first guest's job or candidate, including through guessed and malformed identifiers.
+4. No-match, cancellation, timeout, dependency loss, refresh during polling, stale responses, and unavailable base-map cases remain truthful and recoverable.
+5. The connected test runs in CI with PostgreSQL/PostGIS and a deterministic pinned routing graph; required database cases must not be silently skipped.
+
+Evidence: CI end-to-end transcript, retained deterministic test inputs, exported GPX validation, and independent QA journey review.
+
+### TS-503 — Approve reviewed production routing data and configuration
+
+**Priority:** P0<br>
+**Maps to:** coverage, start-resolution, access-policy, and immutable-data requirements<br>
+**Blocked by:** TS-103, TS-107, TS-401
+
+Replace illustrative deployment values with accountable, reproducible production-pilot data and configuration.
+
+Acceptance criteria:
+
+1. The production routing graph, source provenance, extraction procedure, coverage polygon or bounds, checksum, map-data version, and review date are recorded and reproducible from approved source material.
+2. Every configured routable start is derived from the same pinned graph, is reviewed per supported activity profile, and is not presented as valid for an unreviewed profile.
+3. Coverage and start-resolution tests include boundary, outside-coverage, isolated, direction-restricted, and unknown-data cases and never silently move a start or widen tolerance.
+4. Startup fails closed for missing, malformed, mismatched, empty, or unknown-version graph/start/configuration inputs.
+5. Production workload and retention values are reviewed, remain within hard caps, use canonical metres, and are recorded without embedding secrets or personal precise locations.
+6. A controlled update procedure assigns new immutable versions and proves old snapshots remain interpretable.
+
+Evidence: signed data/configuration manifest, checksums and derivation commands, boundary test report, and QA review.
+
+### TS-504 — Harden the public first-release product surface
+
+**Priority:** P0<br>
+**Maps to:** honest production scope and TS-305 boundaries<br>
+**Blocked by:** TS-305
+
+Ensure the shipped interface exposes only implemented first-release capabilities and states its intentional limitations clearly.
+
+Acceptance criteria:
+
+1. Google sign-in and place-name search controls are absent or explicitly unavailable in production unless their complete authenticated/geocoding integrations, privacy review, and failure behavior are delivered in separate approved stories.
+2. Guest planning remains usable without an account, and saved-route UI consistently states that routes are stored only on the current device and can be removed by clearing site data.
+3. The planner and catalogue identify the supported pilot geography and calibrated designs without claiming citywide, arbitrary-start, or arbitrary-text feasibility.
+4. Unsupported actions cannot be reached through direct URLs, stale client state, query parameters, keyboard navigation, or development flags in the production bundle.
+5. Production, accessibility, and visual-shell tests cover the resulting navigation, unavailable states, and scope copy at mobile and desktop widths.
+
+Evidence: production bundle inspection, navigation/accessibility tests, screenshots, and signed first-release scope record.
+
+### TS-505 — Package and deploy the complete production stack
+
+**Priority:** P0<br>
+**Maps to:** production deployment and operational reproducibility<br>
+**Blocked by:** TS-305, TS-501, TS-503
+
+Create a reproducible staging and production deployment for the static client, API, functional worker, and PostgreSQL/PostGIS.
+
+Acceptance criteria:
+
+1. Versioned, immutable runtime artifacts build with locked dependencies for the target platform; API and worker run as non-root processes, handle termination, and expose or support appropriate liveness/readiness checks.
+2. Infrastructure configuration provisions separate staging and production environments, PostgreSQL 16/PostGIS 3.4 or an explicitly reviewed compatible version, persistent encrypted storage, API and worker compute, and immutable client hosting.
+3. One canonical HTTPS origin serves the client and proxies `/api/*`; cookie, Origin/CSRF, security-header, request-size, timeout, and privacy-safe proxy logging behavior is verified through the edge.
+4. Secrets come from a managed secret store, migrations run as a separately authorized forward-only release job, and neither images nor client bundles contain production credentials or illustrative configuration.
+5. The delivery pipeline records source revision and artifact digests, deploys to staging first, performs readiness and connected smoke checks, supports controlled binary rollback, and never deploys the known no-op worker.
+6. A clean-environment deployment runbook names owners, prerequisites, promotion steps, health checks, rollback conditions, and teardown protections.
+
+Evidence: infrastructure definitions, artifact/SBOM or dependency manifest, staging deployment record, edge tests, and rollback rehearsal.
+
+### TS-506 — Meet production route-generation performance gates
+
+**Priority:** P0<br>
+**Maps to:** TS-403 nonfunctional release gates<br>
+**Blocked by:** TS-403, TS-502, TS-505
+
+Remediate the measured 68.886-second p95 and 75.507-second maximum using the connected worker on production-equivalent infrastructure.
+
+Acceptance criteria:
+
+1. Profiling separates queue, graph loading, candidate search, provider, validation, snapshot persistence, and total latency without logging precise route data.
+2. Algorithm, concurrency, caching, admission-control, or capacity changes preserve every legality and truthfulness invariant and have focused regression tests.
+3. A repeatable production-equivalent run covers at least 20 concurrent representative jobs and reports p50/p95/p99 acknowledgement, queue, provider/search, persistence, and end-to-end latency with terminal outcomes and resource saturation.
+4. Accepted-job acknowledgement p95 is at most one second, termination p95 is at most 30 seconds, and every job terminates within 60 seconds.
+5. If an accountable release owner proposes different thresholds, the change is a separately signed product/SRE decision made before measurement; this story does not pass by retrospectively weakening a missed gate.
+6. Load shedding and overload states return bounded, truthful retry or unavailable responses and do not starve cancellation, cleanup, or lease renewal.
+
+Evidence: versioned workload, profiler record, before/after report on recorded hardware, invariant regression suite, and independent QA/SRE sign-off.
+
+### TS-507 — Operationalize privacy-safe monitoring and incident response
+
+**Priority:** P0<br>
+**Maps to:** production operations, privacy, and US14<br>
+**Blocked by:** TS-402, TS-505
+
+Connect the checked-in telemetry contracts to the deployed monitoring and response systems.
+
+Acceptance criteria:
+
+1. Production dashboards show API health, acknowledgement, queue delay/backlog, stuck leases, worker throughput, route-search latency, outcomes, provider failures, timeouts, cancellations, and cleanup without high-cardinality or precise-route labels.
+2. Alerts are imported, tested with controlled signals, routed to named owners, and linked to runbooks containing triage, escalation, mitigation, and closure steps.
+3. Edge, application, database audit, monitoring, error-reporting, and support paths are reviewed to exclude query strings, bodies, cookies, authorization/CSRF headers, exact coordinates, full traces, custom text, credentials, and tokens.
+4. Correlation IDs connect browser request, API request, job, attempt, worker, provider call, and terminal outcome without identifying a person or location.
+5. Monitoring-system outage, alert-delivery failure, cleanup failure, and stale-worker scenarios have observable degraded states and tested operator procedures.
+
+Evidence: deployed dashboard/alert links or exports, alert-fire transcript, end-to-end redaction audit, on-call ownership record, and QA review.
+
+### TS-508 — Prove backup restore recovery and rollback
+
+**Priority:** P0<br>
+**Maps to:** durability, retention, and operational recovery<br>
+**Blocked by:** TS-401, TS-501, TS-505
+
+Turn the documented recovery expectations into tested production procedures.
+
+Acceptance criteria:
+
+1. Automated encrypted backups use access-audited storage, have a retention period no longer than seven days, and expose success, age, and failure monitoring without leaking route data.
+2. A restore into an isolated environment verifies migration checksums, snapshot readability, authorization isolation, and expiry cleanup before any traffic is admitted.
+3. Database interruption, API restart, worker termination during fitting, stale lease, partial candidate persistence, and network partition recover without duplicate publication, corrupted snapshots, or false success.
+4. Application rollback is rehearsed against forward-only migrations with an explicit compatibility window and a stop condition when rollback is unsafe.
+5. Accountable owners approve measured recovery-point and recovery-time results, data-deletion behavior after restore, and the disaster-recovery runbook.
+
+Evidence: backup and restore logs with sensitive values removed, failure-injection report, rollback transcript, measured RPO/RTO, and independent QA/operations review.
+
+### TS-509 — Close deployed provider licensing capacity and cost obligations
+
+**Priority:** P0<br>
+**Maps to:** TS-404 provider release gate<br>
+**Blocked by:** TS-503, TS-505
+
+Review providers and derived data against the actual deployed origin, configuration, and expected traffic.
+
+Acceptance criteria:
+
+1. The deployed tile/routing configuration records providers, endpoints, attribution, credentials classification, origin/referrer behavior, contact channel, user agent where applicable, and cache behavior observed through the production edge.
+2. Expected and tested request volume fits each provider's policy and capacity; a paid, hosted, or self-hosted alternative replaces a best-effort public service when accountable review finds it unsuitable.
+3. Outage, throttling, quota, and slow-response behavior preserves forms and generated route data and displays explicit unavailable states without substituting another routing mode.
+4. ODbL and other applicable obligations are reviewed for the pinned source, derived routing database, route exports, attribution, notices, and any publication or distribution plan.
+5. Monthly compute, storage, backup, bandwidth, tile/provider, monitoring, and support costs are estimated at pilot and agreed growth levels, with owners and budget approval recorded.
+
+Evidence: deployed provider review, policy/caching capture, load/cost model, licensing decision, failure test, and accountable approval.
+
+## Stage 6 — independent release validation
+
+### TS-601 — Pass the independently reviewed held-out route benchmark
+
+**Priority:** P0 / release gate<br>
+**Maps to:** TS-404 held-out quality and validity gates<br>
+**Blocked by:** TS-301, TS-502, TS-503, TS-506
+
+Run the required benchmark against frozen production-candidate artifacts without tuning on the held-out answers.
+
+Acceptance criteria:
+
+1. The frozen set contains at least 50 independently reviewed feasible cases, at least 20 shapes, at least 20 text cases, and at least 20 restriction/difficult/no-match cases, with provenance and selection rules that prevent test leakage.
+2. Three independent blind reviewers assess each feasible output, two recognitions are required to qualify, and shape and text results are reported separately with inter-reviewer disagreement retained.
+3. At least 80% of feasible shape cases and at least 80% of feasible text cases produce a qualifying full trace; no missing result is reclassified or omitted after execution.
+4. Every returned route passes continuity, exact confirmed start, access/direction/turn policy, requested distance tolerance, connector/retrace disclosure, immutable version consistency, authorization, and GPX round-trip checks; one invalid route fails the gate.
+5. Raw case identities, outputs, reviewer decisions, scripts, environment/artifact versions, exclusions, and aggregate calculations are retained in a privacy-safe, reproducible evidence package.
+
+Evidence: complete 50-case benchmark package, blind-review records, automated validity output, aggregate report, and independent QA signature.
+
+### TS-602 — Pass the five-browser real-route release journey
+
+**Priority:** P0 / release gate<br>
+**Maps to:** TS-404 browser journey gate<br>
+**Blocked by:** TS-502, TS-504, TS-505, TS-509
+
+Manually verify the deployed release candidate on every required browser using real generated routes.
+
+Acceptance criteria:
+
+1. Current Chrome and Firefox on desktop, current Safari on macOS, Mobile Chrome on a physical supported Android device, and Mobile Safari on a physical supported iOS device each complete a signed anonymous start-to-real-route-to-GPX journey.
+2. Each run covers catalogue loading, coordinate or map start entry, explicit snap confirmation when proposed, job progress, route comparison/detail, attribution, local save/reopen, exact GPX export, and import into an independent GPX consumer.
+3. Each run also checks cancellation, a truthful unavailable/error state, refresh recovery, keyboard or relevant assistive navigation, no page-level overflow, and preserved form/result data when the base map is unavailable.
+4. Evidence records browser/OS/device versions, deployed origin, release revision and artifact digests, job/candidate correlation identifiers that contain no personal data, tester, timestamp, result, and linked defect disposition.
+5. Emulation, viewport screenshots, automation, or an unavailable test environment cannot be recorded as a manual pass.
+
+Evidence: signed five-target matrix, redacted journey captures, independent GPX import records, and resolved-defect links.
+
+### TS-603 — Issue the independently signed production release decision
+
+**Priority:** P0 / release gate<br>
+**Maps to:** epic definition of done and production authorization<br>
+**Blocked by:** TS-404, TS-506–TS-509, TS-601, TS-602
+
+Replace the historical NO-GO with a traceable decision for one immutable release candidate.
+
+Acceptance criteria:
+
+1. The checklist identifies the exact source revision, client/API/worker artifact digests, database migration set, routing-data/configuration versions, deployed origin, and decision timestamp.
+2. Held-out quality, route validity, browser journey, provider obligations, performance, accessibility, security/privacy, GPX import, deployment, monitoring, backup/restore, and rollback gates each link to reviewed evidence and are fail-closed.
+3. `npm run factory:verify`, the connected end-to-end suite, deployment smoke tests, and all non-automatable checklists pass against the release candidate with no required database cases skipped.
+4. Known limitations are accurate, visible, and accepted by the accountable product/operations owner; no blocker is relabelled as a limitation merely to authorize release.
+5. Developer, independent QA, product/release owner, and operations owner sign the same decision; any non-passed gate results in NO-GO.
+6. The promotion plan names the release operator, monitoring window, rollback authority, stop conditions, and post-deployment verification, and the resulting production state is recorded after execution.
+
+Evidence: immutable signed checklist, complete evidence map, successful CI/deployment references, production smoke record, and post-release verification.
 
 ## Deferred work
 

@@ -5,7 +5,7 @@ import { loadFactory, readyStories, validateStories } from "../scripts/factory.m
 test("factory backlog is valid and includes every documented technical story", async () => {
   const factory = await loadFactory();
   assert.deepEqual(validateStories(factory), []);
-  assert.equal(factory.stories.length, 26);
+  assert.equal(factory.stories.length, 38);
   assert.deepEqual(factory.stories.filter((story) => story.dependsOn.length === 0).map((story) => story.id), ["TS-001", "TS-003"]);
 });
 
