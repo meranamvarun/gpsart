@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -20,4 +20,21 @@ test("production bundle scan rejects prototype success labels and fixture identi
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("production pages declare a build-owned SVG favicon", async () => {
+  const pages = ["index.html", "login.html", "routes.html", "saved.html", "screens.html"];
+
+  for (const page of pages) {
+    const html = await readFile(new URL(`../${page}`, import.meta.url), "utf8");
+    assert.match(
+      html,
+      /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml">/,
+      `${page} must declare the favicon and its media type`,
+    );
+  }
+
+  const favicon = new URL("../public/favicon.svg", import.meta.url);
+  await access(favicon);
+  assert.match(await readFile(favicon, "utf8"), /^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
 });
