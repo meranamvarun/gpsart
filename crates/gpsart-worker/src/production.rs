@@ -456,7 +456,9 @@ fn forced_completion(
         SearchStop::ProviderTaskFailed => Ok(Some(Completion::Failed {
             code: JobOutcomeCode::ProviderUnavailable,
         })),
-        SearchStop::None if search_wall_time_exhausted => Ok(Some(Completion::TimedOut)),
+        SearchStop::None if search_wall_time_exhausted => Ok(Some(Completion::NoMatch {
+            code: JobOutcomeCode::ExhaustedBudget,
+        })),
         SearchStop::None => Ok(None),
     }
 }
@@ -583,6 +585,12 @@ mod tests {
         assert_eq!(
             forced_completion(SearchStop::DeadlineExceeded, false).unwrap(),
             Some(Completion::TimedOut)
+        );
+        assert_eq!(
+            forced_completion(SearchStop::None, true).unwrap(),
+            Some(Completion::NoMatch {
+                code: JobOutcomeCode::ExhaustedBudget,
+            })
         );
         assert!(matches!(
             forced_completion(SearchStop::JobStateUnavailable, false),

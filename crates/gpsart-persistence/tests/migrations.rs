@@ -101,8 +101,8 @@ async fn seed_owned_request(pool: &PgPool) {
         ) VALUES (
           '10000000-0000-0000-0000-000000000001',
           '00000000-0000-0000-0000-000000000001',
-          ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326),
-          ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326),
+          ST_SetSRID(ST_MakePoint(0, 0), 4326),
+          ST_SetSRID(ST_MakePoint(0, 0), 4326),
           'walking-v1', 'coverage-v1', 'map-v1', now() + interval '1 day'
         );
         INSERT INTO planning_requests (
@@ -115,7 +115,7 @@ async fn seed_owned_request(pool: &PgPool) {
           '00000000-0000-0000-0000-000000000001',
           '10000000-0000-0000-0000-000000000001', 1, 'request-one',
           decode(repeat('01', 32), 'hex'),
-          ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326), 5000, 250,
+          ST_SetSRID(ST_MakePoint(0, 0), 4326), 5000, 250,
           '{"activity":"walking"}'::jsonb, 'walking-v1', 'coverage-v1', 'heart', '1',
           'map-v1', 'algorithm-v1', true, now() + interval '1 day'
         );
@@ -160,8 +160,8 @@ async fn claimed_job_input_is_exactly_versioned_and_lease_fenced() {
         Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()
     );
     assert_eq!(input.request_revision, 1);
-    assert_eq!(input.confirmed_longitude, 77.1);
-    assert_eq!(input.confirmed_latitude, 28.6);
+    assert_eq!(input.confirmed_longitude, 0.0);
+    assert_eq!(input.confirmed_latitude, 0.0);
     assert_eq!(input.requested_distance_metres, 5_000);
     assert_eq!(input.distance_tolerance_metres, 250);
     assert!(input.return_to_start);
