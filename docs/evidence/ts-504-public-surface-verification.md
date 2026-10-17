@@ -21,6 +21,7 @@ The tests were added before the implementation. The first focused run failed fiv
 - `npm run build`: passed; emitted production assets passed the hardened bundle scan.
 - `npm run test:visual-shell`: 2 passed.
 - `npm run test:a11y`: passed at 360/768/1440 px with no serious or critical axe findings on the audited surfaces.
+- `npm run factory:verify`: not completed. After the frontend build passed, the first full run found a stale generated `crossbeam-utils` executable left by a timed-out parallel worktree gate. A scoped `cargo clean -p crossbeam-utils` repaired that artifact, but the isolated rerun exceeded its 10-minute bound while `cargo test --workspace` was still active. No full-gate pass is claimed.
 - Mobile and desktop screenshots were visually inspected: navigation remains reachable, no authentication control appears, and the scope copy is readable without overflow.
 
 ## Evidence
