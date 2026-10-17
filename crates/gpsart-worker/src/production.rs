@@ -183,8 +183,7 @@ impl ProductionWorker {
         let elapsed = search_started.elapsed();
         let forced_completion = forced_completion(
             SearchStop::from_u8(stop_reason.load(Ordering::Acquire)),
-            matches!(&outcome, Ok(MatchOutcome::NoMatch))
-                && elapsed >= prepared.config.wall_time,
+            matches!(&outcome, Ok(MatchOutcome::NoMatch)) && elapsed >= prepared.config.wall_time,
         )?;
         MetricEvent::duration(
             MetricName::SearchLatency,
