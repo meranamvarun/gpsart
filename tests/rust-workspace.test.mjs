@@ -25,3 +25,8 @@ test("both binaries register shutdown handling", async () => {
   assert.match(await read("crates/gpsart-api/src/main.rs"), /ctrl_c/);
   assert.match(await read("crates/gpsart-worker/src/main.rs"), /ctrl_c/);
 });
+
+test("the Windows Cargo wrapper pins the bundled GNU toolchain in every worktree", async () => {
+  const wrapper = await read("scripts/cargo.mjs");
+  assert.match(wrapper, /env\.RUSTUP_TOOLCHAIN\s*\?\?=\s*["']stable-x86_64-pc-windows-gnu["']/);
+});

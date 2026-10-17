@@ -21,6 +21,7 @@ if (process.platform === "win32") {
   const linker = join(llvmBin, "x86_64-w64-mingw32-clang.exe");
   const compatibility = join(root, ".tools", "gnu-compat");
   if (existsSync(linker) && existsSync(compatibility)) {
+    env.RUSTUP_TOOLCHAIN ??= "stable-x86_64-pc-windows-gnu";
     env.PATH = `${llvmBin}${delimiter}${env.PATH ?? ""}`;
     env.CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = linker;
     env.RUSTFLAGS = `${env.RUSTFLAGS ?? ""} -Lnative=${compatibility}`.trim();
