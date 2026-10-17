@@ -1,8 +1,8 @@
 # TS-503 production routing configuration handoff
 
-**Version:** 1  
-**Producer:** `codex/ts503-dev`  
-**Consumers:** TS-501, TS-505, TS-509, TS-601  
+**Version:** 1
+**Producer:** `codex/ts503-dev`
+**Consumers:** TS-501, TS-505, TS-509, TS-601
 **Compatibility:** additive loader and deployment input; manifest, graph, coverage, and map-data versions are immutable. A successor must use new identifiers and retain old artifacts.
 
 ## Published contract

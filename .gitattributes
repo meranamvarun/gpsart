@@ -1,3 +1,5 @@
 crates/gpsart-routing/data/*.json text eol=lf
 crates/gpsart-routing/data/*.sha256 text eol=lf
+ops/routing/*.json text eol=lf
+scripts/extract-osm-pedestrian-pilot-snapshot.mjs text eol=lf
 tests/fixtures/route-export.gpx text eol=lf

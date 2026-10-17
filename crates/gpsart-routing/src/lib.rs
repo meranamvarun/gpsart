@@ -683,6 +683,17 @@ pub struct LocalOsmGraph {
     source: OsmSnapshotSource,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SnapshotProvenance<'a> {
+    pub snapshot_id: &'a str,
+    pub source_api: &'a str,
+    pub source_url: &'a str,
+    pub source_retrieved_at: &'a str,
+    pub source_raw_sha256: &'a str,
+    pub attribution: &'a str,
+    pub license: &'a str,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OsmSnapshot {
@@ -854,24 +865,14 @@ impl LocalOsmGraph {
         &self.data_version
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn has_provenance(
-        &self,
-        snapshot_id: &str,
-        source_api: &str,
-        source_url: &str,
-        source_retrieved_at: &str,
-        source_raw_sha256: &str,
-        attribution: &str,
-        license: &str,
-    ) -> bool {
-        self.snapshot_id == snapshot_id
-            && self.source.api == source_api
-            && self.source.url == source_url
-            && self.source.retrieved_at == source_retrieved_at
-            && self.source.raw_sha256 == source_raw_sha256
-            && self.source.attribution == attribution
-            && self.source.license == license
+    pub fn has_provenance(&self, expected: SnapshotProvenance<'_>) -> bool {
+        self.snapshot_id == expected.snapshot_id
+            && self.source.api == expected.source_api
+            && self.source.url == expected.source_url
+            && self.source.retrieved_at == expected.source_retrieved_at
+            && self.source.raw_sha256 == expected.source_raw_sha256
+            && self.source.attribution == expected.attribution
+            && self.source.license == expected.license
     }
 
     pub fn all_points_within(&self, bounds: [f64; 4]) -> bool {

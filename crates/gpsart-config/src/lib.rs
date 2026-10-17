@@ -1,6 +1,6 @@
 use gpsart_domain::starts::{ConfiguredNetworkPoint, ConfiguredNetworkProvider, Coverage, Point};
 use gpsart_domain::{ActivityProfile, ProfileVersion};
-use gpsart_routing::LocalOsmGraph;
+use gpsart_routing::{LocalOsmGraph, SnapshotProvenance};
 use serde::Deserialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -291,15 +291,15 @@ impl ProductionRoutingConfig {
         let extraction_script = std::fs::read(extraction_script_path)
             .map_err(|_| ProductionRoutingError::ManifestInvalid)?;
         if LocalOsmGraph::sha256_hex(&extraction_script) != manifest.graph.extraction_script_sha256
-            || !graph.has_provenance(
-                &manifest.graph.snapshot_id,
-                &manifest.graph.source_api,
-                &manifest.graph.source_url,
-                &manifest.graph.source_retrieved_at,
-                &manifest.graph.source_raw_sha256,
-                &manifest.graph.attribution,
-                &manifest.graph.license,
-            )
+            || !graph.has_provenance(SnapshotProvenance {
+                snapshot_id: &manifest.graph.snapshot_id,
+                source_api: &manifest.graph.source_api,
+                source_url: &manifest.graph.source_url,
+                source_retrieved_at: &manifest.graph.source_retrieved_at,
+                source_raw_sha256: &manifest.graph.source_raw_sha256,
+                attribution: &manifest.graph.attribution,
+                license: &manifest.graph.license,
+            })
             || !graph.all_points_within(manifest.coverage.bounds)
         {
             return Err(ProductionRoutingError::ManifestInvalid);
