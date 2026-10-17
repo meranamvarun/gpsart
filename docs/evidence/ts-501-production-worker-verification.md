@@ -21,5 +21,7 @@ Date: 17 October 2026
 
 Independent QA rejected the initial implementation and identified immutable-start, terminal-classification,
 database-failure, lease-race, configured-limit, clean-checkout, and documentation defects. Commits
-`6385ee0` and `58a72a7` correct those findings. QA re-review and the required privileged PostgreSQL
-acceptance execution remain pending, so TS-501 remains claimed rather than in review.
+`6385ee0`, `58a72a7`, and `4d973d2` correct those findings. Final independent code re-review passed,
+including focused worker/configuration/persistence checks. The required privileged PostgreSQL execution
+and several AC6 production-worker/PostgreSQL failure-path scenarios remain missing, so TS-501 remains
+claimed rather than in review and no final QA approval is recorded.
