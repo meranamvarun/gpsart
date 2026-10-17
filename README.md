@@ -15,14 +15,10 @@ This revision is **not approved for a public production release**. The signed re
 [`docs/release/first-release-checklist.json`](docs/release/first-release-checklist.json) is `no_go`.
 The current blockers are summarized in [`docs/release/limitations.md`](docs/release/limitations.md).
 
-There is also one functional integration gap that matters when running the application:
-`gpsart-worker` checks its database dependency, but its production `take_work` operation is currently
-a no-op. The routing algorithms and candidate persistence are tested in isolation, but the deployed
-worker does not yet lease queued jobs, run the routing algorithm, and publish candidates. Therefore,
-the connected application can create a private session, load the catalogue, resolve/confirm a start,
-and submit/cancel/query a job, but a submitted job will not progress to generated route results.
-Do not claim that all end-to-end route-generation features work in production until that wiring and
-the release blockers are completed and independently verified.
+The production worker now leases queued jobs, runs the checksum-pinned local routing graph, and
+publishes lease-fenced candidate snapshots. That implementation is not by itself a production
+approval: the connected release journey, deployment, performance, recovery, provider, and
+independent release gates listed in the release checklist still remain fail-closed.
 
 Google sign-in and place search are also UI concepts only. Guest sessions are implemented; Google
 OAuth and a geocoder are not connected. Device-saved routes use IndexedDB and remain local to the
@@ -151,12 +147,15 @@ Start the worker in another terminal if you want to exercise its readiness/recon
 
 ```powershell
 $env:GPSART_DATABASE_URL = "postgres://postgres:change-me@127.0.0.1:5432/gpsart"
+$env:GPSART_COVERAGE_VERSION = "bengaluru-central-pilot-v1"
+$env:GPSART_ROUTING_GRAPH_PATH = "$PWD/crates/gpsart-routing/data/bengaluru-central-osm-v3.json"
+$env:GPSART_ROUTING_GRAPH_SHA256_PATH = "$PWD/crates/gpsart-routing/data/bengaluru-central-osm-v3.sha256"
 $env:RUST_LOG = "info"
 cargo run -p gpsart-worker
 ```
 
-Starting the worker does not remove the route-generation limitation described at the top of this
-README.
+The worker fails closed if its graph, checksum, coverage version, or database configuration is
+missing or inconsistent. A non-secret deployment example is tracked in `ops/worker.env.example`.
 
 ### 4. Serve the built client and provide same-origin HTTPS
 
@@ -253,8 +252,7 @@ Deploy:
 
 - `dist/client/` as immutable static files;
 - `target/release/gpsart-api` as the API service;
-- `target/release/gpsart-worker` only with the known no-op limitation, or after reviewed job-execution
-  wiring lands; and
+- `target/release/gpsart-worker` with its reviewed checksum-pinned graph and non-secret settings;
 - a backed-up PostgreSQL/PostGIS database with migrations applied as a separate release step.
 
 On Windows, Rust binaries have an `.exe` suffix. Build on the same OS/architecture/libc target used

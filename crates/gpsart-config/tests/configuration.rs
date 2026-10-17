@@ -12,10 +12,13 @@ fn valid() -> Vec<(String, String)> {
 
 #[test]
 fn worker_database_configuration_does_not_require_an_api_bind_address() {
-    let config =
-        DatabaseConfig::from_pairs([("GPSART_DATABASE_URL", "postgres://app:secret@db/gpsart")])
-            .expect("worker config");
+    let config = DatabaseConfig::from_pairs([
+        ("GPSART_DATABASE_URL", "postgres://app:secret@db/gpsart"),
+        ("GPSART_MAX_PROVIDER_REQUESTS", "7"),
+    ])
+    .expect("worker config");
     assert!(!format!("{config:?}").contains("secret"));
+    assert_eq!(config.workload_limits.max_provider_requests, 7);
 }
 
 #[test]

@@ -121,6 +121,28 @@ impl WorkerDependencies {
             }),
         }
     }
+
+    pub fn for_test_with_lease_loss(
+        checks: Arc<AtomicUsize>,
+        work_attempts: Arc<AtomicUsize>,
+    ) -> Self {
+        Self {
+            check: Arc::new(move || {
+                checks.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            take_work: Arc::new(move || {
+                let attempt = work_attempts.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    if attempt == 0 {
+                        Err(WorkerError::LeaseLost)
+                    } else {
+                        Ok(())
+                    }
+                })
+            }),
+        }
+    }
 }
 
 pub async fn run_until_shutdown(
@@ -163,7 +185,11 @@ pub async fn run_until_shutdown(
                         }
                         result = &mut work => match result {
                             Ok(()) => {}
-                            Err(WorkerError::DependencyUnavailable | WorkerError::JobStateUnavailable) => continue 'reconnect,
+                            Err(
+                                WorkerError::DependencyUnavailable
+                                | WorkerError::JobStateUnavailable
+                                | WorkerError::LeaseLost,
+                            ) => continue 'reconnect,
                             Err(error) => return Err(error),
                         }
                     }

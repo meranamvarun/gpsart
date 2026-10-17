@@ -27,3 +27,13 @@ node scripts/cargo.mjs clippy -p gpsart-worker -p gpsart-persistence --all-targe
 ```
 
 PostgreSQL integration requires `DATABASE_URL` to name an administrator role able to create isolated databases. The tests deliberately fail rather than downgrade to a shared schema when that role lacks `CREATEDB`.
+
+## Example
+
+Given a queued heart request pinned to `bengaluru-central-pilot-v1`, an exact E7 confirmed start,
+and the map-data version produced by the configured graph checksum, the worker loads that immutable
+request revision, reserves each provider call durably, and publishes a validated snapshot plus the
+terminal success outcome in one lease-fenced transaction. If the stored coverage or map version is
+unknown, the start is not exactly representable, the lease is lost, or the database cannot reserve a
+provider call, no candidate is published. The tracked non-secret runtime shape is
+`ops/worker.env.example`; the database URL must come from the deployment secret store.

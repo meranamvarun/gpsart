@@ -10,9 +10,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = DatabaseConfig::from_env()?;
     let graph_path = PathBuf::from(required_env("GPSART_ROUTING_GRAPH_PATH")?);
     let checksum_path = PathBuf::from(required_env("GPSART_ROUTING_GRAPH_SHA256_PATH")?);
-    let worker =
-        ProductionWorker::connect(config.database_url.expose(), &graph_path, &checksum_path)
-            .await?;
+    let coverage_policy_version = required_env("GPSART_COVERAGE_VERSION")?;
+    let worker = ProductionWorker::connect(
+        config.database_url.expose(),
+        &graph_path,
+        &checksum_path,
+        &coverage_policy_version,
+        config.workload_limits.clone(),
+    )
+    .await?;
     let dependencies = WorkerDependencies::postgres(
         PostgresProbe::new(
             config.database_url.expose().to_owned(),

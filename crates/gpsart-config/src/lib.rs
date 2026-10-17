@@ -26,6 +26,7 @@ pub struct AppConfig {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DatabaseConfig {
     pub database_url: SecretString,
+    pub workload_limits: WorkloadLimits,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -202,6 +203,7 @@ impl DatabaseConfig {
             .collect();
         Ok(Self {
             database_url: parse_database_url(&values)?,
+            workload_limits: WorkloadLimits::from_values(&values)?,
         })
     }
 }

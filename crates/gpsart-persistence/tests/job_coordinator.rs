@@ -152,9 +152,8 @@ fn deadline_publishes_only_validated_candidates_otherwise_times_out() {
     ));
     jobs.complete(
         lease,
-        Completion::Succeeded {
-            candidate_ids: vec![],
-            budget_exhausted: true,
+        Completion::NoMatch {
+            code: JobOutcomeCode::InsufficientVisualMatch,
         },
         now + Duration::from_secs(10),
     )

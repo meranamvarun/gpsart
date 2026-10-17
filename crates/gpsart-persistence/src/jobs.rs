@@ -390,6 +390,11 @@ impl InMemoryJobCoordinator {
             return Err(JobError::Terminal);
         }
         require_lease(job, &lease, now)?;
+        if now >= job.deadline_at {
+            job.state = JobState::TimedOut;
+            job.lease = None;
+            return Ok(());
+        }
         match completion {
             Completion::Succeeded {
                 candidate_ids,
@@ -398,9 +403,6 @@ impl InMemoryJobCoordinator {
                 job.state = JobState::Succeeded;
                 job.candidate_ids = candidate_ids;
                 job.budget_exhausted = budget_exhausted || now >= job.deadline_at;
-            }
-            Completion::Succeeded { .. } | Completion::TimedOut if now >= job.deadline_at => {
-                job.state = JobState::TimedOut
             }
             Completion::NoMatch { code }
                 if code.matches_state(JobState::NoMatch)
@@ -717,7 +719,7 @@ impl PostgresJobCoordinator {
         now: SystemTime,
     ) -> Result<ClaimedJobInput, JobError> {
         let row = sqlx::query(
-            "SELECT gj.guest_session_id, pr.revision, ST_X(rs.confirmed_start) AS confirmed_longitude, ST_Y(rs.confirmed_start) AS confirmed_latitude, pr.requested_distance_metres, pr.distance_tolerance_metres, pr.return_to_start, pr.activity_profile::text AS activity_profile_json, pr.activity_profile_version, pr.coverage_policy_version, pr.template_id, pr.template_version, pr.map_data_version, pr.algorithm_version, gj.deadline_at, pr.expires_at FROM generation_jobs gj JOIN planning_requests pr ON pr.id=gj.planning_request_id AND pr.guest_session_id=gj.guest_session_id JOIN resolved_starts rs ON rs.id=pr.resolved_start_id AND rs.guest_session_id=pr.guest_session_id WHERE gj.id=$1 AND gj.state='running' AND gj.lease_owner=$2 AND gj.attempt_count=$3 AND gj.lease_expires_at>$4 AND gj.deadline_at>$4 AND pr.expires_at>$4 AND rs.expires_at>$4 AND rs.profile_version=pr.activity_profile_version AND rs.coverage_policy_version=pr.coverage_policy_version AND rs.map_data_version=pr.map_data_version",
+            "SELECT gj.guest_session_id, pr.revision, ST_X(pr.requested_pin) AS confirmed_longitude, ST_Y(pr.requested_pin) AS confirmed_latitude, pr.requested_distance_metres, pr.distance_tolerance_metres, pr.return_to_start, pr.activity_profile::text AS activity_profile_json, pr.activity_profile_version, pr.coverage_policy_version, pr.template_id, pr.template_version, pr.map_data_version, pr.algorithm_version, gj.deadline_at, pr.expires_at FROM generation_jobs gj JOIN planning_requests pr ON pr.id=gj.planning_request_id AND pr.guest_session_id=gj.guest_session_id JOIN resolved_starts rs ON rs.id=pr.resolved_start_id AND rs.guest_session_id=pr.guest_session_id WHERE gj.id=$1 AND gj.state='running' AND gj.lease_owner=$2 AND gj.attempt_count=$3 AND gj.lease_expires_at>$4 AND gj.deadline_at>$4 AND pr.expires_at>$4 AND rs.expires_at>$4 AND rs.profile_version=pr.activity_profile_version AND rs.coverage_policy_version=pr.coverage_policy_version AND rs.map_data_version=pr.map_data_version",
         )
         .bind(lease.job_id)
         .bind(lease.worker_id)
@@ -1070,59 +1072,55 @@ impl PostgresJobCoordinator {
             row.try_get::<OffsetDateTime, _>("queued_at")
                 .map_err(|_| JobError::Unavailable)?,
         );
-        let (next, public_code, budget_exhausted, result_ids) = match completion {
-            Completion::Succeeded {
-                candidate_ids,
-                budget_exhausted,
-            } if !candidate_ids.is_empty() => {
-                let count: i64 = sqlx::query_scalar("SELECT count(*) FROM route_candidates rc JOIN generation_jobs gj ON gj.id=rc.generation_job_id JOIN planning_requests pr ON pr.id=gj.planning_request_id WHERE rc.generation_job_id=$1 AND rc.id=ANY($2) AND rc.map_data_version=pr.map_data_version AND rc.algorithm_version=pr.algorithm_version")
-                    .bind(lease.job_id).bind(candidate_ids).fetch_one(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
-                if count == candidate_ids.len() as i64 {
-                    (
-                        JobState::Succeeded,
-                        JobOutcomeCode::Succeeded,
-                        *budget_exhausted,
-                        candidate_ids.clone(),
-                    )
-                } else if now >= deadline_at {
-                    (
-                        JobState::TimedOut,
-                        JobOutcomeCode::TimedOut,
-                        true,
-                        Vec::new(),
-                    )
-                } else {
-                    return Err(JobError::InvalidInput);
-                }
-            }
-            Completion::Succeeded { .. } | Completion::TimedOut if now >= deadline_at => (
+        let (next, public_code, budget_exhausted, result_ids) = if now >= deadline_at {
+            (
                 JobState::TimedOut,
                 JobOutcomeCode::TimedOut,
                 true,
                 Vec::new(),
-            ),
-            Completion::NoMatch { code }
-                if code.matches_state(JobState::NoMatch)
-                    && *code != JobOutcomeCode::LegacyUnknown =>
-            {
-                (
-                    JobState::NoMatch,
-                    *code,
-                    matches!(code, JobOutcomeCode::ExhaustedBudget),
-                    Vec::new(),
-                )
-            }
-            Completion::Failed { code }
-                if code.matches_state(JobState::Failed)
-                    && *code != JobOutcomeCode::LegacyUnknown =>
-            {
-                (JobState::Failed, *code, false, Vec::new())
-            }
-            Completion::Succeeded { .. }
-            | Completion::NoMatch { .. }
-            | Completion::Failed { .. }
-            | Completion::TimedOut => {
-                return Err(JobError::InvalidInput);
+            )
+        } else {
+            match completion {
+                Completion::Succeeded {
+                    candidate_ids,
+                    budget_exhausted,
+                } if !candidate_ids.is_empty() => {
+                    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM route_candidates rc JOIN generation_jobs gj ON gj.id=rc.generation_job_id JOIN planning_requests pr ON pr.id=gj.planning_request_id WHERE rc.generation_job_id=$1 AND rc.id=ANY($2) AND rc.map_data_version=pr.map_data_version AND rc.algorithm_version=pr.algorithm_version")
+                    .bind(lease.job_id).bind(candidate_ids).fetch_one(&mut *tx).await.map_err(|_| JobError::Unavailable)?;
+                    if count == candidate_ids.len() as i64 {
+                        (
+                            JobState::Succeeded,
+                            JobOutcomeCode::Succeeded,
+                            *budget_exhausted,
+                            candidate_ids.clone(),
+                        )
+                    } else {
+                        return Err(JobError::InvalidInput);
+                    }
+                }
+                Completion::NoMatch { code }
+                    if code.matches_state(JobState::NoMatch)
+                        && *code != JobOutcomeCode::LegacyUnknown =>
+                {
+                    (
+                        JobState::NoMatch,
+                        *code,
+                        matches!(code, JobOutcomeCode::ExhaustedBudget),
+                        Vec::new(),
+                    )
+                }
+                Completion::Failed { code }
+                    if code.matches_state(JobState::Failed)
+                        && *code != JobOutcomeCode::LegacyUnknown =>
+                {
+                    (JobState::Failed, *code, false, Vec::new())
+                }
+                Completion::Succeeded { .. }
+                | Completion::NoMatch { .. }
+                | Completion::Failed { .. }
+                | Completion::TimedOut => {
+                    return Err(JobError::InvalidInput);
+                }
             }
         };
         let state_name = match next {

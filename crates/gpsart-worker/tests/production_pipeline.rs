@@ -1,3 +1,4 @@
+use gpsart_config::WorkloadLimits;
 use gpsart_persistence::{
     MIGRATOR,
     jobs::{JobState, PostgresJobCoordinator},
@@ -82,6 +83,8 @@ async fn production_worker_executes_real_heart_and_text_jobs_without_injected_ca
         &database_url,
         &data.join("bengaluru-central-osm-v3.json"),
         &data.join("bengaluru-central-osm-v3.sha256"),
+        "pilot-v1",
+        WorkloadLimits::default(),
     )
     .await
     .unwrap();

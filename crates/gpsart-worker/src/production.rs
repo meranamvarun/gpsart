@@ -1,5 +1,6 @@
 use crate::{WorkerError, run_provider_call};
 use async_trait::async_trait;
+use gpsart_config::WorkloadLimits;
 use gpsart_domain::{
     Metres, RouteRequestProfile,
     templates::{Category, embedded_catalogue},
@@ -18,7 +19,10 @@ use gpsart_routing::{
 use std::{
     fs,
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
     time::{Duration, Instant, SystemTime},
 };
 use uuid::Uuid;
@@ -30,6 +34,7 @@ pub struct ProductionWorker {
     worker_id: Uuid,
     jobs: PostgresJobCoordinator,
     graph: Arc<LocalOsmGraph>,
+    coverage_policy_version: Arc<str>,
 }
 
 impl ProductionWorker {
@@ -37,19 +42,25 @@ impl ProductionWorker {
         database_url: &str,
         graph_path: &Path,
         checksum_path: &Path,
+        coverage_policy_version: &str,
+        limits: WorkloadLimits,
     ) -> Result<Self, WorkerError> {
+        if coverage_policy_version.trim().is_empty() {
+            return Err(WorkerError::InvalidConfiguration);
+        }
         let graph_bytes = fs::read(graph_path).map_err(|_| WorkerError::InvalidConfiguration)?;
         let checksum =
             fs::read_to_string(checksum_path).map_err(|_| WorkerError::InvalidConfiguration)?;
         let graph = LocalOsmGraph::from_json(&graph_bytes, checksum.trim())
             .map_err(|_| WorkerError::InvalidConfiguration)?;
-        let jobs = PostgresJobCoordinator::connect(database_url)
+        let jobs = PostgresJobCoordinator::connect_with_limits(database_url, limits)
             .await
             .map_err(|_| WorkerError::DependencyUnavailable)?;
         Ok(Self {
             worker_id: Uuid::new_v4(),
             jobs,
             graph: Arc::new(graph),
+            coverage_policy_version: Arc::from(coverage_policy_version),
         })
     }
 
@@ -80,9 +91,15 @@ impl ProductionWorker {
                     )
                     .await;
             }
+            Err(JobError::LeaseLost | JobError::Terminal | JobError::NotFound) => return Ok(()),
             Err(error) => return Err(job_error(error)),
         };
-        let prepared = match prepare(&input, self.graph.data_version(), started) {
+        let prepared = match prepare(
+            &input,
+            self.graph.data_version(),
+            &self.coverage_policy_version,
+            started,
+        ) {
             Ok(prepared) => prepared,
             Err(()) => {
                 return self
@@ -95,14 +112,21 @@ impl ProductionWorker {
                     .await;
             }
         };
-        self.jobs
+        match self
+            .jobs
             .advance_stage(&lease, SystemTime::now(), JobStage::FittingDesign)
             .await
-            .map_err(job_error)?;
+        {
+            Ok(_) => {}
+            Err(JobError::LeaseLost | JobError::Terminal | JobError::NotFound) => return Ok(()),
+            Err(error) => return Err(job_error(error)),
+        }
+        let stop_reason = Arc::new(AtomicU8::new(SearchStop::None as u8));
         let provider = DurableGraph {
             graph: self.graph.clone(),
             jobs: self.jobs.clone(),
             lease: lease.clone(),
+            stop_reason: stop_reason.clone(),
         };
         let search = CandidateSearch::new(&provider, &provider);
         let control =
@@ -156,24 +180,43 @@ impl ProductionWorker {
                 }
             }
         };
+        let elapsed = search_started.elapsed();
+        let forced_completion = forced_completion(
+            SearchStop::from_u8(stop_reason.load(Ordering::Acquire)),
+            matches!(&outcome, Ok(MatchOutcome::NoMatch))
+                && elapsed >= prepared.config.wall_time,
+        )?;
         MetricEvent::duration(
             MetricName::SearchLatency,
             Correlation::for_job(lease.job_id).with_attempt(lease.attempt),
-            search_started.elapsed(),
+            elapsed,
             None,
         )
-        .with_result_class(match &outcome {
-            Ok(MatchOutcome::Match(_)) => "match",
-            Ok(MatchOutcome::NoMatch) => "no_match",
-            Err(CandidateError::Cancelled | CandidateError::Routing(RoutingError::Cancelled)) => {
-                "cancelled"
-            }
-            Err(CandidateError::Routing(RoutingError::DeadlineExceeded)) => "timed_out",
-            Err(CandidateError::Routing(RoutingError::Unavailable)) => "provider_unavailable",
-            Err(CandidateError::Routing(RoutingError::BudgetExhausted)) => "exhausted_budget",
-            Err(_) => "failed",
+        .with_result_class(match &forced_completion {
+            Some(Completion::TimedOut) => "timed_out",
+            Some(Completion::NoMatch {
+                code: JobOutcomeCode::ExhaustedBudget,
+            }) => "exhausted_budget",
+            Some(Completion::Failed {
+                code: JobOutcomeCode::ProviderUnavailable,
+            }) => "provider_unavailable",
+            Some(_) => "failed",
+            None => match &outcome {
+                Ok(MatchOutcome::Match(_)) => "match",
+                Ok(MatchOutcome::NoMatch) => "no_match",
+                Err(
+                    CandidateError::Cancelled | CandidateError::Routing(RoutingError::Cancelled),
+                ) => "cancelled",
+                Err(CandidateError::Routing(RoutingError::DeadlineExceeded)) => "timed_out",
+                Err(CandidateError::Routing(RoutingError::Unavailable)) => "provider_unavailable",
+                Err(CandidateError::Routing(RoutingError::BudgetExhausted)) => "exhausted_budget",
+                Err(_) => "failed",
+            },
         })
         .emit();
+        if let Some(completion) = forced_completion {
+            return self.finish(&lease, completion).await;
+        }
         let completion = match outcome {
             Ok(MatchOutcome::NoMatch) => Completion::NoMatch {
                 code: JobOutcomeCode::InsufficientVisualMatch,
@@ -192,10 +235,17 @@ impl ProductionWorker {
                 code: JobOutcomeCode::AttemptsExhausted,
             },
             Ok(MatchOutcome::Match(candidate)) => {
-                self.jobs
+                match self
+                    .jobs
                     .advance_stage(&lease, SystemTime::now(), JobStage::ComparingRoutes)
                     .await
-                    .map_err(job_error)?;
+                {
+                    Ok(_) => {}
+                    Err(JobError::LeaseLost | JobError::Terminal | JobError::NotFound) => {
+                        return Ok(());
+                    }
+                    Err(error) => return Err(job_error(error)),
+                }
                 let scored = score_candidate(
                     *candidate,
                     &prepared.template,
@@ -262,8 +312,14 @@ struct Prepared {
     time_left: Duration,
 }
 
-fn prepare(input: &ClaimedJobInput, graph_version: &str, now: SystemTime) -> Result<Prepared, ()> {
+fn prepare(
+    input: &ClaimedJobInput,
+    graph_version: &str,
+    coverage_policy_version: &str,
+    now: SystemTime,
+) -> Result<Prepared, ()> {
     if input.map_data_version != graph_version
+        || input.coverage_policy_version != coverage_policy_version
         || input.algorithm_version != SUPPORTED_ALGORITHM_VERSION
         || !input.return_to_start
     {
@@ -318,7 +374,11 @@ fn degrees_to_e7(value: f64, limit: f64) -> Result<i32, ()> {
     if scaled < f64::from(i32::MIN) || scaled > f64::from(i32::MAX) {
         return Err(());
     }
-    Ok(scaled.round() as i32)
+    let rounded = scaled.round();
+    if (scaled - rounded).abs() > f64::EPSILON * scaled.abs().max(1.0) {
+        return Err(());
+    }
+    Ok(rounded as i32)
 }
 
 fn calibrated_config(category: Category, time_left: Duration) -> HeartSearchConfig {
@@ -359,6 +419,47 @@ struct DurableGraph {
     graph: Arc<LocalOsmGraph>,
     jobs: PostgresJobCoordinator,
     lease: JobLease,
+    stop_reason: Arc<AtomicU8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum SearchStop {
+    None = 0,
+    BudgetExhausted = 1,
+    DeadlineExceeded = 2,
+    JobStateUnavailable = 3,
+    ProviderTaskFailed = 4,
+}
+
+impl SearchStop {
+    const fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::BudgetExhausted,
+            2 => Self::DeadlineExceeded,
+            3 => Self::JobStateUnavailable,
+            4 => Self::ProviderTaskFailed,
+            _ => Self::None,
+        }
+    }
+}
+
+fn forced_completion(
+    stop: SearchStop,
+    search_wall_time_exhausted: bool,
+) -> Result<Option<Completion>, WorkerError> {
+    match stop {
+        SearchStop::JobStateUnavailable => Err(WorkerError::JobStateUnavailable),
+        SearchStop::BudgetExhausted => Ok(Some(Completion::NoMatch {
+            code: JobOutcomeCode::ExhaustedBudget,
+        })),
+        SearchStop::DeadlineExceeded => Ok(Some(Completion::TimedOut)),
+        SearchStop::ProviderTaskFailed => Ok(Some(Completion::Failed {
+            code: JobOutcomeCode::ProviderUnavailable,
+        })),
+        SearchStop::None if search_wall_time_exhausted => Ok(Some(Completion::TimedOut)),
+        SearchStop::None => Ok(None),
+    }
 }
 
 impl AnchorMatch for DurableGraph {
@@ -382,9 +483,33 @@ impl RouteProvider for DurableGraph {
         })
         .await
         {
-            Ok(Some(result)) => result,
-            Ok(None) => Err(RoutingError::BudgetExhausted),
-            Err(_) => Err(RoutingError::Unavailable),
+            Ok(Some(Ok(path))) => Ok(path),
+            Ok(Some(Err(error))) => {
+                let reason = match error {
+                    RoutingError::BudgetExhausted => Some(SearchStop::BudgetExhausted),
+                    RoutingError::DeadlineExceeded => Some(SearchStop::DeadlineExceeded),
+                    _ => None,
+                };
+                if let Some(reason) = reason {
+                    self.stop_reason.store(reason as u8, Ordering::Release);
+                }
+                Err(error)
+            }
+            Ok(None) => {
+                self.stop_reason
+                    .store(SearchStop::BudgetExhausted as u8, Ordering::Release);
+                Err(RoutingError::BudgetExhausted)
+            }
+            Err(WorkerError::JobStateUnavailable) => {
+                self.stop_reason
+                    .store(SearchStop::JobStateUnavailable as u8, Ordering::Release);
+                Err(RoutingError::Unavailable)
+            }
+            Err(_) => {
+                self.stop_reason
+                    .store(SearchStop::ProviderTaskFailed as u8, Ordering::Release);
+                Err(RoutingError::Unavailable)
+            }
         }
     }
 }
@@ -427,18 +552,42 @@ mod tests {
     #[test]
     fn immutable_input_validation_rejects_unknown_versions_and_malformed_values() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
-        assert!(prepare(&input(), "map-v1", now).is_ok());
+        assert!(prepare(&input(), "map-v1", "pilot-v1", now).is_ok());
         let mut wrong_map = input();
         wrong_map.map_data_version = "map-v2".into();
-        assert!(prepare(&wrong_map, "map-v1", now).is_err());
+        assert!(prepare(&wrong_map, "map-v1", "pilot-v1", now).is_err());
         let mut wrong_template = input();
         wrong_template.template_version = 99;
-        assert!(prepare(&wrong_template, "map-v1", now).is_err());
+        assert!(prepare(&wrong_template, "map-v1", "pilot-v1", now).is_err());
         let mut malformed_profile = input();
         malformed_profile.activity_profile_json = "{}".into();
-        assert!(prepare(&malformed_profile, "map-v1", now).is_err());
+        assert!(prepare(&malformed_profile, "map-v1", "pilot-v1", now).is_err());
         let mut unsupported_finish = input();
         unsupported_finish.return_to_start = false;
-        assert!(prepare(&unsupported_finish, "map-v1", now).is_err());
+        assert!(prepare(&unsupported_finish, "map-v1", "pilot-v1", now).is_err());
+        let mut wrong_coverage = input();
+        wrong_coverage.coverage_policy_version = "unknown-v9".into();
+        assert!(prepare(&wrong_coverage, "map-v1", "pilot-v1", now).is_err());
+        let mut noncanonical_start = input();
+        noncanonical_start.confirmed_longitude = 77.59401101;
+        assert!(prepare(&noncanonical_start, "map-v1", "pilot-v1", now).is_err());
+    }
+
+    #[test]
+    fn swallowed_search_limits_are_restored_to_truthful_terminal_outcomes() {
+        assert_eq!(
+            forced_completion(SearchStop::BudgetExhausted, false).unwrap(),
+            Some(Completion::NoMatch {
+                code: JobOutcomeCode::ExhaustedBudget,
+            })
+        );
+        assert_eq!(
+            forced_completion(SearchStop::DeadlineExceeded, false).unwrap(),
+            Some(Completion::TimedOut)
+        );
+        assert!(matches!(
+            forced_completion(SearchStop::JobStateUnavailable, false),
+            Err(WorkerError::JobStateUnavailable)
+        ));
     }
 }

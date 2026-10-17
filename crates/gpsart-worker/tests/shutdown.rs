@@ -62,6 +62,26 @@ async fn database_loss_while_taking_work_rechecks_before_resuming() {
 }
 
 #[tokio::test]
+async fn lease_loss_does_not_terminate_the_worker_process() {
+    let checks = Arc::new(AtomicUsize::new(0));
+    let work_attempts = Arc::new(AtomicUsize::new(0));
+    let dependencies =
+        WorkerDependencies::for_test_with_lease_loss(checks.clone(), work_attempts.clone());
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let worker = tokio::spawn(run_until_shutdown(dependencies, shutdown_rx));
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while work_attempts.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("worker should continue after a lease-loss race");
+    shutdown_tx.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    assert!(checks.load(Ordering::SeqCst) >= 2);
+}
+
+#[tokio::test]
 async fn shutdown_interrupts_in_flight_work_without_waiting_for_the_lease() {
     let checks = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(AtomicUsize::new(0));

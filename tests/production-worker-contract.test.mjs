@@ -16,15 +16,21 @@ test("the production worker delegates take_work to the durable routing pipeline"
   assert.match(production, /load_claimed_input/);
   assert.match(production, /publish_success/);
   assert.match(production, /CandidateSearch::new/);
+  assert.match(production, /connect_with_limits/);
+  assert.match(production, /JobStateUnavailable/);
 });
 
 test("production routing requires external checksum-pinned graph inputs", async () => {
-  const [main, local] = await Promise.all([
+  const [main, example] = await Promise.all([
     source("../crates/gpsart-worker/src/main.rs"),
-    source("../.tools/run-local.ps1"),
+    source("../ops/worker.env.example"),
   ]);
-  for (const variable of ["GPSART_ROUTING_GRAPH_PATH", "GPSART_ROUTING_GRAPH_SHA256_PATH"]) {
+  for (const variable of [
+    "GPSART_COVERAGE_VERSION",
+    "GPSART_ROUTING_GRAPH_PATH",
+    "GPSART_ROUTING_GRAPH_SHA256_PATH",
+  ]) {
     assert.match(main, new RegExp(variable));
-    assert.match(local, new RegExp(variable));
+    assert.match(example, new RegExp(variable));
   }
 });

@@ -147,6 +147,13 @@ async fn claimed_job_input_is_exactly_versioned_and_lease_fenced() {
         .unwrap()
         .unwrap();
 
+    sqlx::query(
+        "UPDATE resolved_starts SET confirmed_start=ST_SetSRID(ST_MakePoint(77.2,28.7),4326) WHERE id='10000000-0000-0000-0000-000000000001'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let input = coordinator.load_claimed_input(&lease, now).await.unwrap();
     assert_eq!(
         input.owner,
