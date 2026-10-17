@@ -1,6 +1,6 @@
-export const screens = ["planner", "catalogue", "generating", "results", "details", "saved", "no-match", "coverage", "error", "login", "auth-pending", "auth-error", "welcome", "account", "screens"] as const;
+export const screens = ["planner", "catalogue", "generating", "results", "details", "saved", "no-match", "coverage", "error", "screens"] as const;
 export type Screen = (typeof screens)[number];
-const reviewOnlyScreens: readonly Screen[] = ["welcome", "screens"];
+const reviewOnlyScreens: readonly Screen[] = ["screens"];
 
 export function currentScreen(hash: string, fallback: string | undefined, designReviewEnabled = false): Screen {
   const requested = hash.replace(/^#\//, "") || fallback || "planner";

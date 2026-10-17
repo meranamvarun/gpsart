@@ -77,15 +77,22 @@ try {
     if (viewport.width === 360) {
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForSelector("#plan-form");
-      const mobileSignIn = await page.evaluate(() => {
-        const control = document.querySelector('.signin');
-        const rect = control?.getBoundingClientRect();
+      const publicSurface = await page.evaluate(() => {
+        const savedControl = document.querySelector('.nav a[href="#/saved"]');
+        const rect = savedControl?.getBoundingClientRect();
         return {
-          name: control?.textContent?.trim(),
-          visible: !!rect && rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.right <= window.innerWidth,
+          savedName: savedControl?.textContent?.trim(),
+          savedVisible: !!rect && rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.right <= window.innerWidth,
+          hasAuthenticationControl: !!document.querySelector('.signin, .google, [href*="login"], [data-action="google"]'),
+          hasPlaceSearchControl: !!document.querySelector('[type="search"], [data-action*="search"], [aria-label*="place" i]'),
         };
       });
-      assert.deepEqual(mobileSignIn, { name: "Sign in", visible: true }, "mobile Sign in must have an accessible name and remain visible without overflowing");
+      assert.deepEqual(publicSurface, {
+        savedName: "Saved",
+        savedVisible: true,
+        hasAuthenticationControl: false,
+        hasPlaceSearchControl: false,
+      }, "mobile public navigation must expose guest saves without unsupported sign-in or place search");
 
       const focusOrder = [];
       for (let index = 0; index < 14; index += 1) {
@@ -98,15 +105,8 @@ try {
         }));
       }
       assert.equal(focusOrder[0], "Skip to content", "skip link must be first in keyboard focus order");
-      assert.ok(focusOrder.includes("Sign in"), "mobile Sign in must be keyboard reachable");
+      assert.ok(focusOrder.includes("Saved"), "mobile device-only saves must be keyboard reachable");
       assert.ok(focusOrder.some((name) => name.includes("Use my location")), "planner controls must be reachable by keyboard");
-
-      await page.focus('.signin');
-      await page.keyboard.press("Enter");
-      await page.waitForSelector('.auth-layout');
-      assert.equal(await page.evaluate(() => window.location.hash), "#/login", "mobile Sign in must navigate to login from the keyboard");
-      await page.goto(`${origin}/#/planner`, { waitUntil: "domcontentloaded" });
-      await page.waitForSelector("#plan-form");
 
       await page.focus("#design-tab-shapes");
       await page.keyboard.press("ArrowRight");
@@ -134,7 +134,7 @@ try {
       document.querySelectorAll("*").forEach((element) => { element.scrollTop = 0; element.scrollLeft = 0; });
       window.scrollTo(0, 0);
     });
-    await page.screenshot({ path: path.join(evidence, `ts-304-${viewport.name}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(evidence, `ts-504-public-surface-${viewport.name}.png`), fullPage: true });
 
     assert.ok(audit.documentWidth <= audit.viewportWidth, `${viewport.name} has page-level horizontal overflow (${audit.documentWidth} > ${audit.viewportWidth})`);
     assert.equal(audit.primaryActionVisible, true, `${viewport.name} primary action cannot be brought into view`);
@@ -145,7 +145,7 @@ try {
     await page.close();
   }
 
-  for (const surface of ["catalogue", "saved", "results", "login"]) {
+  for (const surface of ["catalogue", "saved", "results"]) {
     const page = await browser.newPage();
     await page.setViewport({ width: 360, height: 800, deviceScaleFactor: 1 });
     await page.goto(`${origin}/#/${surface}`, { waitUntil: "domcontentloaded" });
@@ -177,8 +177,18 @@ try {
     await page.close();
   }
 
-  await writeFile(path.join(evidence, "ts-304-axe-report.json"), `${JSON.stringify({ standard: "axe-core WCAG 2 A/AA, 2.1 AA, 2.2 AA", report }, null, 2)}\n`);
-  console.log(`TS-304 accessibility audit passed for planner widths ${viewports.map(({ width }) => `${width}px`).join(", ")} and catalogue/saved/results/login surfaces; no serious or critical axe findings.`);
+  for (const staleRoute of ["login", "auth-pending", "auth-error", "welcome", "account"]) {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/#/${staleRoute}?enabled=true`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#plan-form");
+    assert.equal(await page.evaluate(() => window.location.hash), `#/${staleRoute}?enabled=true`);
+    assert.equal(await page.evaluate(() => document.querySelector("#plan-form") !== null), true, `${staleRoute} must fall back to the guest planner`);
+    assert.equal(await page.evaluate(() => document.querySelector('.signin, .google, [data-action="google"]') === null), true);
+    await page.close();
+  }
+
+  await writeFile(path.join(evidence, "ts-504-public-surface-report.json"), `${JSON.stringify({ standard: "axe-core WCAG 2 A/AA, 2.1 AA, 2.2 AA", report, staleAuthenticationRoutes: "guest planner fallback" }, null, 2)}\n`);
+  console.log(`Accessibility and TS-504 public-surface audit passed for planner widths ${viewports.map(({ width }) => `${width}px`).join(", ")} and catalogue/saved/results surfaces; no serious or critical axe findings.`);
 } finally {
   await browser?.close();
   await new Promise((resolve) => server.close(resolve));

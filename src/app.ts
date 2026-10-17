@@ -25,12 +25,10 @@ import type { RouteRequest } from "./domain/planner.ts";
 import { downloadRouteSnapshotGpx } from "./domain/gpx-export.ts";
 import {
   fromMapSelection,
-  fromSearchSelection,
   parseManualCoordinates,
   requestBrowserStart,
   type ProposedStart,
 } from "./domain/start-selection.ts";
-import type { GeoPoint } from "./domain/start-resolution.ts";
 
 let state = initialState();
 let proposedStart: ProposedStart | null = null;
@@ -58,8 +56,8 @@ const workflow = new PlannerWorkflow({
 });
 
 function header(screen: string): string {
-  const plannerActive = !["saved", "login", "account", "welcome", "screens"].includes(screen);
-  return `<header class="header"><a class="brand" href="#/planner" aria-label="GPSART home">GPSART</a><nav class="nav" aria-label="Main navigation"><a href="#/planner" class="${plannerActive ? "active" : ""}"${plannerActive ? ` aria-current="page"` : ""}>Planner</a><a href="#/saved" class="${screen === "saved" ? "active" : ""}"${screen === "saved" ? ` aria-current="page"` : ""}>Saved</a></nav><div class="header-end"><span class="pilot"><i class="ph ph-leaf" aria-hidden="true"></i> Bengaluru pilot</span><a class="signin" href="#/${state.signedIn ? "account" : "login"}"${screen === "login" || screen === "account" ? ` aria-current="page"` : ""}>${state.signedIn ? "My account" : "Sign in"}</a></div></header>`;
+  const plannerActive = !["saved", "screens"].includes(screen);
+  return `<header class="header"><a class="brand" href="#/planner" aria-label="GPSART home">GPSART</a><nav class="nav" aria-label="Main navigation"><a href="#/planner" class="${plannerActive ? "active" : ""}"${plannerActive ? ` aria-current="page"` : ""}>Planner</a><a href="#/saved" class="${screen === "saved" ? "active" : ""}"${screen === "saved" ? ` aria-current="page"` : ""}>Saved</a></nav><div class="header-end"><span class="pilot"><i class="ph ph-leaf" aria-hidden="true"></i> Bengaluru pilot</span></div></header>`;
 }
 
 function focusLocator(): string | null {
@@ -321,7 +319,7 @@ function submitPlan(): void {
   const distanceKm = Number(inputValue("distance"));
   const selected = proposedStart?.label === start ? proposedStart : parseManualCoordinates(start);
   if (!selected) {
-    locationMessage = "Enter exact latitude, longitude coordinates, click the map, use location, or choose a search result.";
+    locationMessage = "Enter exact latitude, longitude coordinates, click the map, or use location.";
     const status = document.querySelector<HTMLElement>("#location-status");
     if (status) {
       status.textContent = locationMessage;
@@ -427,16 +425,8 @@ function bind(): void {
     if (button.dataset.action === "delete-saved" && button.dataset.routeId) void deleteSaved(button.dataset.routeId);
     if (button.dataset.action === "cancel-rename") renameDialog?.close();
     if (button.dataset.action === "edit-start") document.querySelector<HTMLInputElement>("#start")?.select();
-    if (button.dataset.action === "google") navigate("auth-pending");
   }));
 }
-
-window.addEventListener("gpsart:search-selection", (event) => {
-  const detail = (event as CustomEvent<{ point?: GeoPoint; label?: string }>).detail;
-  if (!detail?.point || typeof detail.label !== "string") return;
-  const selected = fromSearchSelection(detail.point, detail.label);
-  if (selected) selectStart(selected);
-});
 window.addEventListener("gpsart:session-ready", () => {
   resuming = true;
   void workflow.resume().finally(() => { resuming = false; });

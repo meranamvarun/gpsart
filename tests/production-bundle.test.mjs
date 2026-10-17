@@ -17,6 +17,13 @@ test("production bundle scan rejects prototype success labels and fixture identi
     const findings = await scanProductionBundle(root);
     assert.ok(findings.some((finding) => finding.includes("route snapshot fixture id")));
     assert.ok(findings.some((finding) => finding.includes("sample GPX action")));
+
+    await writeFile(path.join(root, "assets", "unsupported.js"), "const auth='Continue with Google'; const search='gpsart:search-selection'; const city='explore your city'; const place='choose a search result';");
+    const unsupported = await scanProductionBundle(root);
+    assert.ok(unsupported.some((finding) => finding.includes("unavailable Google sign-in surface")));
+    assert.ok(unsupported.some((finding) => finding.includes("unavailable place-search bridge")));
+    assert.ok(unsupported.some((finding) => finding.includes("unsupported citywide claim")));
+    assert.ok(unsupported.some((finding) => finding.includes("unsupported place-search copy")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

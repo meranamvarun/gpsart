@@ -9,6 +9,10 @@ const forbidden = [
   { label: "sample route label", pattern: /sample\s+route/i },
   { label: "demo route label", pattern: /demo\s+route/i },
   { label: "prototype success label", pattern: /prototype\s+success/i },
+  { label: "unavailable Google sign-in surface", pattern: /continue\s+with\s+google/i },
+  { label: "unavailable place-search bridge", pattern: /gpsart:search-selection/i },
+  { label: "unsupported citywide claim", pattern: /explore\s+your\s+city/i },
+  { label: "unsupported place-search copy", pattern: /choose\s+a\s+search\s+result/i },
 ];
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".map", ".txt"]);
 

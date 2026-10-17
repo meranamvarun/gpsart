@@ -1,0 +1,193 @@
+{
+  "standard": "axe-core WCAG 2 A/AA, 2.1 AA, 2.2 AA",
+  "report": [
+    {
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "primaryActionVisible": true,
+      "activeNavigationCurrent": true,
+      "violations": [],
+      "blockingViolations": 0,
+      "assistiveSmoke": {
+        "focusOrder": [
+          "Skip to content",
+          "GPSART home",
+          "Planner",
+          "Saved",
+          "Expand map",
+          "",
+          "Use my location",
+          "Walking",
+          "Running",
+          "Cycling",
+          "Shapes",
+          "All designs",
+          "",
+          "Return to start"
+        ],
+        "tabKeyboard": {
+          "activeId": "design-tab-text",
+          "selectedText": "true",
+          "outlineWidth": "3px"
+        },
+        "accessibleNodes": [
+          {
+            "role": "navigation",
+            "name": "Main navigation"
+          },
+          {
+            "role": "button",
+            "name": " Expand map"
+          },
+          {
+            "role": "textbox",
+            "name": "Starting point"
+          },
+          {
+            "role": "button",
+            "name": "Use my location"
+          },
+          {
+            "role": "button",
+            "name": "Design unavailable"
+          },
+          {
+            "role": "button",
+            "name": "Walking"
+          },
+          {
+            "role": "button",
+            "name": "Running"
+          },
+          {
+            "role": "button",
+            "name": "Cycling"
+          },
+          {
+            "role": "tab",
+            "name": "Shapes"
+          },
+          {
+            "role": "tab",
+            "name": "Text"
+          },
+          {
+            "role": "button",
+            "name": "Heart route design, Easy"
+          },
+          {
+            "role": "button",
+            "name": "Circle route design, Easy"
+          },
+          {
+            "role": "button",
+            "name": "Triangle route design, Easy"
+          },
+          {
+            "role": "button",
+            "name": "Star route design, Complex"
+          },
+          {
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "role": "button",
+            "name": "Zoom out"
+          }
+        ]
+      }
+    },
+    {
+      "viewport": {
+        "name": "tablet-768",
+        "width": 768,
+        "height": 900
+      },
+      "documentWidth": 768,
+      "viewportWidth": 768,
+      "primaryActionVisible": true,
+      "activeNavigationCurrent": true,
+      "violations": [],
+      "blockingViolations": 0,
+      "assistiveSmoke": null
+    },
+    {
+      "viewport": {
+        "name": "desktop-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "documentWidth": 1440,
+      "viewportWidth": 1440,
+      "primaryActionVisible": true,
+      "activeNavigationCurrent": true,
+      "violations": [],
+      "blockingViolations": 0,
+      "assistiveSmoke": null
+    },
+    {
+      "surface": "catalogue",
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "overflowingElements": [
+        {
+          "element": "div#announcer.sr-only",
+          "left": -1,
+          "right": 0
+        }
+      ],
+      "violations": [],
+      "blockingViolations": 0
+    },
+    {
+      "surface": "saved",
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "overflowingElements": [
+        {
+          "element": "div#announcer.sr-only",
+          "left": -1,
+          "right": 0
+        }
+      ],
+      "violations": [],
+      "blockingViolations": 0
+    },
+    {
+      "surface": "results",
+      "viewport": {
+        "name": "mobile-360",
+        "width": 360,
+        "height": 800
+      },
+      "documentWidth": 360,
+      "viewportWidth": 360,
+      "overflowingElements": [
+        {
+          "element": "div#announcer.sr-only",
+          "left": -1,
+          "right": 0
+        }
+      ],
+      "violations": [],
+      "blockingViolations": 0
+    }
+  ],
+  "staleAuthenticationRoutes": "guest planner fallback"
+}
