@@ -1,8 +1,11 @@
 # First-release public product scope
 
-**Record version:** 1  
-**Story:** TS-504  
-**Recorded:** 2026-10-17  
+**Record version:** 1
+
+**Story:** TS-504
+
+**Recorded:** 2026-10-17
+
 **Decision:** This scope describes the public surface only; it does not change the repository's NO-GO release decision.
 
 ## Included public capabilities
@@ -31,7 +34,8 @@
 
 I, `codex/ts504-dev`, attest that the TS-504 implementation and evidence preserve this scope and do not claim unsupported routing truth or release readiness.
 
-Signed: `codex/ts504-dev`  
+Signed: `codex/ts504-dev`
+
 Date: 2026-10-17
 
 Independent QA approval is recorded separately in `factory/stories.json`; QA, not the developer, decides whether the story may advance from `in_review` to `done`.

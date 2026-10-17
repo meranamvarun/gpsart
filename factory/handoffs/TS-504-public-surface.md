@@ -1,8 +1,11 @@
 # TS-504 public-surface handoff
 
-**Version:** 1  
-**Producer:** TS-504  
-**Consumers:** TS-602 and release verification  
+**Version:** 1
+
+**Producer:** TS-504
+
+**Consumers:** TS-602 and release verification
+
 **Compatibility:** intentionally removes unsupported authentication routes and the browser place-search bridge
 
 ## Contract
