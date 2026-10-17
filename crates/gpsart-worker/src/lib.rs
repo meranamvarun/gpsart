@@ -15,6 +15,8 @@ use std::{
 use thiserror::Error;
 use tokio::sync::watch;
 
+pub mod production;
+
 type Operation =
     Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send>> + Send + Sync>;
 
@@ -25,8 +27,9 @@ pub struct WorkerDependencies {
 }
 
 impl WorkerDependencies {
-    pub fn postgres(probe: PostgresProbe) -> Self {
+    pub fn postgres(probe: PostgresProbe, worker: production::ProductionWorker) -> Self {
         let probe = Arc::new(probe);
+        let worker = Arc::new(worker);
         Self {
             check: Arc::new(move || {
                 let probe = probe.clone();
@@ -37,7 +40,10 @@ impl WorkerDependencies {
                         .map_err(|_| WorkerError::DependencyUnavailable)
                 })
             }),
-            take_work: Arc::new(|| Box::pin(async { Ok(()) })),
+            take_work: Arc::new(move || {
+                let worker = worker.clone();
+                Box::pin(async move { worker.take_one().await })
+            }),
         }
     }
 
@@ -99,6 +105,22 @@ impl WorkerDependencies {
             }),
         }
     }
+
+    pub fn for_test_with_pending_work(checks: Arc<AtomicUsize>, started: Arc<AtomicUsize>) -> Self {
+        Self {
+            check: Arc::new(move || {
+                checks.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            take_work: Arc::new(move || {
+                let started = started.clone();
+                Box::pin(async move {
+                    started.fetch_add(1, Ordering::SeqCst);
+                    std::future::pending::<Result<(), WorkerError>>().await
+                })
+            }),
+        }
+    }
 }
 
 pub async fn run_until_shutdown(
@@ -133,10 +155,17 @@ pub async fn run_until_shutdown(
                 }
                 _ = tokio::time::sleep(Duration::from_millis(250)) => {
                     if *shutdown.borrow() { return Ok(()); }
-                    match (dependencies.take_work)().await {
-                        Ok(()) => {}
-                        Err(WorkerError::DependencyUnavailable | WorkerError::JobStateUnavailable) => continue 'reconnect,
-                        Err(error) => return Err(error),
+                    let work = (dependencies.take_work)();
+                    tokio::pin!(work);
+                    tokio::select! {
+                        changed = shutdown.changed() => {
+                            if changed.is_err() || *shutdown.borrow() { return Ok(()); }
+                        }
+                        result = &mut work => match result {
+                            Ok(()) => {}
+                            Err(WorkerError::DependencyUnavailable | WorkerError::JobStateUnavailable) => continue 'reconnect,
+                            Err(error) => return Err(error),
+                        }
                     }
                 }
             }
@@ -152,6 +181,12 @@ pub enum WorkerError {
     JobStateUnavailable,
     #[error("provider task failed before producing a result")]
     ProviderTaskFailed,
+    #[error("production worker configuration is invalid")]
+    InvalidConfiguration,
+    #[error("claimed job input is invalid or unsupported")]
+    InvalidJobInput,
+    #[error("worker lease was lost")]
+    LeaseLost,
 }
 
 #[async_trait::async_trait]

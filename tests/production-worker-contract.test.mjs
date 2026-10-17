@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const source = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test("the production worker delegates take_work to the durable routing pipeline", async () => {
+  const [library, main, production] = await Promise.all([
+    source("../crates/gpsart-worker/src/lib.rs"),
+    source("../crates/gpsart-worker/src/main.rs"),
+    source("../crates/gpsart-worker/src/production.rs"),
+  ]);
+  assert.match(library, /worker\.take_one\(\)\.await/);
+  assert.doesNotMatch(library, /take_work:\s*Arc::new\(\|\|\s*Box::pin\(async\s*\{\s*Ok\(\(\)\)\s*\}\)\)/);
+  assert.match(main, /ProductionWorker::connect/);
+  assert.match(production, /load_claimed_input/);
+  assert.match(production, /publish_success/);
+  assert.match(production, /CandidateSearch::new/);
+});
+
+test("production routing requires external checksum-pinned graph inputs", async () => {
+  const [main, local] = await Promise.all([
+    source("../crates/gpsart-worker/src/main.rs"),
+    source("../.tools/run-local.ps1"),
+  ]);
+  for (const variable of ["GPSART_ROUTING_GRAPH_PATH", "GPSART_ROUTING_GRAPH_SHA256_PATH"]) {
+    assert.match(main, new RegExp(variable));
+    assert.match(local, new RegExp(variable));
+  }
+});

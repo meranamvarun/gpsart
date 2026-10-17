@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use gpsart_domain::profile_for;
 use gpsart_routing::{CandidatePart, ManoeuvreKind, ScoredCandidate};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sqlx::{PgPool, Row, postgres::PgPoolOptions};
+use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use std::time::SystemTime;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -633,33 +633,48 @@ impl PostgresRouteSnapshotStore {
         source: &ScoredCandidate,
         expires_at: SystemTime,
     ) -> Result<(), RouteSnapshotError> {
-        snapshot
-            .validate_source(source)
-            .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
-        let created_at = SystemTime::UNIX_EPOCH
-            .checked_add(std::time::Duration::from_secs(
-                snapshot.generated_at_epoch_seconds,
-            ))
-            .ok_or(RouteSnapshotError::InvalidSnapshot)?;
-        if expires_at <= created_at {
-            return Err(RouteSnapshotError::InvalidSnapshot);
-        }
-        let start = snapshot.start();
-        let finish = snapshot.finish();
-        let geometry_json = serde_json::to_string(&snapshot.geometry)
-            .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
-        let snapshot_json =
-            serde_json::to_string(snapshot).map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
         let mut transaction = self
             .pool
             .begin()
             .await
             .map_err(|_| RouteSnapshotError::Unavailable)?;
-        let request_revision = i32::try_from(snapshot.request_revision)
-            .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
-        let candidate_version = i32::try_from(snapshot.candidate_version)
-            .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
-        let inserted = sqlx::query(
+        insert_validated_snapshot(&mut transaction, owner, snapshot, source, expires_at).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| RouteSnapshotError::Unavailable)
+    }
+}
+
+pub(crate) async fn insert_validated_snapshot(
+    transaction: &mut Transaction<'_, Postgres>,
+    owner: Uuid,
+    snapshot: &CandidateSnapshot,
+    source: &ScoredCandidate,
+    expires_at: SystemTime,
+) -> Result<(), RouteSnapshotError> {
+    snapshot
+        .validate_source(source)
+        .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
+    let created_at = SystemTime::UNIX_EPOCH
+        .checked_add(std::time::Duration::from_secs(
+            snapshot.generated_at_epoch_seconds,
+        ))
+        .ok_or(RouteSnapshotError::InvalidSnapshot)?;
+    if expires_at <= created_at {
+        return Err(RouteSnapshotError::InvalidSnapshot);
+    }
+    let start = snapshot.start();
+    let finish = snapshot.finish();
+    let geometry_json = serde_json::to_string(&snapshot.geometry)
+        .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
+    let snapshot_json =
+        serde_json::to_string(snapshot).map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
+    let request_revision = i32::try_from(snapshot.request_revision)
+        .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
+    let candidate_version = i32::try_from(snapshot.candidate_version)
+        .map_err(|_| RouteSnapshotError::InvalidSnapshot)?;
+    let inserted = sqlx::query(
             "INSERT INTO route_candidates (id, guest_session_id, generation_job_id, candidate_version, start_point, end_point, canonical_route, distance_metres, map_data_version, algorithm_version, created_at, expires_at) SELECT $1,$2,gj.id,$4,ST_SetSRID(ST_MakePoint($5,$6),4326),ST_SetSRID(ST_MakePoint($7,$8),4326),ST_SetSRID(ST_GeomFromGeoJSON($9),4326),$10,$11,$12,$13,$14 FROM generation_jobs gj JOIN planning_requests pr ON pr.id=gj.planning_request_id WHERE gj.id=$3 AND gj.guest_session_id=$2 AND pr.revision=$15 AND pr.activity_profile_version=$16 AND pr.template_id=$17 AND pr.template_version=$18 AND pr.map_data_version=$11 AND pr.algorithm_version=$12 AND $10 BETWEEN pr.requested_distance_metres - pr.distance_tolerance_metres AND pr.requested_distance_metres + pr.distance_tolerance_metres",
         )
         .bind(snapshot.id)
@@ -680,24 +695,22 @@ impl PostgresRouteSnapshotStore {
         .bind(&snapshot.versions.profile)
         .bind(&snapshot.versions.template_id)
         .bind(snapshot.versions.template.to_string())
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await
         .map_err(|_| RouteSnapshotError::Unavailable)?
         .rows_affected();
-        if inserted != 1 {
-            return Err(RouteSnapshotError::InvalidSnapshot);
-        }
-        sqlx::query("INSERT INTO route_candidate_snapshots (candidate_id, snapshot_json) VALUES ($1,$2::jsonb)")
-            .bind(snapshot.id)
-            .bind(snapshot_json)
-            .execute(&mut *transaction)
-            .await
-            .map_err(|_| RouteSnapshotError::Unavailable)?;
-        transaction
-            .commit()
-            .await
-            .map_err(|_| RouteSnapshotError::Unavailable)
+    if inserted != 1 {
+        return Err(RouteSnapshotError::InvalidSnapshot);
     }
+    sqlx::query(
+        "INSERT INTO route_candidate_snapshots (candidate_id, snapshot_json) VALUES ($1,$2::jsonb)",
+    )
+    .bind(snapshot.id)
+    .bind(snapshot_json)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| RouteSnapshotError::Unavailable)?;
+    Ok(())
 }
 
 #[async_trait]

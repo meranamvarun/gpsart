@@ -109,7 +109,7 @@ async fn seed_owned_request(pool: &PgPool) {
           id, guest_session_id, resolved_start_id, revision, idempotency_key, input_hash,
           requested_pin, requested_distance_metres, distance_tolerance_metres,
           activity_profile, activity_profile_version, coverage_policy_version, template_id, template_version,
-          map_data_version, algorithm_version, expires_at
+          map_data_version, algorithm_version, return_to_start, expires_at
         ) VALUES (
           '20000000-0000-0000-0000-000000000001',
           '00000000-0000-0000-0000-000000000001',
@@ -117,7 +117,7 @@ async fn seed_owned_request(pool: &PgPool) {
           decode(repeat('01', 32), 'hex'),
           ST_SetSRID(ST_MakePoint(77.1, 28.6), 4326), 5000, 250,
           '{"activity":"walking"}'::jsonb, 'walking-v1', 'coverage-v1', 'heart', '1',
-          'map-v1', 'algorithm-v1', now() + interval '1 day'
+          'map-v1', 'algorithm-v1', true, now() + interval '1 day'
         );
         INSERT INTO generation_jobs (
           id, guest_session_id, planning_request_id, deadline_at
@@ -131,6 +131,49 @@ async fn seed_owned_request(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("owned request fixture inserts");
+}
+
+#[tokio::test]
+async fn claimed_job_input_is_exactly_versioned_and_lease_fenced() {
+    let Some((admin, pool, database_name)) = isolated_database("claimed_job_input").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(30))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let input = coordinator.load_claimed_input(&lease, now).await.unwrap();
+    assert_eq!(
+        input.owner,
+        Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()
+    );
+    assert_eq!(input.request_revision, 1);
+    assert_eq!(input.confirmed_longitude, 77.1);
+    assert_eq!(input.confirmed_latitude, 28.6);
+    assert_eq!(input.requested_distance_metres, 5_000);
+    assert_eq!(input.distance_tolerance_metres, 250);
+    assert!(input.return_to_start);
+    assert_eq!(input.activity_profile_version, "walking-v1");
+    assert_eq!(input.coverage_policy_version, "coverage-v1");
+    assert_eq!(input.template_id, "heart");
+    assert_eq!(input.template_version, 1);
+    assert_eq!(input.map_data_version, "map-v1");
+    assert_eq!(input.algorithm_version, "algorithm-v1");
+
+    let stale = gpsart_persistence::jobs::JobLease {
+        worker_id: Uuid::new_v4(),
+        ..lease
+    };
+    assert_eq!(
+        coordinator.load_claimed_input(&stale, now).await,
+        Err(JobError::LeaseLost)
+    );
+    drop_database(admin, pool, &database_name).await;
 }
 
 #[tokio::test]
@@ -870,6 +913,100 @@ async fn complete_candidate_snapshot_round_trips_immutably_and_owner_scoped() {
         .execute(&pool)
         .await
         .is_err()
+    );
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
+async fn candidate_snapshot_and_success_outcome_publish_atomically_under_the_lease() {
+    let Some((admin, pool, database_name)) = isolated_database("atomic_worker_success").await
+    else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let now = SystemTime::now();
+    let lease = coordinator
+        .claim(Uuid::new_v4(), now, Duration::from_secs(30))
+        .await
+        .unwrap()
+        .unwrap();
+    let source = support::scored_candidate("map-v1", 417).await;
+    let snapshot = CandidateSnapshot::from_scored(
+        &source,
+        SnapshotIdentity {
+            id: Uuid::new_v4(),
+            generation_job_id: lease.job_id,
+            candidate_version: 1,
+            request_revision: 1,
+            generated_at_epoch_seconds: now
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        },
+    )
+    .unwrap();
+
+    let stale = gpsart_persistence::jobs::JobLease {
+        worker_id: Uuid::new_v4(),
+        ..lease.clone()
+    };
+    assert_eq!(
+        coordinator
+            .publish_success(
+                &stale,
+                owner,
+                &snapshot,
+                &source,
+                now + Duration::from_secs(86_400),
+                now,
+            )
+            .await,
+        Err(JobError::LeaseLost),
+    );
+    let unpublished: i64 = sqlx::query_scalar("SELECT count(*) FROM route_candidates WHERE id=$1")
+        .bind(snapshot.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(unpublished, 0);
+
+    assert_eq!(
+        coordinator
+            .publish_success(
+                &lease,
+                owner,
+                &snapshot,
+                &source,
+                now + Duration::from_secs(86_400),
+                now,
+            )
+            .await
+            .unwrap(),
+        gpsart_persistence::jobs::JobState::Succeeded,
+    );
+    let status = coordinator.status(owner, lease.job_id).await.unwrap();
+    assert_eq!(status.result_ids, vec![snapshot.id]);
+    assert_eq!(
+        PostgresRouteSnapshotStore::new(pool.clone())
+            .get(owner, snapshot.id)
+            .await
+            .unwrap(),
+        snapshot
+    );
+    assert_eq!(
+        coordinator
+            .publish_success(
+                &lease,
+                owner,
+                &snapshot,
+                &source,
+                now + Duration::from_secs(86_400),
+                now,
+            )
+            .await,
+        Err(JobError::Terminal),
     );
     drop_database(admin, pool, &database_name).await;
 }

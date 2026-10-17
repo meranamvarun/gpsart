@@ -7,10 +7,16 @@ version.workspace = true
 [dependencies]
 async-trait.workspace = true
 gpsart-config = { path = "../gpsart-config" }
+gpsart-domain = { path = "../gpsart-domain" }
 gpsart-observability = { path = "../gpsart-observability" }
 gpsart-persistence = { path = "../gpsart-persistence" }
+gpsart-routing = { path = "../gpsart-routing" }
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true
 

@@ -1,5 +1,7 @@
+use crate::routes::{CandidateSnapshot, RouteSnapshotError, insert_validated_snapshot};
 use gpsart_config::WorkloadLimits;
 use gpsart_observability::{Correlation, MetricEvent, MetricName};
+use gpsart_routing::ScoredCandidate;
 use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use std::{
     collections::HashMap,
@@ -154,6 +156,26 @@ pub struct JobLease {
     pub worker_id: Uuid,
     pub attempt: u32,
     pub lease_expires_at: SystemTime,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClaimedJobInput {
+    pub owner: Uuid,
+    pub request_revision: u32,
+    pub confirmed_longitude: f64,
+    pub confirmed_latitude: f64,
+    pub requested_distance_metres: u32,
+    pub distance_tolerance_metres: u32,
+    pub return_to_start: bool,
+    pub activity_profile_json: String,
+    pub activity_profile_version: String,
+    pub coverage_policy_version: String,
+    pub template_id: String,
+    pub template_version: u32,
+    pub map_data_version: String,
+    pub algorithm_version: String,
+    pub deadline_at: SystemTime,
+    pub expires_at: SystemTime,
 }
 
 struct AutomaticTerminalMetric {
@@ -686,6 +708,110 @@ impl PostgresJobCoordinator {
         }))
     }
 
+    /// Loads the immutable request bound to a currently-held lease. The join repeats
+    /// every version and ownership relationship needed by the production worker so a
+    /// malformed or stale row fails closed before routing begins.
+    pub async fn load_claimed_input(
+        &self,
+        lease: &JobLease,
+        now: SystemTime,
+    ) -> Result<ClaimedJobInput, JobError> {
+        let row = sqlx::query(
+            "SELECT gj.guest_session_id, pr.revision, ST_X(rs.confirmed_start) AS confirmed_longitude, ST_Y(rs.confirmed_start) AS confirmed_latitude, pr.requested_distance_metres, pr.distance_tolerance_metres, pr.return_to_start, pr.activity_profile::text AS activity_profile_json, pr.activity_profile_version, pr.coverage_policy_version, pr.template_id, pr.template_version, pr.map_data_version, pr.algorithm_version, gj.deadline_at, pr.expires_at FROM generation_jobs gj JOIN planning_requests pr ON pr.id=gj.planning_request_id AND pr.guest_session_id=gj.guest_session_id JOIN resolved_starts rs ON rs.id=pr.resolved_start_id AND rs.guest_session_id=pr.guest_session_id WHERE gj.id=$1 AND gj.state='running' AND gj.lease_owner=$2 AND gj.attempt_count=$3 AND gj.lease_expires_at>$4 AND gj.deadline_at>$4 AND pr.expires_at>$4 AND rs.expires_at>$4 AND rs.profile_version=pr.activity_profile_version AND rs.coverage_policy_version=pr.coverage_policy_version AND rs.map_data_version=pr.map_data_version",
+        )
+        .bind(lease.job_id)
+        .bind(lease.worker_id)
+        .bind(lease.attempt as i32)
+        .bind(OffsetDateTime::from(now))
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|_| JobError::Unavailable)?
+        .ok_or(JobError::LeaseLost)?;
+        let revision: i32 = row.try_get("revision").map_err(|_| JobError::Unavailable)?;
+        let requested_distance: i32 = row
+            .try_get("requested_distance_metres")
+            .map_err(|_| JobError::Unavailable)?;
+        let tolerance: i32 = row
+            .try_get("distance_tolerance_metres")
+            .map_err(|_| JobError::Unavailable)?;
+        let template_version: String = row
+            .try_get("template_version")
+            .map_err(|_| JobError::Unavailable)?;
+        let confirmed_longitude: f64 = row
+            .try_get("confirmed_longitude")
+            .map_err(|_| JobError::Unavailable)?;
+        let confirmed_latitude: f64 = row
+            .try_get("confirmed_latitude")
+            .map_err(|_| JobError::Unavailable)?;
+        let input = ClaimedJobInput {
+            owner: row
+                .try_get("guest_session_id")
+                .map_err(|_| JobError::Unavailable)?,
+            request_revision: revision.try_into().map_err(|_| JobError::InvalidInput)?,
+            confirmed_longitude,
+            confirmed_latitude,
+            requested_distance_metres: requested_distance
+                .try_into()
+                .map_err(|_| JobError::InvalidInput)?,
+            distance_tolerance_metres: tolerance.try_into().map_err(|_| JobError::InvalidInput)?,
+            return_to_start: row
+                .try_get::<Option<bool>, _>("return_to_start")
+                .map_err(|_| JobError::Unavailable)?
+                .ok_or(JobError::InvalidInput)?,
+            activity_profile_json: row
+                .try_get("activity_profile_json")
+                .map_err(|_| JobError::Unavailable)?,
+            activity_profile_version: row
+                .try_get("activity_profile_version")
+                .map_err(|_| JobError::Unavailable)?,
+            coverage_policy_version: row
+                .try_get("coverage_policy_version")
+                .map_err(|_| JobError::Unavailable)?,
+            template_id: row
+                .try_get("template_id")
+                .map_err(|_| JobError::Unavailable)?,
+            template_version: template_version
+                .parse()
+                .map_err(|_| JobError::InvalidInput)?,
+            map_data_version: row
+                .try_get("map_data_version")
+                .map_err(|_| JobError::Unavailable)?,
+            algorithm_version: row
+                .try_get("algorithm_version")
+                .map_err(|_| JobError::Unavailable)?,
+            deadline_at: SystemTime::from(
+                row.try_get::<OffsetDateTime, _>("deadline_at")
+                    .map_err(|_| JobError::Unavailable)?,
+            ),
+            expires_at: SystemTime::from(
+                row.try_get::<OffsetDateTime, _>("expires_at")
+                    .map_err(|_| JobError::Unavailable)?,
+            ),
+        };
+        if !confirmed_longitude.is_finite()
+            || !confirmed_latitude.is_finite()
+            || !(-180.0..=180.0).contains(&confirmed_longitude)
+            || !(-90.0..=90.0).contains(&confirmed_latitude)
+            || input.request_revision == 0
+            || input.requested_distance_metres == 0
+            || input.template_version == 0
+            || input.deadline_at <= now
+            || input.expires_at <= input.deadline_at
+            || [
+                &input.activity_profile_version,
+                &input.coverage_policy_version,
+                &input.template_id,
+                &input.map_data_version,
+                &input.algorithm_version,
+            ]
+            .iter()
+            .any(|value| value.is_empty())
+        {
+            return Err(JobError::InvalidInput);
+        }
+        Ok(input)
+    }
+
     pub async fn renew(
         &self,
         lease: &JobLease,
@@ -1025,6 +1151,100 @@ impl PostgresJobCoordinator {
             event.emit();
         }
         Ok(next)
+    }
+
+    /// Atomically publishes a validated immutable candidate and the fenced success
+    /// outcome. A crash or lost database connection can therefore expose either the
+    /// complete success family or none of it, never an orphan candidate or false success.
+    pub async fn publish_success(
+        &self,
+        lease: &JobLease,
+        owner: Uuid,
+        snapshot: &CandidateSnapshot,
+        source: &ScoredCandidate,
+        expires_at: SystemTime,
+        now: SystemTime,
+    ) -> Result<JobState, JobError> {
+        let mut tx = self.pool.begin().await.map_err(|_| JobError::Unavailable)?;
+        let row = sqlx::query("SELECT gj.state::text AS state, gj.deadline_at, gj.queued_at FROM generation_jobs gj WHERE gj.id=$1 AND gj.guest_session_id=$2 FOR UPDATE")
+            .bind(lease.job_id)
+            .bind(owner)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?
+            .ok_or(JobError::NotFound)?;
+        let state: String = row.try_get("state").map_err(|_| JobError::Unavailable)?;
+        if state != "running" {
+            return Err(
+                if matches!(
+                    state.as_str(),
+                    "succeeded" | "no_match" | "failed" | "cancelled" | "timed_out"
+                ) {
+                    JobError::Terminal
+                } else {
+                    JobError::LeaseLost
+                },
+            );
+        }
+        let deadline_at = SystemTime::from(
+            row.try_get::<OffsetDateTime, _>("deadline_at")
+                .map_err(|_| JobError::Unavailable)?,
+        );
+        if deadline_at <= now {
+            return Err(JobError::LeaseLost);
+        }
+        let valid_lease: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM generation_jobs WHERE id=$1 AND state='running' AND lease_owner=$2 AND attempt_count=$3 AND lease_expires_at>$4 AND deadline_at>$4)")
+            .bind(lease.job_id)
+            .bind(lease.worker_id)
+            .bind(lease.attempt as i32)
+            .bind(OffsetDateTime::from(now))
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
+        if !valid_lease {
+            return Err(JobError::LeaseLost);
+        }
+        insert_validated_snapshot(&mut tx, owner, snapshot, source, expires_at)
+            .await
+            .map_err(|error| match error {
+                RouteSnapshotError::Unavailable => JobError::Unavailable,
+                RouteSnapshotError::NotFound | RouteSnapshotError::InvalidSnapshot => {
+                    JobError::InvalidInput
+                }
+            })?;
+        sqlx::query("UPDATE generation_jobs SET state='succeeded', status_version=status_version+1, completed_at=$1, lease_owner=NULL, lease_expires_at=NULL WHERE id=$2")
+            .bind(OffsetDateTime::from(now))
+            .bind(lease.job_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
+        sqlx::query("UPDATE job_attempts SET finished_at=$1,result_code='succeeded' WHERE generation_job_id=$2 AND attempt_number=$3")
+            .bind(OffsetDateTime::from(now))
+            .bind(lease.job_id)
+            .bind(lease.attempt as i32)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
+        sqlx::query("INSERT INTO generation_job_outcomes (generation_job_id,outcome,public_code,budget_exhausted,result_ids) VALUES ($1,'succeeded','succeeded',false,$2)")
+            .bind(lease.job_id)
+            .bind(vec![snapshot.id])
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| JobError::Unavailable)?;
+        tx.commit().await.map_err(|_| JobError::Unavailable)?;
+        let queued_at = SystemTime::from(
+            row.try_get::<OffsetDateTime, _>("queued_at")
+                .map_err(|_| JobError::Unavailable)?,
+        );
+        for event in terminal_metric_events(
+            Correlation::for_job(lease.job_id).with_attempt(lease.attempt),
+            now.duration_since(queued_at).unwrap_or_default(),
+            JobOutcomeCode::Succeeded,
+            1,
+        ) {
+            event.emit();
+        }
+        Ok(JobState::Succeeded)
     }
 }
 

@@ -61,6 +61,28 @@ async fn database_loss_while_taking_work_rechecks_before_resuming() {
     assert!(checks.load(Ordering::SeqCst) >= 2);
 }
 
+#[tokio::test]
+async fn shutdown_interrupts_in_flight_work_without_waiting_for_the_lease() {
+    let checks = Arc::new(AtomicUsize::new(0));
+    let started = Arc::new(AtomicUsize::new(0));
+    let dependencies = WorkerDependencies::for_test_with_pending_work(checks, started.clone());
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let worker = tokio::spawn(run_until_shutdown(dependencies, shutdown_rx));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while started.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("work should begin");
+    shutdown_tx.send(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), worker)
+        .await
+        .expect("shutdown must interrupt in-flight work")
+        .unwrap()
+        .unwrap();
+}
+
 struct Gate(bool);
 
 struct Permit<'a>(&'a AtomicUsize);

@@ -574,8 +574,12 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "gpsart-config",
+ "gpsart-domain",
  "gpsart-observability",
  "gpsart-persistence",
+ "gpsart-routing",
+ "serde_json",
+ "sqlx",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

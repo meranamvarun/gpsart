@@ -843,6 +843,10 @@ impl LocalOsmGraph {
         self.points_by_osm_id.get(&osm_node_id).copied()
     }
 
+    pub fn data_version(&self) -> &str {
+        &self.data_version
+    }
+
     fn rewrite_query(&self, query: &RouteQuery) -> Result<RouteQuery, RoutingError> {
         let ordered_anchors = query
             .ordered_anchors
