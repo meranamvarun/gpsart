@@ -9,6 +9,7 @@ use gpsart_persistence::routes::{
 use gpsart_persistence::{
     GuestSessionStore, MIGRATOR, MigrationStatus, PostgresGuestSessionStore,
     PostgresResolvedStartStore, ResolvedStartRecord, ResolvedStartStore, migration_status,
+    run_migrations,
 };
 use sqlx::{Connection, Executor, PgConnection, PgPool, Row, postgres::PgConnectOptions};
 use std::time::{Duration, SystemTime};
@@ -160,8 +161,8 @@ async fn claimed_job_input_is_exactly_versioned_and_lease_fenced() {
         Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()
     );
     assert_eq!(input.request_revision, 1);
-    assert_eq!(input.confirmed_longitude, 0.0);
-    assert_eq!(input.confirmed_latitude, 0.0);
+    assert_eq!(input.confirmed_longitude, 77.2);
+    assert_eq!(input.confirmed_latitude, 28.7);
     assert_eq!(input.requested_distance_metres, 5_000);
     assert_eq!(input.distance_tolerance_metres, 250);
     assert!(input.return_to_start);
@@ -260,7 +261,7 @@ async fn upgrades_from_the_previous_checked_in_migration() {
     assert_eq!(
         migration_status(&pool).await.unwrap(),
         MigrationStatus::Pending {
-            versions: vec![2, 3, 4, 5, 6]
+            versions: vec![2, 3, 4, 5, 6, 7, 8, 9]
         }
     );
     MIGRATOR
@@ -378,8 +379,7 @@ async fn job_status_migration_upgrades_populated_v4_rows_without_inventing_outco
     .unwrap();
     tx.commit().await.unwrap();
 
-    MIGRATOR
-        .run(&pool)
+    run_migrations(&pool)
         .await
         .expect("v4 to current upgrade succeeds");
     let historical_finish: Option<bool> = sqlx::query_scalar(
@@ -979,6 +979,8 @@ async fn candidate_snapshot_and_success_outcome_publish_atomically_under_the_lea
         .unwrap();
     assert_eq!(unpublished, 0);
 
+    let completed_at = SystemTime::now();
+
     assert_eq!(
         coordinator
             .publish_success(
@@ -987,7 +989,7 @@ async fn candidate_snapshot_and_success_outcome_publish_atomically_under_the_lea
                 &snapshot,
                 &source,
                 now + Duration::from_secs(86_400),
-                now,
+                completed_at,
             )
             .await
             .unwrap(),
@@ -1146,7 +1148,7 @@ async fn succeeded_status_freezes_the_exact_atomic_result_set() {
                 candidate_ids: vec![published],
                 budget_exhausted: false,
             },
-            now,
+            SystemTime::now(),
         )
         .await
         .unwrap();

@@ -104,11 +104,11 @@ Create a PostgreSQL database whose owner can enable PostGIS. For example, with l
 createdb -U postgres gpsart
 ```
 
-Set SQLx's migration URL and apply all forward-only migrations before starting either Rust process:
+Set the migration URL and run the repository's forward-only upgrader before starting either Rust process:
 
 ```powershell
 $env:DATABASE_URL = "postgres://postgres:change-me@127.0.0.1:5432/gpsart"
-cargo sqlx migrate run --source migrations
+cargo run -p gpsart-persistence --bin gpsart-migrate
 ```
 
 The API and worker refuse to become ready if migrations are missing, pending, changed, or
@@ -287,7 +287,7 @@ stops its cleanup task, while the worker exits its loop.
 
 1. Back up the database using encrypted, access-audited storage.
 2. Run `cargo sqlx migrate info --source migrations` against the target.
-3. Apply `cargo sqlx migrate run --source migrations` as a separately authorized release job.
+3. Apply `cargo run -p gpsart-persistence --bin gpsart-migrate` as a separately authorized release job.
 4. Start the API and verify `/health/ready` before shifting traffic.
 5. Start workers only after the API/database version is confirmed compatible.
 6. Roll back application binaries if necessary; database migrations are forward-only. Do not edit or

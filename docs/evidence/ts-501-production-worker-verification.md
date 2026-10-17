@@ -14,14 +14,16 @@ Date: 17 October 2026
 ## Commands run
 
 - `node --test tests/production-worker-contract.test.mjs` - 2 passed.
-- `node scripts/cargo.mjs test -p gpsart-worker --all-targets` - unit/integration targets passed; the real PostGIS pipeline test is an explicit environment skip when `DATABASE_URL` is absent.
+- `DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres node scripts/cargo.mjs test -p gpsart-worker --all-targets -- --test-threads=1` - 12 passed, including 3 production-worker/PostgreSQL cases.
+- `DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres node scripts/cargo.mjs test -p gpsart-persistence --test migrations -- --test-threads=1` - 18 passed, including populated-v4 upgrade, stale lease, atomic publication, duplicate delivery, timeout, cancellation and durable budget cases.
 - `node scripts/cargo.mjs clippy -p gpsart-worker -p gpsart-persistence --all-targets -- -D warnings` - passed.
-- `npm run factory:verify` - passed after QA corrections (17 October 2026); PostgreSQL-dependent tests were environment skips because `DATABASE_URL` was not set.
-- PostgreSQL execution attempt with `DATABASE_URL=postgres://gpsart_app@127.0.0.1:5433/gpsart_local` - blocked because `gpsart_app` lacks `CREATEDB`; this is retained as an environment limitation, not represented as a database pass.
+- `DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres npm run factory:verify` - passed in 62.2 seconds with PostgreSQL-dependent tests executed (17 October 2026).
 
 Independent QA rejected the initial implementation and identified immutable-start, terminal-classification,
-database-failure, lease-race, configured-limit, clean-checkout, and documentation defects. Commits
-`6385ee0`, `58a72a7`, and `4d973d2` correct those findings. Final independent code re-review passed,
-including focused worker/configuration/persistence checks. The required privileged PostgreSQL execution
-and several AC6 production-worker/PostgreSQL failure-path scenarios remain missing, so TS-501 remains
-claimed rather than in review and no final QA approval is recorded.
+database-failure, lease-race, configured-limit, clean-checkout, documentation, confirmed-start, migration-
+compatibility, restart, duplicate-delivery and publication-failure evidence defects. The final review by
+`codex/qa_ts501_final` approved all six acceptance criteria after independently passing the 18-case
+PostgreSQL migration suite and 12-case worker suite. INC-052 and INC-053 retain the confirmed-start and
+populated-v4 upgrade defects with permanent regression checks. Historical migration 0005 remains byte-
+identical to `origin/main`; the forward-only migration 0009 and supported migration runner repair legacy
+upgrades without invalidating SQLx checksums.

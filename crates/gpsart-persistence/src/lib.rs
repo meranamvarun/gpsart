@@ -464,9 +464,48 @@ pub async fn apply_migrations(database_url: &str) -> Result<(), MigrationApplyEr
         .max_connections(1)
         .connect(database_url)
         .await?;
-    MIGRATOR.run(&pool).await?;
+    run_migrations(&pool).await?;
     pool.close().await;
     Ok(())
+}
+
+pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrationApplyError> {
+    prepare_populated_v4_upgrade(pool).await?;
+    MIGRATOR.run(pool).await?;
+    Ok(())
+}
+
+async fn prepare_populated_v4_upgrade(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let migration_table_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('public._sqlx_migrations') IS NOT NULL")
+            .fetch_one(pool)
+            .await?;
+    if !migration_table_exists {
+        return Ok(());
+    }
+    let needs_repair: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version=4 AND success)
+         AND NOT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version=5 AND success)",
+    )
+    .fetch_one(pool)
+    .await?;
+    if !needs_repair {
+        return Ok(());
+    }
+    let mut transaction = pool.begin().await?;
+    sqlx::raw_sql(
+        "DROP TRIGGER generation_jobs_terminal_outcome_check ON generation_jobs;
+         DROP TRIGGER generation_job_outcomes_state_check ON generation_job_outcomes;
+         CREATE CONSTRAINT TRIGGER generation_jobs_terminal_outcome_check
+         AFTER INSERT OR UPDATE OF state OR DELETE ON generation_jobs
+         NOT DEFERRABLE FOR EACH ROW EXECUTE FUNCTION enforce_one_terminal_outcome();
+         CREATE CONSTRAINT TRIGGER generation_job_outcomes_state_check
+         AFTER INSERT OR UPDATE OR DELETE ON generation_job_outcomes
+         NOT DEFERRABLE FOR EACH ROW EXECUTE FUNCTION enforce_one_terminal_outcome();",
+    )
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await
 }
 
 #[derive(Debug, Error)]
