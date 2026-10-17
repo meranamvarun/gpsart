@@ -16,6 +16,10 @@ Date: 17 October 2026
 - `node --test tests/production-worker-contract.test.mjs` - 2 passed.
 - `node scripts/cargo.mjs test -p gpsart-worker --all-targets` - unit/integration targets passed; the real PostGIS pipeline test is an explicit environment skip when `DATABASE_URL` is absent.
 - `node scripts/cargo.mjs clippy -p gpsart-worker -p gpsart-persistence --all-targets -- -D warnings` - passed.
+- `npm run factory:verify` - passed after QA corrections (17 October 2026); PostgreSQL-dependent tests were environment skips because `DATABASE_URL` was not set.
 - PostgreSQL execution attempt with `DATABASE_URL=postgres://gpsart_app@127.0.0.1:5433/gpsart_local` - blocked because `gpsart_app` lacks `CREATEDB`; this is retained as an environment limitation, not represented as a database pass.
 
-Independent QA and full `factory:verify` results are pending.
+Independent QA rejected the initial implementation and identified immutable-start, terminal-classification,
+database-failure, lease-race, configured-limit, clean-checkout, and documentation defects. Commits
+`6385ee0` and `58a72a7` correct those findings. QA re-review and the required privileged PostgreSQL
+acceptance execution remain pending, so TS-501 remains claimed rather than in review.
