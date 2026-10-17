@@ -1,8 +1,6 @@
 use gpsart_api::auth::{SessionPolicy, run_cleanup_until_shutdown};
-use gpsart_config::{AppConfig, init_tracing};
-use gpsart_domain::starts::{
-    ConfiguredNetworkPoint, ConfiguredNetworkProvider, Coverage, StartResolver,
-};
+use gpsart_config::{AppConfig, ProductionRoutingConfig, init_tracing};
+use gpsart_domain::starts::StartResolver;
 use gpsart_persistence::jobs::PostgresJobCoordinator;
 use gpsart_persistence::routes::PostgresRouteSnapshotStore;
 use gpsart_persistence::{DependencyProbe, PostgresProbe};
@@ -19,17 +17,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Duration::from_secs(2),
     );
     readiness.check().await?;
-    let coverage_version = required_env("GPSART_COVERAGE_VERSION")?;
-    let bounds = parse_bounds(&required_env("GPSART_COVERAGE_BOUNDS")?)?;
-    let data_version = required_env("GPSART_MAP_DATA_VERSION")?;
-    let network_points: Vec<ConfiguredNetworkPoint> =
-        serde_json::from_str(&required_env("GPSART_ROUTABLE_STARTS_JSON")?)
-            .map_err(|_| "GPSART_ROUTABLE_STARTS_JSON is invalid")?;
-    let provider = ConfiguredNetworkProvider::new(network_points)
-        .map_err(|_| "GPSART_ROUTABLE_STARTS_JSON must contain profiled points")?;
-    let coverage =
-        Coverage::rectangle(coverage_version, bounds[0], bounds[1], bounds[2], bounds[3])
-            .map_err(|_| "GPSART_COVERAGE_BOUNDS is invalid")?;
+    let routing = ProductionRoutingConfig::load(required_env("GPSART_ROUTING_MANIFEST")?)?;
+    routing.validate_workload(&config.workload_limits)?;
+    let provider = routing.network_provider()?;
+    let coverage = routing.coverage().clone();
+    let data_version = routing.map_data_version().to_owned();
     let start_store =
         Arc::new(PostgresResolvedStartStore::connect(config.database_url.expose()).await?);
     let starts = gpsart_api::ConfiguredStartService::with_store(
@@ -90,14 +82,4 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 fn required_env(name: &'static str) -> Result<String, Box<dyn Error + Send + Sync>> {
     std::env::var(name)
         .map_err(|_| format!("required environment variable {name} is missing").into())
-}
-
-fn parse_bounds(value: &str) -> Result<[f64; 4], Box<dyn Error + Send + Sync>> {
-    let values = value
-        .split(',')
-        .map(str::parse::<f64>)
-        .collect::<Result<Vec<_>, _>>()?;
-    values
-        .try_into()
-        .map_err(|_| "GPSART_COVERAGE_BOUNDS requires four coordinates".into())
 }

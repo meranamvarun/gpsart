@@ -510,6 +510,10 @@ dependencies = [
 name = "gpsart-config"
 version = "0.1.0"
 dependencies = [
+ "gpsart-domain",
+ "gpsart-routing",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tracing",
  "tracing-subscriber",

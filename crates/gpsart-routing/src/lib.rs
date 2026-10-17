@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use gpsart_domain::{
-    AccessPolicy, ActivityProfileDefinition, Metres, RouteRequestProfile, profile_for,
+    AccessPolicy, ActivityProfile, ActivityProfileDefinition, Metres, RouteRequestProfile,
+    profile_for,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -678,6 +679,8 @@ pub struct LocalOsmGraph {
     node_ids_by_point: HashMap<GeoPointE7, String>,
     data_version: String,
     attribution: String,
+    snapshot_id: String,
+    source: OsmSnapshotSource,
 }
 
 #[derive(Debug, Deserialize)]
@@ -691,7 +694,7 @@ struct OsmSnapshot {
     forbidden_turns: Vec<OsmSnapshotTurn>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OsmSnapshotSource {
     api: String,
@@ -740,6 +743,8 @@ impl LocalOsmGraph {
         let snapshot: OsmSnapshot =
             serde_json::from_slice(bytes).map_err(|_| RoutingError::InvalidSnapshot)?;
         validate_snapshot_header(&snapshot)?;
+        let snapshot_id = snapshot.snapshot_id.clone();
+        let source = snapshot.source.clone();
 
         let mut nodes = Vec::with_capacity(snapshot.nodes.len());
         let mut points_by_osm_id = HashMap::with_capacity(snapshot.nodes.len());
@@ -832,6 +837,8 @@ impl LocalOsmGraph {
             node_ids_by_point,
             data_version,
             attribution,
+            snapshot_id,
+            source,
         })
     }
 
@@ -845,6 +852,57 @@ impl LocalOsmGraph {
 
     pub fn data_version(&self) -> &str {
         &self.data_version
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn has_provenance(
+        &self,
+        snapshot_id: &str,
+        source_api: &str,
+        source_url: &str,
+        source_retrieved_at: &str,
+        source_raw_sha256: &str,
+        attribution: &str,
+        license: &str,
+    ) -> bool {
+        self.snapshot_id == snapshot_id
+            && self.source.api == source_api
+            && self.source.url == source_url
+            && self.source.retrieved_at == source_retrieved_at
+            && self.source.raw_sha256 == source_raw_sha256
+            && self.source.attribution == attribution
+            && self.source.license == license
+    }
+
+    pub fn all_points_within(&self, bounds: [f64; 4]) -> bool {
+        self.points_by_osm_id.values().all(|point| {
+            let longitude = f64::from(point.longitude_e7) / 10_000_000.0;
+            let latitude = f64::from(point.latitude_e7) / 10_000_000.0;
+            (bounds[0]..=bounds[2]).contains(&longitude)
+                && (bounds[1]..=bounds[3]).contains(&latitude)
+        })
+    }
+
+    pub fn is_reviewable_start(&self, node: u64, activity: ActivityProfile) -> bool {
+        let node_id = osm_node_id(node);
+        let profile = profile_for(activity);
+        self.graph.edges.iter().any(|edge| {
+            let direction = if edge.from == node_id {
+                Some(TraversalDirection::Forward)
+            } else if edge.to == node_id {
+                Some(TraversalDirection::Reverse)
+            } else {
+                None
+            };
+            direction.is_some_and(|direction| {
+                matches!(
+                    evaluate_edge(profile, &edge.metadata, direction),
+                    Eligibility::Eligible { ref qualifications }
+                        if !qualifications.contains(&Qualification::AccessUnknown)
+                            && !qualifications.contains(&Qualification::ProviderAccessUnverified)
+                )
+            })
+        })
     }
 
     fn rewrite_query(&self, query: &RouteQuery) -> Result<RouteQuery, RoutingError> {

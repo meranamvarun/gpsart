@@ -1,4 +1,14 @@
-use std::{collections::HashMap, fmt, net::SocketAddr, time::Duration};
+use gpsart_domain::starts::{ConfiguredNetworkPoint, ConfiguredNetworkProvider, Coverage, Point};
+use gpsart_domain::{ActivityProfile, ProfileVersion};
+use gpsart_routing::LocalOsmGraph;
+use serde::Deserialize;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use thiserror::Error;
 use tracing_subscriber::EnvFilter;
 
@@ -136,6 +146,317 @@ impl WorkloadLimits {
         }
         Ok(limits)
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProductionRoutingConfig {
+    map_data_version: String,
+    coverage: Coverage,
+    reviewed_starts: Vec<ConfiguredNetworkPoint>,
+    reviewed_workload: ReviewedWorkload,
+    graph_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductionRoutingManifest {
+    schema_version: String,
+    configuration_version: String,
+    map_data_version: String,
+    graph: GraphManifest,
+    coverage: CoverageManifest,
+    routable_starts: Vec<ReviewedStart>,
+    workload: ReviewedWorkload,
+    approval: Approval,
+    update_procedure: UpdateProcedure,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GraphManifest {
+    path: String,
+    sha256: String,
+    snapshot_id: String,
+    source_api: String,
+    source_url: String,
+    source_retrieved_at: String,
+    source_raw_sha256: String,
+    attribution: String,
+    license: String,
+    extraction_command: String,
+    extraction_script_path: String,
+    extraction_script_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CoverageManifest {
+    version: String,
+    bounds: [f64; 4],
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewedStart {
+    osm_node_id: u64,
+    point: Point,
+    profile_versions: Vec<ProfileVersion>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct ReviewedWorkload {
+    distance_unit: String,
+    allowed_tolerance_percent: [u8; 3],
+    max_distance_metres: i32,
+    max_template_points: usize,
+    max_anchors: usize,
+    max_candidate_attempts: i32,
+    max_provider_requests: usize,
+    max_request_bytes: usize,
+    max_response_bytes: usize,
+    max_runtime_seconds: u64,
+    max_active_jobs_per_guest: i64,
+    max_active_jobs_deployment: i64,
+    max_submissions_per_guest_per_minute: i64,
+    guest_retention_seconds: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Approval {
+    status: String,
+    reviewed_at: String,
+    reviewed_by: String,
+    reviewer_sign_off: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateProcedure {
+    document: String,
+    immutable_version_required: bool,
+    old_snapshot_compatibility_test: String,
+}
+
+impl ProductionRoutingConfig {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ProductionRoutingError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path).map_err(|_| ProductionRoutingError::ManifestUnavailable)?;
+        let manifest: ProductionRoutingManifest = serde_json::from_slice(&bytes)
+            .map_err(|_| ProductionRoutingError::ManifestMalformed)?;
+        if manifest.schema_version != "gpsart-production-routing-v1"
+            || manifest.configuration_version.trim().is_empty()
+            || manifest.approval.status != "approved"
+            || !valid_date(&manifest.approval.reviewed_at)
+            || manifest.approval.reviewed_by.trim().is_empty()
+            || manifest.approval.reviewer_sign_off.trim().is_empty()
+            || !manifest.update_procedure.immutable_version_required
+            || manifest.update_procedure.document.trim().is_empty()
+            || manifest
+                .update_procedure
+                .old_snapshot_compatibility_test
+                .trim()
+                .is_empty()
+            || !valid_sha256(&manifest.graph.sha256)
+            || !valid_sha256(&manifest.graph.source_raw_sha256)
+            || !valid_sha256(&manifest.graph.extraction_script_sha256)
+            || manifest.graph.snapshot_id.trim().is_empty()
+            || manifest.graph.source_api != "OpenStreetMap API 0.6"
+            || !manifest
+                .graph
+                .source_url
+                .starts_with("https://api.openstreetmap.org/api/0.6/map.json?bbox=")
+            || !manifest.graph.source_retrieved_at.ends_with('Z')
+            || manifest.graph.attribution.trim().is_empty()
+            || manifest.graph.license != "ODbL-1.0"
+            || manifest.graph.extraction_command.trim().is_empty()
+            || manifest.workload.distance_unit != "metres"
+            || manifest.routable_starts.is_empty()
+        {
+            return Err(ProductionRoutingError::ManifestInvalid);
+        }
+        let graph_path = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(&manifest.graph.path);
+        let graph_bytes =
+            std::fs::read(&graph_path).map_err(|_| ProductionRoutingError::GraphUnavailable)?;
+        let graph = LocalOsmGraph::from_json(&graph_bytes, &manifest.graph.sha256)
+            .map_err(|_| ProductionRoutingError::GraphInvalid)?;
+        let extraction_script_path = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(&manifest.graph.extraction_script_path);
+        let extraction_script = std::fs::read(extraction_script_path)
+            .map_err(|_| ProductionRoutingError::ManifestInvalid)?;
+        if LocalOsmGraph::sha256_hex(&extraction_script) != manifest.graph.extraction_script_sha256
+            || !graph.has_provenance(
+                &manifest.graph.snapshot_id,
+                &manifest.graph.source_api,
+                &manifest.graph.source_url,
+                &manifest.graph.source_retrieved_at,
+                &manifest.graph.source_raw_sha256,
+                &manifest.graph.attribution,
+                &manifest.graph.license,
+            )
+            || !graph.all_points_within(manifest.coverage.bounds)
+        {
+            return Err(ProductionRoutingError::ManifestInvalid);
+        }
+        let expected_version = format!(
+            "{}:sha256:{}",
+            manifest.graph.snapshot_id, manifest.graph.sha256
+        );
+        if manifest.map_data_version != expected_version
+            || graph.data_version() != manifest.map_data_version
+        {
+            return Err(ProductionRoutingError::GraphVersionMismatch);
+        }
+        let coverage = Coverage::rectangle(
+            manifest.coverage.version,
+            manifest.coverage.bounds[0],
+            manifest.coverage.bounds[1],
+            manifest.coverage.bounds[2],
+            manifest.coverage.bounds[3],
+        )
+        .map_err(|_| ProductionRoutingError::ManifestInvalid)?;
+        let mut reviewed_starts = Vec::with_capacity(manifest.routable_starts.len());
+        let mut reviewed_node_ids = HashSet::new();
+        let mut reviewed_points = HashSet::new();
+        for start in manifest.routable_starts {
+            if start.profile_versions.is_empty()
+                || !reviewed_node_ids.insert(start.osm_node_id)
+                || !reviewed_points.insert((
+                    start.point.longitude.to_bits(),
+                    start.point.latitude.to_bits(),
+                ))
+                || start
+                    .profile_versions
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>()
+                    .len()
+                    != start.profile_versions.len()
+            {
+                return Err(ProductionRoutingError::StartInvalid);
+            }
+            let Some(graph_point) = graph.point(start.osm_node_id) else {
+                return Err(ProductionRoutingError::StartInvalid);
+            };
+            let expected = Point::new(
+                f64::from(graph_point.longitude_e7) / 10_000_000.0,
+                f64::from(graph_point.latitude_e7) / 10_000_000.0,
+            )
+            .map_err(|_| ProductionRoutingError::StartInvalid)?;
+            if start.point != expected || !coverage.contains(start.point) {
+                return Err(ProductionRoutingError::StartInvalid);
+            }
+            for profile in &start.profile_versions {
+                let activity = match profile {
+                    ProfileVersion::WalkingV1 => ActivityProfile::Walking,
+                    ProfileVersion::RunningV1 => ActivityProfile::Running,
+                    ProfileVersion::CyclingV1 => ActivityProfile::Cycling,
+                };
+                if !graph.is_reviewable_start(start.osm_node_id, activity) {
+                    return Err(ProductionRoutingError::StartInvalid);
+                }
+            }
+            reviewed_starts.push(ConfiguredNetworkPoint {
+                point: start.point,
+                profile_versions: start.profile_versions,
+            });
+        }
+        Ok(Self {
+            map_data_version: manifest.map_data_version,
+            coverage,
+            reviewed_starts,
+            reviewed_workload: manifest.workload,
+            graph_path,
+        })
+    }
+
+    pub fn map_data_version(&self) -> &str {
+        &self.map_data_version
+    }
+    pub fn coverage(&self) -> &Coverage {
+        &self.coverage
+    }
+    pub fn reviewed_starts(&self) -> &[ConfiguredNetworkPoint] {
+        &self.reviewed_starts
+    }
+    pub fn graph_path(&self) -> &Path {
+        &self.graph_path
+    }
+    pub fn network_provider(&self) -> Result<ConfiguredNetworkProvider, ProductionRoutingError> {
+        ConfiguredNetworkProvider::new(self.reviewed_starts.clone())
+            .map_err(|_| ProductionRoutingError::StartInvalid)
+    }
+    pub fn validate_workload(&self, limits: &WorkloadLimits) -> Result<(), ProductionRoutingError> {
+        let reviewed = ReviewedWorkload {
+            distance_unit: "metres".into(),
+            allowed_tolerance_percent: limits.allowed_tolerance_percent,
+            max_distance_metres: limits.max_distance_metres,
+            max_template_points: limits.max_template_points,
+            max_anchors: limits.max_anchors,
+            max_candidate_attempts: limits.max_candidate_attempts,
+            max_provider_requests: limits.max_provider_requests,
+            max_request_bytes: limits.max_request_bytes,
+            max_response_bytes: limits.max_response_bytes,
+            max_runtime_seconds: limits.max_runtime.as_secs(),
+            max_active_jobs_per_guest: limits.max_active_jobs_per_guest,
+            max_active_jobs_deployment: limits.max_active_jobs_deployment,
+            max_submissions_per_guest_per_minute: limits.max_submissions_per_guest_per_minute,
+            guest_retention_seconds: limits.guest_retention.as_secs(),
+        };
+        (reviewed == self.reviewed_workload)
+            .then_some(())
+            .ok_or(ProductionRoutingError::WorkloadMismatch)
+    }
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn valid_date(value: &str) -> bool {
+    if !(value.len() == 10
+        && value.as_bytes()[4] == b'-'
+        && value.as_bytes()[7] == b'-'
+        && value
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit()))
+    {
+        return false;
+    }
+    let year = value[0..4].parse::<u16>().unwrap_or(0);
+    let month = value[5..7].parse::<u8>().unwrap_or(0);
+    let day = value[8..10].parse::<u8>().unwrap_or(0);
+    year >= 2020 && (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum ProductionRoutingError {
+    #[error("production routing manifest is unavailable")]
+    ManifestUnavailable,
+    #[error("production routing manifest is malformed")]
+    ManifestMalformed,
+    #[error("production routing manifest is invalid")]
+    ManifestInvalid,
+    #[error("production routing graph is unavailable")]
+    GraphUnavailable,
+    #[error("production routing graph is invalid")]
+    GraphInvalid,
+    #[error("production routing graph version does not match the manifest")]
+    GraphVersionMismatch,
+    #[error("production routable start is invalid")]
+    StartInvalid,
+    #[error("runtime workload limits do not match the reviewed production configuration")]
+    WorkloadMismatch,
 }
 
 fn optional_positive<T>(

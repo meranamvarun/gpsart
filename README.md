@@ -117,25 +117,22 @@ the readiness contract.
 
 ### 3. Configure the API
 
-The API has no secret-bearing defaults. This PowerShell example uses intentionally illustrative pilot
-values; replace the coverage and routable points with reviewed data derived from the same pinned map
-snapshot. Never invent routability points for production.
+The API has no secret-bearing defaults. Its coverage, routable starts, graph provenance, immutable
+map-data version, and reviewed workload values come from one fail-closed production manifest.
 
 ```powershell
 $env:GPSART_DATABASE_URL = $env:DATABASE_URL
 $env:GPSART_API_BIND = "127.0.0.1:8080"
 $env:GPSART_PUBLIC_ORIGIN = "https://gpsart.localhost"
-$env:GPSART_COVERAGE_VERSION = "local-pilot-v1"
-$env:GPSART_COVERAGE_BOUNDS = "77.5900,12.9700,77.6000,12.9800"
-$env:GPSART_MAP_DATA_VERSION = "local-reviewed-snapshot-v1"
-$env:GPSART_ROUTABLE_STARTS_JSON = '[{"point":{"longitude":77.5946,"latitude":12.9716},"profile_versions":["walking-v1","running-v1","cycling-v1"]}]'
+$env:GPSART_ROUTING_MANIFEST = "ops/routing/production-pilot-v1.json"
 $env:RUST_LOG = "info"
 ```
 
-`GPSART_COVERAGE_BOUNDS` is `min_longitude,min_latitude,max_longitude,max_latitude`.
-`GPSART_ROUTABLE_STARTS_JSON` must be a non-empty JSON array. Every point must have valid WGS84
-coordinates and at least one exact profile version: `walking-v1`, `running-v1`, or `cycling-v1`.
-The configured point set is only a start-resolution index; it is not a replacement for routing data.
+The checked-in manifest records the bounded Bengaluru pilot and explicitly reviews walking and
+running starts only. Startup rejects missing or malformed manifests, graph/checksum/provenance
+mismatches, unknown versions, unreviewed profiles, invalid starts, and runtime workload overrides
+that differ from the approved values. Follow the recorded update runbook rather than editing an
+existing immutable manifest or graph.
 
 Start the API in one terminal:
 
@@ -207,15 +204,13 @@ Required API variables:
 | `GPSART_DATABASE_URL` | PostgreSQL connection; treated as a secret | `postgres://user:password@db/gpsart` |
 | `GPSART_API_BIND` | API listen address | `0.0.0.0:8080` |
 | `GPSART_PUBLIC_ORIGIN` | Exact canonical HTTPS browser origin used by CSRF policy | `https://gpsart.example.com` |
-| `GPSART_COVERAGE_VERSION` | Immutable coverage-policy identifier | deployment-defined non-secret string |
-| `GPSART_COVERAGE_BOUNDS` | Coverage rectangle | `min_lon,min_lat,max_lon,max_lat` |
-| `GPSART_MAP_DATA_VERSION` | Immutable map-data identifier | version/checksum-derived string |
-| `GPSART_ROUTABLE_STARTS_JSON` | Reviewed, profile-specific start index | JSON described above |
+| `GPSART_ROUTING_MANIFEST` | Approved immutable graph, coverage, start, and workload configuration | `ops/routing/production-pilot-v1.json` |
 
 The worker requires only `GPSART_DATABASE_URL`. Both services accept `RUST_LOG`; structured JSON logs
 default to `info`.
 
-Optional workload variables and their defaults:
+Optional workload variables and their defaults are accepted only when they equal the values in the
+approved production manifest; publish a reviewed successor manifest to change them:
 
 | Variable | Default | Constraint |
 | --- | ---: | --- |

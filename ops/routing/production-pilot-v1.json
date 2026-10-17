@@ -1,0 +1,62 @@
+{
+  "schema_version": "gpsart-production-routing-v1",
+  "configuration_version": "bengaluru-production-pilot-v1",
+  "map_data_version": "osm-bengaluru-central-pedestrian-pilot-v3:sha256:df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
+  "graph": {
+    "path": "../../crates/gpsart-routing/data/bengaluru-central-osm-v3.json",
+    "sha256": "df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
+    "snapshot_id": "osm-bengaluru-central-pedestrian-pilot-v3",
+    "source_api": "OpenStreetMap API 0.6",
+    "source_url": "https://api.openstreetmap.org/api/0.6/map.json?bbox=77.5840,12.9680,77.6040,12.9860",
+    "source_retrieved_at": "2026-10-04T18:08:15.000Z",
+    "source_raw_sha256": "7c46353e917488745fb2de5cf24d0aadd89eeb2b53b4911b064225e36314be93",
+    "attribution": "OpenStreetMap contributors",
+    "license": "ODbL-1.0",
+    "extraction_command": "node scripts/extract-osm-pedestrian-pilot-snapshot.mjs <raw-map.json> crates/gpsart-routing/data/bengaluru-central-osm-v3.json crates/gpsart-routing/data/bengaluru-central-osm-v3.sha256 osm-bengaluru-central-pedestrian-pilot-v3 'https://api.openstreetmap.org/api/0.6/map.json?bbox=77.5840,12.9680,77.6040,12.9860' 2026-10-04T18:08:15.000Z 7c46353e917488745fb2de5cf24d0aadd89eeb2b53b4911b064225e36314be93",
+    "extraction_script_path": "../../scripts/extract-osm-pedestrian-pilot-snapshot.mjs",
+    "extraction_script_sha256": "7fc9efbfb429cbbc6991da90cc26f302e6a006605c25cfc74513402c1baaeb0a"
+  },
+  "coverage": {
+    "version": "bengaluru-central-pilot-coverage-v1",
+    "bounds": [77.578203, 12.9652039, 77.607869, 12.9883305]
+  },
+  "routable_starts": [
+    {
+      "osm_node_id": 13459508937,
+      "point": { "longitude": 77.5939555, "latitude": 12.9724454 },
+      "profile_versions": ["walking-v1", "running-v1"]
+    },
+    {
+      "osm_node_id": 10238269050,
+      "point": { "longitude": 77.6016974, "latitude": 12.9755777 },
+      "profile_versions": ["walking-v1", "running-v1"]
+    }
+  ],
+  "workload": {
+    "distance_unit": "metres",
+    "allowed_tolerance_percent": [5, 10, 20],
+    "max_distance_metres": 100000,
+    "max_template_points": 512,
+    "max_anchors": 64,
+    "max_candidate_attempts": 3,
+    "max_provider_requests": 50,
+    "max_request_bytes": 65536,
+    "max_response_bytes": 2097152,
+    "max_runtime_seconds": 60,
+    "max_active_jobs_per_guest": 2,
+    "max_active_jobs_deployment": 20,
+    "max_submissions_per_guest_per_minute": 10,
+    "guest_retention_seconds": 86400
+  },
+  "approval": {
+    "status": "approved",
+    "reviewed_at": "2026-10-17",
+    "reviewed_by": "codex/ts503-dev",
+    "reviewer_sign_off": "Approved for the bounded Bengaluru production pilot; cycling is explicitly unreviewed."
+  },
+  "update_procedure": {
+    "document": "docs/runbooks/production-routing-data-update.md",
+    "immutable_version_required": true,
+    "old_snapshot_compatibility_test": "cargo test -p gpsart-config --test production_routing"
+  }
+}

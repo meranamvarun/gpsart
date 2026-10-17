@@ -70,6 +70,25 @@ fn rejects_malformed_or_unversioned_snapshot_elements() {
     ));
 }
 
+#[test]
+fn reviewed_starts_reject_isolated_direction_blocked_and_unknown_access_nodes() {
+    let isolated = String::from_utf8(inline_snapshot(r#"{"highway":"footway"}"#))
+        .unwrap()
+        .replace("[1, 2, 3]", "[1, 2]")
+        .into_bytes();
+    let graph = LocalOsmGraph::from_json(&isolated, &LocalOsmGraph::sha256_hex(&isolated)).unwrap();
+    assert!(!graph.is_reviewable_start(3, ActivityProfile::Walking));
+
+    let one_way = inline_snapshot(r#"{"highway":"footway","oneway:foot":"yes"}"#);
+    let graph = LocalOsmGraph::from_json(&one_way, &LocalOsmGraph::sha256_hex(&one_way)).unwrap();
+    assert!(graph.is_reviewable_start(1, ActivityProfile::Walking));
+    assert!(!graph.is_reviewable_start(3, ActivityProfile::Walking));
+
+    let unknown = inline_snapshot(r#"{"highway":"unclassified"}"#);
+    let graph = LocalOsmGraph::from_json(&unknown, &LocalOsmGraph::sha256_hex(&unknown)).unwrap();
+    assert!(!graph.is_reviewable_start(1, ActivityProfile::Walking));
+}
+
 #[tokio::test]
 async fn applies_profile_specific_osm_defaults_without_guessing_unknown_access() {
     let missing_direction =
