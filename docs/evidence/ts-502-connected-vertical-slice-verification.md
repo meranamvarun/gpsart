@@ -7,9 +7,11 @@ Date: 2026-10-18
 1. `connected_vertical_slice` uses a fresh private guest and the real catalogue, approved start
    resolver, PostgreSQL stores, production worker, checksum-pinned graph, authorized route endpoint,
    and GPX endpoint. No candidate fixture or synthetic geometry enters the path.
-2. The test compares the terminal job and stored `CandidateSnapshot` with the API payload and an
-   external GPX 1.1 import. Job/revision/candidate identity, ordered coordinates, distance and
-   retracing fields, and immutable version pins must agree.
+2. The test compares the terminal job and stored `CandidateSnapshot` with the API payload, then
+   passes that exact live payload through the TypeScript decoder, candidate state, map model, and
+   details renderer. Those layers must agree on job/revision/candidate identity, ordered coordinates,
+   distance and retracing fields, and every immutable version pin. The external GPX 1.1 import must
+   preserve exact coordinate order and its documented identity/version/traversal metadata.
 3. A second private guest cannot read or cancel the job and cannot read or export the candidate.
    Existing and guessed valid IDs return the same not-found boundary; malformed IDs return the same
    generic invalid-path response.
@@ -26,13 +28,15 @@ Date: 2026-10-18
 - Graph: `crates/gpsart-routing/data/bengaluru-central-osm-v3.json`
 - Reviewed walking start: the first manifest start
 - Template/distance: `heart` v1, 1,300 m with the reviewed 20% tolerance
-- Local database-backed run: 1 connected test passed, 0 failed, 0 ignored in 3.16 seconds.
+- Local database-backed run plus live browser decode/render: 1 connected Rust test passed, 0 failed,
+  0 ignored in 2.92 seconds; the browser verifier accepted and rendered that exact ephemeral API
+  payload (2026-10-18).
 - Production-manifest regression: 1 passed, 0 failed after `INC-054` correction.
 - The first clean-worktree factory run exposed `INC-055`: Sites tests preceded the build and failed
   on the absent `dist/client/index.html` after all preceding gates passed. The ordering regression
   now requires a production build before Sites packaging tests.
-- Database-backed `npm run factory:verify`: passed in 59.4 seconds after the ordering prevention
-  landed; the connected test executed with 0 ignored cases.
+- Final database-backed `npm run factory:verify`: passed in 84.6 seconds after the live-browser
+  evidence fix; the connected Rust test executed with 0 ignored cases.
 
 Independent QA must rerun the commands in the handoff and review this evidence before setting the
 story to done.

@@ -18,7 +18,7 @@ use http_body_util::BodyExt;
 use sqlx::{
     ConnectOptions, Connection, Executor, PgConnection, PgPool, postgres::PgConnectOptions,
 };
-use std::{env, io::Cursor, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{env, fs, io::Cursor, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -394,7 +394,21 @@ async fn anonymous_browser_api_postgis_worker_and_gpx_share_one_immutable_route(
         gpx_response.headers()["content-type"],
         "application/gpx+xml; charset=utf-8"
     );
-    let imported = gpx::read(Cursor::new(response_bytes(gpx_response).await))
+    let gpx_bytes = response_bytes(gpx_response).await;
+    let gpx_text = std::str::from_utf8(&gpx_bytes).expect("GPX is UTF-8");
+    for expected_metadata in [
+        candidate_id,
+        "candidate version 1",
+        "profile walking-v1",
+        "routing data osm-bengaluru-central-pedestrian-pilot-v3:sha256:df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
+        "including connectors and retraced sections",
+    ] {
+        assert!(
+            gpx_text.contains(expected_metadata),
+            "GPX must retain its documented immutable identity and traversal disclosure"
+        );
+    }
+    let imported = gpx::read(Cursor::new(gpx_bytes))
         .expect("external GPX 1.1 importer accepts the connected export");
     let gpx_coordinates = imported.tracks[0].segments[0]
         .points
@@ -405,6 +419,14 @@ async fn anonymous_browser_api_postgis_worker_and_gpx_share_one_immutable_route(
         serde_json::from_value(details["geometry"]["coordinates"].clone()).unwrap();
     assert_eq!(gpx_coordinates, detail_coordinates);
     assert_eq!(stored.geometry.coordinates, detail_coordinates);
+
+    if let Ok(path) = env::var("GPSART_CONNECTED_TRANSCRIPT_PATH") {
+        fs::write(
+            path,
+            serde_json::to_vec(&details).expect("serialize live API transcript"),
+        )
+        .expect("write ephemeral live API transcript for the browser verifier");
+    }
 
     let foreign = create_guest(&app).await;
     for uri in [

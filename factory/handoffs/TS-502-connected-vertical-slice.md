@@ -18,11 +18,15 @@ submits an immutable request, observes queued and persisted execution progress, 
 worker, reads the authorized candidate, and exports it. It does not inject a candidate or routing
 geometry.
 
-The persisted snapshot, authorized API response, browser-consumed ordered geometry, and externally
-parsed GPX must retain the same job ID, revision, candidate ID, coordinate order, distance fields,
-retracing disclosure, and immutable version pins. A second guest receives only the normal not-found
-boundary for existing and guessed IDs and cannot cancel the first guest's job; malformed IDs remain
-the documented generic bad-request response.
+The Rust path writes its live authorized API payload only to a process-owned temporary file. The
+browser decoder and render models consume that exact payload, and the runner removes the file even
+on failure. The stored snapshot, API payload, and rendered model must agree on job/revision/candidate
+identity, coordinate order, distance and retracing fields, and every immutable version pin. The GPX
+must preserve the exact coordinate order plus its documented route ID, candidate version, profile,
+routing-data pin, and connector/retrace disclosure; it does not invent fields outside the GPX v1
+contract. A second guest receives only the normal not-found boundary for existing and guessed IDs
+and cannot cancel the first guest's job; malformed IDs remain the documented generic bad-request
+response.
 
 The approved manifest now pins the canonical LF extraction-script bytes. `INC-054` records why the
 previous CRLF-derived checksum made a fresh checkout fail closed. The immutable routing graph and
