@@ -115,6 +115,17 @@ test("delivery promotes one manifest through staging and production with smoke a
   ]);
 
   assert.match(delivery, /--platform linux\/amd64/g);
+  assert.match(delivery, /runs-on: ubuntu-24\.04/);
+  assert.doesNotMatch(delivery, /runs-on: \[self-hosted, linux, x64, gpsart-build\]/);
+  assert.match(delivery, /postgis\/postgis:16-3\.4@sha256:[a-f0-9]{64}/);
+  assert.match(delivery, /DATABASE_URL: postgres:\/\/postgres:postgres@127\.0\.0\.1:5432\/postgres/);
+  assert.match(delivery, /actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020/);
+  assert.match(delivery, /node-version: 22\.15\.0/);
+  assert.match(delivery, /docker\/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f/);
+  assert.match(delivery, /version: v0\.38\.0/);
+  assert.match(delivery, /image=moby\/buildkit@sha256:[a-f0-9]{64}/);
+  assert.match(delivery, /anchore\/sbom-action\/download-syft@e22c389904149dbc22b58101806040fa8d37a610/);
+  assert.match(delivery, /syft-version: v1\.54\.1/);
   assert.match(delivery, /generate-sbom/);
   assert.match(delivery, /environment: staging/);
   assert.match(delivery, /needs: deploy-staging/);

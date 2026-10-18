@@ -5,7 +5,7 @@ This runbook deploys the complete GPSART stack to a Kubernetes cluster on `linux
 ## Owners
 
 - Release owner: approves the full source revision and starts `Build and deliver production stack`.
-- Platform owner: owns the Linux build/deploy runners, Kubernetes clusters, ingress, DNS, certificate issuers, External Secrets stores, and the `encrypted-rwo` storage classes.
+- Platform owner: owns the Linux deploy runners, Kubernetes clusters, ingress, DNS, certificate issuers, External Secrets stores, and the `encrypted-rwo` storage classes.
 - Database owner: controls the bootstrap and separately authorized migration database roles and verifies backup readiness before promotion.
 - Privacy/security owner: reviews edge behavior, registry/SBOM attestations, secret access, and privacy-safe logs.
 - Incident commander: decides rollback when a rollback condition is met.
@@ -14,7 +14,7 @@ Every production GitHub environment must require approval from the release and p
 
 ## Prerequisites
 
-1. Provide clean `linux/amd64` build and deploy runners with Git, Node 22.15, Docker Buildx, Syft, jq, kubectl, and GitHub CLI. The build itself uses pinned BuildKit, Node, Rust, nginx, distroless, and PostGIS image digests plus `package-lock.json` and `Cargo.lock`.
+1. Enable GitHub-hosted `ubuntu-24.04` Actions runners for the build job. It installs Node 22.15, Buildx 0.38.0, a digest-pinned BuildKit 0.34.0 driver, and Syft 1.54.1 through commit-pinned actions; starts a digest-pinned PostGIS service for the complete factory gate; and uses pinned Rust, nginx, distroless, and PostGIS image digests plus `package-lock.json` and `Cargo.lock`. Provide clean `linux/amd64` deploy runners labelled `gpsart-deploy` with Git, Node 22.15, jq, kubectl, and GitHub CLI.
 2. Install Kubernetes, nginx Ingress, cert-manager, and External Secrets. Provision separate staging and production `ClusterSecretStore` and certificate issuers named by `deploy/environments/*.json`.
 3. Provision an `encrypted-rwo` StorageClass in each cluster and independently verify provider-side encryption at rest. The renderer refuses configurations that do not assert encrypted storage.
 4. Put three records in each managed secret store: the runtime database URL, the more privileged forward-only migration URL, and Postgres bootstrap values. Required bootstrap keys are `POSTGRES_DB=gpsart`, `POSTGRES_USER=gpsart`, `POSTGRES_PASSWORD`, and `PGDATA=/var/lib/postgresql/data/pgdata`. Never put their values in GitHub variables, image layers, manifests, tickets, or logs.

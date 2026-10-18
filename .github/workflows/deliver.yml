@@ -18,11 +18,39 @@ concurrency:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, x64, gpsart-build]
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.source_revision }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.15.0
+          cache: npm
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        with:
+          version: v0.38.0
+          driver-opts: image=moby/buildkit@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610
+        id: syft
+        with:
+          syft-version: v1.54.1
       - name: Verify exact revision and locked source
         run: |
           test "$(git rev-parse HEAD)" = "${{ inputs.source_revision }}"
@@ -34,6 +62,7 @@ jobs:
         env:
           REGISTRY: ghcr.io/${{ github.repository_owner }}/gpsart
           REVISION: ${{ inputs.source_revision }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
         run: |
           set -euo pipefail
           mkdir -p release/sboms
@@ -43,7 +72,7 @@ jobs:
               --file "deploy/images/${component}.Containerfile" \
               --tag "${REGISTRY}/${component}:${REVISION}" --metadata-file "${metadata}" .
             digest="$(jq -r '."containerimage.digest"' "${metadata}")"
-            syft "${REGISTRY}/${component}@${digest}" -o spdx-json="release/sboms/${component}.spdx.json"
+            "${SYFT}" "${REGISTRY}/${component}@${digest}" -o spdx-json="release/sboms/${component}.spdx.json"
             sha256sum "release/sboms/${component}.spdx.json" | cut -d' ' -f1 > "release/sboms/${component}.sha256"
             printf '%s' "${REGISTRY}/${component}@${digest}" > "release/${component}.image"
           done
