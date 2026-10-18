@@ -59,4 +59,6 @@ test("the connected production slice is a mandatory PostGIS CI gate", async () =
   assert.match(browserVerifier, /decodeRouteSnapshot/);
   assert.match(browserVerifier, /routeMapModel/);
   assert.match(browserVerifier, /renderCandidateDetails/);
+  assert.doesNotMatch(connectedTest, /assert_eq!\s*\(\s*(?:gpx_coordinates|stored\.geometry\.coordinates)/s);
+  assert.doesNotMatch(browserVerifier, /deepEqual\s*\(\s*map\.highlighted\.trace/);
 });

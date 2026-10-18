@@ -326,24 +326,41 @@ async fn no_match_timeout_cancellation_and_persistence_failure_stay_truthful() {
         },
     )
     .await;
+    // Hold the worker between its durable claim and input loading. This makes
+    // cancellation-after-claim deterministic without slowing production code.
+    let mut input_blocker = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE planning_requests IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *input_blocker)
+        .await
+        .unwrap();
     let running = worker.clone();
     let task = tokio::spawn(async move { running.take_one().await });
     for _ in 0..200 {
-        let calls: i32 =
-            sqlx::query_scalar("SELECT provider_call_count FROM generation_jobs WHERE id=$1")
+        let state: String =
+            sqlx::query_scalar("SELECT state::text FROM generation_jobs WHERE id=$1")
                 .bind(cancelled)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        if calls > 0 {
+        if state == "running" {
             break;
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    let state: String = sqlx::query_scalar("SELECT state::text FROM generation_jobs WHERE id=$1")
+        .bind(cancelled)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        state, "running",
+        "the worker must claim the job before cancellation"
+    );
     coordinator
         .cancel(owner, cancelled, std::time::SystemTime::now())
         .await
         .unwrap();
+    input_blocker.rollback().await.unwrap();
     task.await.unwrap().unwrap();
     assert_eq!(
         coordinator.status(owner, cancelled).await.unwrap().state,

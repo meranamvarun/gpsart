@@ -269,9 +269,9 @@ async fn anonymous_browser_api_postgis_worker_and_gpx_share_one_immutable_route(
     .await;
     assert_eq!(confirmed.status(), StatusCode::OK);
     let confirmed = response_json(confirmed).await;
-    assert_eq!(
-        confirmed["confirmed_start"],
-        resolved["candidate_network_point"]
+    assert!(
+        confirmed["confirmed_start"] == resolved["candidate_network_point"],
+        "confirmation must preserve the reviewed network point"
     );
 
     let accepted = request(
@@ -368,9 +368,9 @@ async fn anonymous_browser_api_postgis_worker_and_gpx_share_one_immutable_route(
         .get(owner_id, route_id)
         .await
         .expect("persisted candidate");
-    assert_eq!(
-        serde_json::to_value(&stored).unwrap()["geometry"],
-        details["geometry"]
+    assert!(
+        serde_json::to_value(&stored).unwrap()["geometry"] == details["geometry"],
+        "stored and API geometry order must match"
     );
     assert_eq!(
         serde_json::to_value(&stored).unwrap()["distances"],
@@ -417,8 +417,14 @@ async fn anonymous_browser_api_postgis_worker_and_gpx_share_one_immutable_route(
         .collect::<Vec<_>>();
     let detail_coordinates: Vec<[f64; 2]> =
         serde_json::from_value(details["geometry"]["coordinates"].clone()).unwrap();
-    assert_eq!(gpx_coordinates, detail_coordinates);
-    assert_eq!(stored.geometry.coordinates, detail_coordinates);
+    assert!(
+        gpx_coordinates == detail_coordinates,
+        "GPX and API coordinate order must match"
+    );
+    assert!(
+        stored.geometry.coordinates == detail_coordinates,
+        "stored and API coordinate order must match"
+    );
 
     if let Ok(path) = env::var("GPSART_CONNECTED_TRANSCRIPT_PATH") {
         fs::write(

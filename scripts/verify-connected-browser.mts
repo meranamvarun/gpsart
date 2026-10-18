@@ -25,7 +25,15 @@ const apiCoordinates = payload.geometry.coordinates.map(([longitude, latitude]: 
   longitude,
   latitude,
 }));
-assert.deepEqual(map.highlighted.trace, apiCoordinates);
+assert.ok(
+  map.highlighted.trace.length === apiCoordinates.length &&
+    map.highlighted.trace.every(
+      (point, index) =>
+        point.longitude === apiCoordinates[index]?.longitude &&
+        point.latitude === apiCoordinates[index]?.latitude,
+    ),
+  "rendered and API coordinate order must match",
+);
 assert.equal(map.highlighted.id, payload.id);
 assert.equal(snapshot.generationJobId, payload.generation_job_id);
 assert.equal(snapshot.requestRevision, payload.request_revision);

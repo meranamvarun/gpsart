@@ -35,8 +35,12 @@ Date: 2026-10-18
 - The first clean-worktree factory run exposed `INC-055`: Sites tests preceded the build and failed
   on the absent `dist/client/index.html` after all preceding gates passed. The ordering regression
   now requires a production build before Sites packaging tests.
-- Final database-backed `npm run factory:verify`: passed in 84.6 seconds after the live-browser
-  evidence fix; the connected Rust test executed with 0 ignored cases.
+- Independent QA exposed a race in the cancellation check (`INC-056`) and coordinate-bearing
+  assertion diagnostics (`INC-057`). Cancellation is now held deterministically after the durable
+  claim, and route-coordinate comparisons fail with fixed privacy-safe messages. The cancellation
+  case passed five consecutive database-backed runs.
+- Final database-backed `npm run factory:verify`: passed in 71.6 seconds after both QA fixes; the
+  connected Rust test executed with 0 ignored cases.
 
 Independent QA must rerun the commands in the handoff and review this evidence before setting the
 story to done.
