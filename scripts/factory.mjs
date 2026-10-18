@@ -83,8 +83,8 @@ async function main() {
   const factoryTestCode = await run("npm", ["run", "test:factory"]);
   const unitTestCode = await run("npm", ["run", "test:unit"]);
   const visualShellTestCode = await run("npm", ["run", "test:visual-shell"]);
-  const testCode = await run("npm", ["run", "test:sites"]);
   const buildCode = await run("npm", ["run", "build"]);
+  const testCode = await run("npm", ["run", "test:sites"]);
   if (rustFormatCode || rustClippyCode || rustTestCode || rustBuildCode || factoryTestCode || unitTestCode || visualShellTestCode || testCode || buildCode) process.exitCode = 1;
 }
 

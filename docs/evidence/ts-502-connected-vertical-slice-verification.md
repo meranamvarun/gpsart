@@ -1,0 +1,38 @@
+# TS-502 connected vertical-slice verification
+
+Date: 2026-10-18
+
+## Executable acceptance checks
+
+1. `connected_vertical_slice` uses a fresh private guest and the real catalogue, approved start
+   resolver, PostgreSQL stores, production worker, checksum-pinned graph, authorized route endpoint,
+   and GPX endpoint. No candidate fixture or synthetic geometry enters the path.
+2. The test compares the terminal job and stored `CandidateSnapshot` with the API payload and an
+   external GPX 1.1 import. Job/revision/candidate identity, ordered coordinates, distance and
+   retracing fields, and immutable version pins must agree.
+3. A second private guest cannot read or cancel the job and cannot read or export the candidate.
+   Existing and guessed valid IDs return the same not-found boundary; malformed IDs return the same
+   generic invalid-path response.
+4. `production_pipeline` covers real no-match, mid-routing cancellation, timeout, provider/persistence
+   dependency failure, stale lease, restart, and duplicate delivery. `planner-workflow.test.ts` covers
+   refresh recovery, cancellation fencing, and stale responses. `route-candidate-journey.test.ts`
+   proves a base-map failure leaves the complete routed geometry and facts available.
+5. `npm run test:connected` requires `DATABASE_URL`, creates an isolated migrated database, and is an
+   explicit CI step against PostGIS. Absence is a failure, not a skip.
+
+## Deterministic inputs and transcript
+
+- Routing manifest: `ops/routing/production-pilot-v1.json`
+- Graph: `crates/gpsart-routing/data/bengaluru-central-osm-v3.json`
+- Reviewed walking start: the first manifest start
+- Template/distance: `heart` v1, 1,300 m with the reviewed 20% tolerance
+- Local database-backed run: 1 connected test passed, 0 failed, 0 ignored in 3.16 seconds.
+- Production-manifest regression: 1 passed, 0 failed after `INC-054` correction.
+- The first clean-worktree factory run exposed `INC-055`: Sites tests preceded the build and failed
+  on the absent `dist/client/index.html` after all preceding gates passed. The ordering regression
+  now requires a production build before Sites packaging tests.
+- Database-backed `npm run factory:verify`: passed in 59.4 seconds after the ordering prevention
+  landed; the connected test executed with 0 ignored cases.
+
+Independent QA must rerun the commands in the handoff and review this evidence before setting the
+story to done.

@@ -39,6 +39,7 @@ jobs:
       - run: npm ci
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: npm run test:connected
       - run: cargo test --workspace
       - run: npm run factory:verify
 

@@ -17,6 +17,7 @@
     "rust:clippy": "node scripts/cargo.mjs clippy --workspace --all-targets -- -D warnings",
     "typecheck": "tsc --noEmit",
     "test:factory": "node --test tests/factory.test.mjs tests/observability-contract.test.mjs tests/persistence-contract.test.mjs tests/pilot-hardening-contract.test.mjs tests/privacy-contract.test.mjs tests/production-bundle.test.mjs tests/production-worker-contract.test.mjs tests/release-evidence-contract.test.mjs tests/rust-workspace.test.mjs",
+    "test:connected": "node scripts/cargo.mjs test -p gpsart-worker --test connected_vertical_slice -- --test-threads=1",
     "test:persistence": "node --test tests/persistence-contract.test.mjs && node scripts/cargo.mjs test -p gpsart-persistence --test migrations -- --test-threads=1",
     "factory:status": "node scripts/factory.mjs status",
     "factory:next": "node scripts/factory.mjs next",

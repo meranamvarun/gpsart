@@ -577,15 +577,20 @@ name = "gpsart-worker"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "gpsart-api",
  "gpsart-config",
  "gpsart-domain",
  "gpsart-observability",
  "gpsart-persistence",
  "gpsart-routing",
+ "gpx",
+ "http-body-util",
  "serde_json",
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
+ "tower",
  "tracing",
  "uuid",
 ]

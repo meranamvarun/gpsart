@@ -18,5 +18,10 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
+gpsart-api = { path = "../gpsart-api" }
+gpx.workspace = true
+http-body-util.workspace = true
 sqlx.workspace = true
+tower.workspace = true
 

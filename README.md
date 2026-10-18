@@ -314,7 +314,7 @@ stops its cleanup task, while the worker exits its loop.
 | Private guest session, CSRF, rotation, revocation | Implemented; HTTPS required |
 | Start coverage, snap proposal, explicit confirmation | Implemented from configured reviewed points |
 | Durable job submit/status/cancel | Implemented |
-| Worker route generation and candidate publication | **Not wired in the production worker** |
+| Worker route generation and candidate publication | Implemented and exercised through the connected PostgreSQL-backed vertical slice |
 | Candidate comparison/details | Implemented for authorized server snapshots |
 | GPX 1.1 export | Implemented for a real loaded snapshot |
 | Save/rename/delete routes | Implemented in browser IndexedDB only |
@@ -351,9 +351,10 @@ npm run rust:test
 
 `npm run test:a11y` needs Chrome/Chromium. If it is not auto-detected, set
 `GPSART_CHROME_PATH` to the executable. PostgreSQL integration tests use `DATABASE_URL` (not
-`GPSART_DATABASE_URL`) and explicitly skip their database cases when it is absent. To exercise those
-cases, point `DATABASE_URL` at a disposable administrative PostGIS database; the tests create and
-drop isolated databases.
+`GPSART_DATABASE_URL`). Older component suites explicitly skip their database cases when it is
+absent, but `npm run test:connected` is a required release-path check and fails when it is absent.
+Point `DATABASE_URL` at a disposable administrative PostGIS database; the tests create and drop
+isolated databases.
 
 ## Repository map
 

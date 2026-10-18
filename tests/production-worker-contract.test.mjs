@@ -34,3 +34,19 @@ test("production routing requires external checksum-pinned graph inputs", async 
     assert.match(example, new RegExp(variable));
   }
 });
+
+test("the connected production slice is a mandatory PostGIS CI gate", async () => {
+  const [packageJson, workflow, connectedTest] = await Promise.all([
+    source("../package.json"),
+    source("../.github/workflows/ci.yml"),
+    source("../crates/gpsart-worker/tests/connected_vertical_slice.rs"),
+  ]);
+  const scripts = JSON.parse(packageJson).scripts;
+  assert.match(scripts["test:connected"], /connected_vertical_slice/);
+  assert.match(workflow, /- run: npm run test:connected/);
+  assert.match(connectedTest, /DATABASE_URL.*expect\(/s);
+  assert.doesNotMatch(connectedTest, /skipping|return None/);
+  assert.match(connectedTest, /ProductionRoutingConfig::load/);
+  assert.match(connectedTest, /ProductionWorker::connect/);
+  assert.match(connectedTest, /gpx::read/);
+});

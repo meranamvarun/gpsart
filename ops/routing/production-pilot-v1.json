@@ -14,7 +14,7 @@
     "license": "ODbL-1.0",
     "extraction_command": "node scripts/extract-osm-pedestrian-pilot-snapshot.mjs <raw-map.json> crates/gpsart-routing/data/bengaluru-central-osm-v3.json crates/gpsart-routing/data/bengaluru-central-osm-v3.sha256 osm-bengaluru-central-pedestrian-pilot-v3 'https://api.openstreetmap.org/api/0.6/map.json?bbox=77.5840,12.9680,77.6040,12.9860' 2026-10-04T18:08:15.000Z 7c46353e917488745fb2de5cf24d0aadd89eeb2b53b4911b064225e36314be93",
     "extraction_script_path": "../../scripts/extract-osm-pedestrian-pilot-snapshot.mjs",
-    "extraction_script_sha256": "7fc9efbfb429cbbc6991da90cc26f302e6a006605c25cfc74513402c1baaeb0a"
+    "extraction_script_sha256": "cacbef658af44e584922c74bf556e6c68804d942139ef56d2c2df6326b3a81f0"
   },
   "coverage": {
     "version": "bengaluru-central-pilot-coverage-v1",

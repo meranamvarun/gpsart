@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { loadFactory, readyStories, validateStories } from "../scripts/factory.mjs";
 
@@ -16,4 +17,11 @@ test("only stories with completed dependencies are offered to developers", () =>
     { id: "TS-003", status: "todo", roles: ["dev"], dependsOn: ["TS-002"] },
   ];
   assert.deepEqual(readyStories(stories).map((story) => story.id), ["TS-002"]);
+});
+
+test("factory verification builds Sites assets before testing the packaged worker", async () => {
+  const source = await readFile(new URL("../scripts/factory.mjs", import.meta.url), "utf8");
+  const build = source.indexOf('await run("npm", ["run", "build"])');
+  const sites = source.indexOf('await run("npm", ["run", "test:sites"])');
+  assert.ok(build >= 0 && sites >= 0 && build < sites);
 });
