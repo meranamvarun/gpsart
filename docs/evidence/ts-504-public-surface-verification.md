@@ -21,8 +21,10 @@ The tests were added before the implementation. The first focused run failed fiv
 - `npm run build`: passed; emitted production assets passed the hardened bundle scan.
 - `npm run test:visual-shell`: 2 passed.
 - `npm run test:a11y`: passed at 360/768/1440 px with no serious or critical axe findings on the audited surfaces.
-- `npm run factory:verify`: not completed. After the frontend build passed, the first full run found a stale generated `crossbeam-utils` executable left by a timed-out parallel worktree gate. A scoped `cargo clean -p crossbeam-utils` repaired that artifact, but the isolated rerun exceeded its 10-minute bound while `cargo test --workspace` was still active. No full-gate pass is claimed.
+- `npm run factory:verify`: passed in 166.9 seconds against PostgreSQL after the rebased worktree cache was warmed; all 18 migration checks, production worker scenarios, Rust checks, 94 client unit tests, visual-shell, Sites, and production build/bundle checks passed. Independent QA repeated the complete database-backed gate in 83.6 seconds.
 - Mobile and desktop screenshots were visually inspected: navigation remains reachable, no authentication control appears, and the scope copy is readable without overflow.
+
+Independent QA (`codex/qa_ts504_final`) approved all five acceptance criteria on 2026-10-18 after inspecting the final diff and screenshots and independently running the focused 21-test public-surface suite, 4 bundle/visual checks, production build, accessibility audit, and complete factory gate. No blockers or unsupported claims were found.
 
 ## Evidence
 
