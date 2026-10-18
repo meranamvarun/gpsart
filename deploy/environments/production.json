@@ -1,0 +1,14 @@
+{
+  "environment": "production",
+  "platform": "linux/amd64",
+  "namespace": "gpsart-production",
+  "hostnameVariable": "GPSART_PRODUCTION_HOSTNAME",
+  "secretStoreName": "gpsart-production",
+  "runtimeDatabaseSecretRef": "gpsart/production/database/runtime",
+  "migrationDatabaseSecretRef": "gpsart/production/database/migration",
+  "postgresBootstrapSecretRef": "gpsart/production/database/bootstrap",
+  "storageClassName": "encrypted-rwo",
+  "storageEncrypted": true,
+  "certificateIssuer": "gpsart-production",
+  "replicas": { "edge": 2, "api": 2, "worker": 2 }
+}

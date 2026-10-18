@@ -17,7 +17,7 @@ The current blockers are summarized in [`docs/release/limitations.md`](docs/rele
 
 The production worker now leases queued jobs, runs the checksum-pinned local routing graph, and
 publishes lease-fenced candidate snapshots. That implementation is not by itself a production
-approval: the connected release journey, deployment, performance, recovery, provider, and
+approval: live deployment evidence, performance, recovery, provider, and
 independent release gates listed in the release checklist still remain fail-closed.
 
 Google sign-in and place search are also UI concepts only. Guest sessions are implemented; Google
@@ -34,7 +34,7 @@ Browser (one HTTPS origin)
                                   `-------> PostgreSQL 16 + PostGIS
 
 gpsart-worker ----------------------------> PostgreSQL 16 + PostGIS
-  (dependency/reconnect loop exists; production job execution is not wired yet)
+  (leases queued jobs and publishes only validated, lease-fenced snapshots)
 ```
 
 The browser deliberately uses relative `/api/v1/...` URLs. In a connected environment, static files
@@ -231,9 +231,11 @@ Unsupported values fail startup; the service never silently widens these limits.
 
 ## Production deployment reference
 
-There is no checked-in full-stack container or infrastructure manifest. `.openai/hosting.json` and
-`worker/index.js` package the static frontend for Sites, but they do **not** deploy the Rust API,
-PostGIS, or a functioning route-generation worker. A complete deployment must supply those services.
+The supported production target is Kubernetes on `linux/amd64`. Digest-pinned OCI definitions,
+separate staging/production inputs, the complete Kubernetes stack, delivery/rollback workflows, and
+the clean-environment procedure are checked in under `deploy/`, `.github/workflows/`, and
+[`docs/runbooks/production-deployment.md`](docs/runbooks/production-deployment.md). The Sites package
+remains a static preview and is not the production stack.
 
 ### Build immutable artifacts
 
@@ -243,35 +245,21 @@ npm run build
 cargo build --workspace --release --locked
 ```
 
-Deploy:
+The delivery workflow builds and deploys:
 
 - `dist/client/` as immutable static files;
 - `target/release/gpsart-api` as the API service;
 - `target/release/gpsart-worker` with its reviewed checksum-pinned graph and non-secret settings;
 - a backed-up PostgreSQL/PostGIS database with migrations applied as a separate release step.
 
-On Windows, Rust binaries have an `.exe` suffix. Build on the same OS/architecture/libc target used
-at runtime, or use a controlled cross-compilation/container pipeline.
+Local Windows builds are for development only. Release images are built by the controlled Linux
+Buildx runner for `linux/amd64`, recorded by digest, and promoted unchanged from staging.
 
 ### Route traffic
 
-Terminate TLS at the edge, serve the client and `/api/*` from one canonical origin, and proxy
-`/api/*` to the API. A minimal Caddy shape is:
-
-```caddyfile
-gpsart.example.com {
-    root * /srv/gpsart/client
-
-    handle /api/* {
-        reverse_proxy gpsart-api:8080
-    }
-
-    handle {
-        try_files {path} /index.html
-        file_server
-    }
-}
-```
+TLS ingress sends the entire canonical origin to `gpsart-client-edge`. Its checked-in nginx policy
+serves immutable client assets and proxies `/api/*` and `/health/*` internally, with bounded bodies
+and timeouts, security headers, and privacy-safe access logs.
 
 Set `GPSART_PUBLIC_ORIGIN=https://gpsart.example.com`. Keep API health endpoints on an internal
 monitoring path or deliberately expose only the information already returned by them. Configure

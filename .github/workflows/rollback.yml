@@ -1,0 +1,44 @@
+name: Roll back production binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Successful delivery run containing the previously approved artifact-manifest
+        required: true
+      environment:
+        type: choice
+        options: [staging, production]
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+jobs:
+  rollback:
+    environment: ${{ inputs.environment }}
+    runs-on: [self-hosted, linux, x64, gpsart-deploy]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GPSART_STAGING_HOSTNAME: ${{ inputs.environment == 'staging' && vars.GPSART_HOSTNAME || '' }}
+      GPSART_PRODUCTION_HOSTNAME: ${{ inputs.environment == 'production' && vars.GPSART_HOSTNAME || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch approved immutable artifact-manifest
+        run: gh run download "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --pattern 'gpsart-*' --dir release
+      - name: Apply controlled binary rollback
+        run: |
+          set -euo pipefail
+          manifest="$(find release -name artifact-manifest.json -print -quit)"
+          test -n "${manifest}"
+          revision="$(jq -r .sourceRevision "${manifest}")"
+          git fetch --depth=1 origin "${revision}"
+          git checkout --detach "${revision}"
+          node scripts/render-deployment.mjs "deploy/environments/${{ inputs.environment }}.json" "${manifest}" release/rollback.yaml
+          kubectl apply --server-side --field-manager=gpsart-rollback -f release/rollback.yaml --selector='gpsart.dev/release-phase=runtime'
+          namespace="gpsart-${{ inputs.environment }}"
+          kubectl -n "${namespace}" rollout status deployment/gpsart-api --timeout=5m
+          kubectl -n "${namespace}" rollout status deployment/gpsart-worker --timeout=5m
+          kubectl -n "${namespace}" rollout status deployment/gpsart-client-edge --timeout=5m

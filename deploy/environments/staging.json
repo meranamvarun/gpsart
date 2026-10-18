@@ -1,0 +1,14 @@
+{
+  "environment": "staging",
+  "platform": "linux/amd64",
+  "namespace": "gpsart-staging",
+  "hostnameVariable": "GPSART_STAGING_HOSTNAME",
+  "secretStoreName": "gpsart-staging",
+  "runtimeDatabaseSecretRef": "gpsart/staging/database/runtime",
+  "migrationDatabaseSecretRef": "gpsart/staging/database/migration",
+  "postgresBootstrapSecretRef": "gpsart/staging/database/bootstrap",
+  "storageClassName": "encrypted-rwo",
+  "storageEncrypted": true,
+  "certificateIssuer": "gpsart-staging",
+  "replicas": { "edge": 1, "api": 1, "worker": 1 }
+}

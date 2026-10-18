@@ -1,0 +1,12 @@
+.git
+.github
+.tools
+target
+node_modules
+dist
+release
+*.env
+.env
+.env.*
+**/*.env
+*.log

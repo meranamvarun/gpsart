@@ -1,0 +1,130 @@
+name: Build and deliver production stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_revision:
+        description: Full Git revision to build and promote
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: gpsart-delivery
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, gpsart-build]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_revision }}
+      - name: Verify exact revision and locked source
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ inputs.source_revision }}"
+          npm ci
+          npm run factory:verify
+      - name: Authenticate to immutable registry
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build linux/amd64 images, attest, and generate-sbom
+        env:
+          REGISTRY: ghcr.io/${{ github.repository_owner }}/gpsart
+          REVISION: ${{ inputs.source_revision }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/sboms
+          for component in api worker migrate client-edge; do
+            metadata="release/${component}.json"
+            docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true --push \
+              --file "deploy/images/${component}.Containerfile" \
+              --tag "${REGISTRY}/${component}:${REVISION}" --metadata-file "${metadata}" .
+            digest="$(jq -r '."containerimage.digest"' "${metadata}")"
+            syft "${REGISTRY}/${component}@${digest}" -o spdx-json="release/sboms/${component}.spdx.json"
+            sha256sum "release/sboms/${component}.spdx.json" | cut -d' ' -f1 > "release/sboms/${component}.sha256"
+            printf '%s' "${REGISTRY}/${component}@${digest}" > "release/${component}.image"
+          done
+          jq -n \
+            --arg revision "${REVISION}" \
+            --arg api "$(cat release/api.image)" \
+            --arg worker "$(cat release/worker.image)" \
+            --arg migrate "$(cat release/migrate.image)" \
+            --arg edge "$(cat release/client-edge.image)" \
+            --arg apiSbom "sha256:$(cat release/sboms/api.sha256)" \
+            --arg workerSbom "sha256:$(cat release/sboms/worker.sha256)" \
+            --arg migrateSbom "sha256:$(cat release/sboms/migrate.sha256)" \
+            --arg edgeSbom "sha256:$(cat release/sboms/client-edge.sha256)" \
+            '{sourceRevision:$revision,platform:"linux/amd64",images:{api:$api,worker:$worker,migrate:$migrate,clientEdge:$edge},sboms:{api:$apiSbom,worker:$workerSbom,migrate:$migrateSbom,clientEdge:$edgeSbom}}' \
+            > release/artifact-manifest.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gpsart-${{ inputs.source_revision }}
+          path: release/
+          retention-days: 30
+
+  deploy-staging:
+    needs: build
+    environment: staging
+    runs-on: [self-hosted, linux, x64, gpsart-deploy]
+    env:
+      GPSART_STAGING_HOSTNAME: ${{ vars.GPSART_HOSTNAME }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { ref: "${{ inputs.source_revision }}" }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: { name: "gpsart-${{ inputs.source_revision }}", path: release }
+      - name: Render and deploy staging
+        run: |
+          set -euo pipefail
+          node scripts/render-deployment.mjs deploy/environments/staging.json release/artifact-manifest.json release/staging.yaml
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/staging.yaml --selector='gpsart.dev/release-phase=foundation'
+          kubectl -n gpsart-staging rollout status statefulset/gpsart-postgres --timeout=5m
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/staging.yaml --selector='gpsart.dev/release-phase=migration'
+          migration_job="gpsart-migrate-$(printf '%s' '${{ inputs.source_revision }}' | cut -c1-12)"
+          kubectl -n gpsart-staging wait --for=condition=complete "job/${migration_job}" --timeout=5m
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/staging.yaml --selector='gpsart.dev/release-phase=runtime'
+          kubectl -n gpsart-staging rollout status deployment/gpsart-api --timeout=5m
+          kubectl -n gpsart-staging rollout status deployment/gpsart-worker --timeout=5m
+          kubectl -n gpsart-staging rollout status deployment/gpsart-client-edge --timeout=5m
+          node scripts/smoke-deployment.mjs "https://${GPSART_STAGING_HOSTNAME}"
+          kubectl -n gpsart-staging get deployment,statefulset,job -o json > release/staging-deployment-record.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gpsart-staging-record-${{ inputs.source_revision }}
+          path: release/staging-deployment-record.json
+          retention-days: 30
+
+  deploy-production:
+    needs: deploy-staging
+    environment: production
+    runs-on: [self-hosted, linux, x64, gpsart-deploy]
+    env:
+      GPSART_PRODUCTION_HOSTNAME: ${{ vars.GPSART_HOSTNAME }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { ref: "${{ inputs.source_revision }}" }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: { name: "gpsart-${{ inputs.source_revision }}", path: release }
+      - name: Promote exact staging artifacts to production
+        run: |
+          set -euo pipefail
+          node scripts/render-deployment.mjs deploy/environments/production.json release/artifact-manifest.json release/production.yaml
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/production.yaml --selector='gpsart.dev/release-phase=foundation'
+          kubectl -n gpsart-production rollout status statefulset/gpsart-postgres --timeout=5m
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/production.yaml --selector='gpsart.dev/release-phase=migration'
+          migration_job="gpsart-migrate-$(printf '%s' '${{ inputs.source_revision }}' | cut -c1-12)"
+          kubectl -n gpsart-production wait --for=condition=complete "job/${migration_job}" --timeout=5m
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/production.yaml --selector='gpsart.dev/release-phase=runtime'
+          kubectl -n gpsart-production rollout status deployment/gpsart-api --timeout=5m
+          kubectl -n gpsart-production rollout status deployment/gpsart-worker --timeout=5m
+          kubectl -n gpsart-production rollout status deployment/gpsart-client-edge --timeout=5m
+          node scripts/smoke-deployment.mjs "https://${GPSART_PRODUCTION_HOSTNAME}"
+          kubectl -n gpsart-production get deployment,statefulset,job -o json > release/production-deployment-record.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gpsart-production-record-${{ inputs.source_revision }}
+          path: release/production-deployment-record.json
+          retention-days: 30
