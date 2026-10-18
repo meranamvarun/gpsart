@@ -24,6 +24,8 @@ The new `production_routing` test was added before its implementation. Its initi
 - `cargo test -p gpsart-routing --test local_osm_snapshot`: 10 passed.
 - `npm run test:factory`: 21 passed.
 - `cargo check -p gpsart-api`: passed.
-- `npm run factory:verify`: not completed. The first recovered run failed because the isolated worktree lacked its ignored local toolchain and dependencies. After linking those inputs and selecting the repository's GNU toolchain, two bounded runs stalled inside Cargo/Clippy after compiler activity (20 minutes with the isolated target; 10 minutes with the shared verified target). No full-gate pass is claimed.
+- `npm run factory:verify`: passed in 91.4 seconds after the worktree toolchain was pinned to the repository's GNU target; independent QA repeated the database-backed gate in 90.6 seconds.
+
+Independent QA (`codex/qa_ts503_final`) approved all six acceptance criteria on 2026-10-18 after reviewing the rebased diff, the resolved routing-library overlap, and the immutable routing artifacts. QA independently repeated the complete database-backed factory gate with 18 PostgreSQL migration checks and all production worker, TypeScript, visual, accessibility, and site-boundary suites passing.
 
 The checked-in raw OSM API response is intentionally omitted because it can contain contributor-identifying fields. The approved source URL, retrieval time, raw SHA-256, derived sanitized graph, graph SHA-256, extractor command, and extractor SHA-256 provide the reproducibility record without embedding that personal data in fixtures.
