@@ -40,6 +40,19 @@ test("every alert is owned, routed, runnable, and passes controlled signal tests
   for (const heading of ["Triage", "Escalation", "Mitigation", "Closure"]) {
     assert.match(runbook, new RegExp(`## ${heading}`));
   }
+  const byId = new Map(alerts.rules.map((rule) => [rule.id, rule]));
+  assert.equal(byId.get("monitoring_watchdog")?.query, "vector(1) == 1");
+  assert.equal(byId.get("monitoring_watchdog")?.route, "gpsart-deadman");
+  assert.match(
+    byId.get("worker_stalled")?.query ?? "",
+    /or\s+vector\(0\)/,
+    "a fresh worker with backlog and no terminal-outcome series must still alert",
+  );
+  assert.doesNotMatch(
+    byId.get("alert_delivery_failure")?.query ?? "",
+    /receiver\s*=/,
+    "notification-failure detection must not depend on Alertmanager's optional receiver-name metric label",
+  );
 });
 
 test("privacy audit covers every production telemetry and support boundary", async () => {

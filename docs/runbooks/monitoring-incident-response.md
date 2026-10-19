@@ -54,6 +54,10 @@ Check database readiness and `cleanup_runs`. Preserve bounded batches, active-le
 
 Use Kubernetes readiness and direct privacy-safe health probes while the pipeline is unavailable. Notify `platform-oncall` through the independent deadman path. Do not enable raw request logging as a substitute.
 
+## Monitoring watchdog
+
+The `monitoring_watchdog` alert continuously reaches the independently operated deadman receiver. Treat absence beyond the receiver's agreed interval as a monitoring or Alertmanager outage, contact `platform-oncall` out of band, and use the direct probes above until both the watchdog and ordinary alert delivery are restored.
+
 ## Alert delivery failure
 
 Confirm `alertmanager_notifications_failed_total`, test the independent deadman receiver, and contact `platform-oncall` out of band. After repair, inject the controlled delivery test and record both firing and resolved notifications without message payloads from users.

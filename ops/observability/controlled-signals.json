@@ -1,17 +1,17 @@
 {
   "version": 1,
   "cases": [
-    { "id": "healthy", "values": { "api_health": 1, "acknowledgement_p95_ms": 80, "queue_backlog": 0, "stuck_leases": 0, "worker_throughput": 2, "provider_failures": 0, "provider_calls": 20, "errors": 0, "terminal_outcomes": 20, "timeouts": 0, "cleanup_failures": 0, "monitoring_pipeline_up": 1, "alert_delivery_failures": 0 }, "expected_alerts": [] },
-    { "id": "api-down", "values": { "api_health": 0 }, "expected_alerts": ["api_unavailable"] },
-    { "id": "slow-ack", "values": { "acknowledgement_p95_ms": 1001 }, "expected_alerts": ["acknowledgement_latency"] },
-    { "id": "queue-high", "values": { "queue_backlog": 21 }, "expected_alerts": ["queue_backlog"] },
-    { "id": "lease-stale", "values": { "stuck_leases": 1 }, "expected_alerts": ["stuck_leases"] },
-    { "id": "worker-stalled", "values": { "worker_throughput": 0, "queue_backlog": 1 }, "expected_alerts": ["worker_stalled"] },
-    { "id": "provider-failing", "values": { "provider_failures": 3, "provider_calls": 20 }, "expected_alerts": ["provider_failure_rate"] },
-    { "id": "errors-high", "values": { "errors": 2, "terminal_outcomes": 20 }, "expected_alerts": ["error_rate"] },
-    { "id": "timeouts-high", "values": { "timeouts": 2, "terminal_outcomes": 20 }, "expected_alerts": ["timeout_rate"] },
-    { "id": "cleanup-failed", "values": { "cleanup_failures": 1 }, "expected_alerts": ["cleanup_failure"] },
-    { "id": "monitoring-down", "values": { "monitoring_pipeline_up": 0 }, "expected_alerts": ["monitoring_pipeline_absent"] },
-    { "id": "delivery-failed", "values": { "alert_delivery_failures": 1 }, "expected_alerts": ["alert_delivery_failure"] }
+    { "id": "healthy", "values": { "api_health": 1, "acknowledgement_p95_ms": 80, "queue_backlog": 0, "stuck_leases": 0, "worker_throughput": 2, "provider_failures": 0, "provider_calls": 20, "errors": 0, "terminal_outcomes": 20, "timeouts": 0, "cleanup_failures": 0, "monitoring_pipeline_up": 1, "alert_delivery_failures": 0, "monitoring_watchdog": 1 }, "expected_alerts": ["monitoring_watchdog"] },
+    { "id": "api-down", "values": { "api_health": 0, "monitoring_watchdog": 1 }, "expected_alerts": ["api_unavailable", "monitoring_watchdog"] },
+    { "id": "slow-ack", "values": { "acknowledgement_p95_ms": 1001, "monitoring_watchdog": 1 }, "expected_alerts": ["acknowledgement_latency", "monitoring_watchdog"] },
+    { "id": "queue-high", "values": { "queue_backlog": 21, "monitoring_watchdog": 1 }, "expected_alerts": ["monitoring_watchdog", "queue_backlog"] },
+    { "id": "lease-stale", "values": { "stuck_leases": 1, "monitoring_watchdog": 1 }, "expected_alerts": ["monitoring_watchdog", "stuck_leases"] },
+    { "id": "worker-stalled", "values": { "worker_throughput": 0, "queue_backlog": 1, "monitoring_watchdog": 1 }, "expected_alerts": ["monitoring_watchdog", "worker_stalled"] },
+    { "id": "provider-failing", "values": { "provider_failures": 3, "provider_calls": 20, "monitoring_watchdog": 1 }, "expected_alerts": ["monitoring_watchdog", "provider_failure_rate"] },
+    { "id": "errors-high", "values": { "errors": 2, "terminal_outcomes": 20, "monitoring_watchdog": 1 }, "expected_alerts": ["error_rate", "monitoring_watchdog"] },
+    { "id": "timeouts-high", "values": { "timeouts": 2, "terminal_outcomes": 20, "monitoring_watchdog": 1 }, "expected_alerts": ["monitoring_watchdog", "timeout_rate"] },
+    { "id": "cleanup-failed", "values": { "cleanup_failures": 1, "monitoring_watchdog": 1 }, "expected_alerts": ["cleanup_failure", "monitoring_watchdog"] },
+    { "id": "monitoring-down", "values": { "monitoring_pipeline_up": 0, "monitoring_watchdog": 1 }, "expected_alerts": ["monitoring_pipeline_absent", "monitoring_watchdog"] },
+    { "id": "delivery-failed", "values": { "alert_delivery_failures": 1, "monitoring_watchdog": 1 }, "expected_alerts": ["alert_delivery_failure", "monitoring_watchdog"] }
   ]
 }

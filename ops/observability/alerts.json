@@ -43,7 +43,7 @@
     },
     {
       "id": "worker_stalled",
-      "query": "sum(rate(terminal_outcome_total[10m])) == 0 and max(queue_backlog) > 0",
+      "query": "(sum(rate(terminal_outcome_total[10m])) or vector(0)) == 0 and max(queue_backlog) > 0",
       "for_seconds": 300,
       "severity": "page",
       "owner": "gpsart-oncall",
@@ -92,6 +92,16 @@
       "condition": { "metric": "cleanup_failures", "operator": "gt", "threshold": 0 }
     },
     {
+      "id": "monitoring_watchdog",
+      "query": "vector(1) == 1",
+      "for_seconds": 60,
+      "severity": "ticket",
+      "owner": "platform-oncall",
+      "route": "gpsart-deadman",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#monitoring-watchdog",
+      "condition": { "metric": "monitoring_watchdog", "operator": "gte", "threshold": 1 }
+    },
+    {
       "id": "monitoring_pipeline_absent",
       "query": "absent_over_time(gpsart_operational_metric_seen[5m])",
       "for_seconds": 300,
@@ -103,7 +113,7 @@
     },
     {
       "id": "alert_delivery_failure",
-      "query": "increase(alertmanager_notifications_failed_total{receiver=\"gpsart-primary\"}[5m]) > 0",
+      "query": "sum(increase(alertmanager_notifications_failed_total[5m])) > 0",
       "for_seconds": 60,
       "severity": "page",
       "owner": "platform-oncall",
