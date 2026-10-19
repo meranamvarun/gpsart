@@ -288,9 +288,11 @@ impl ProductionRoutingConfig {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(&manifest.graph.extraction_script_path);
-        let extraction_script = std::fs::read(extraction_script_path)
+        let extraction_script = std::fs::read_to_string(extraction_script_path)
             .map_err(|_| ProductionRoutingError::ManifestInvalid)?;
-        if LocalOsmGraph::sha256_hex(&extraction_script) != manifest.graph.extraction_script_sha256
+        let canonical_extraction_script = extraction_script.replace("\r\n", "\n");
+        if LocalOsmGraph::sha256_hex(canonical_extraction_script.as_bytes())
+            != manifest.graph.extraction_script_sha256
             || !graph.has_provenance(SnapshotProvenance {
                 snapshot_id: &manifest.graph.snapshot_id,
                 source_api: &manifest.graph.source_api,

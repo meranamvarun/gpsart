@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -33,6 +34,17 @@ test("production routing requires external checksum-pinned graph inputs", async 
     assert.match(main, new RegExp(variable));
     assert.match(example, new RegExp(variable));
   }
+});
+
+test("the approved manifest pins canonical LF extraction-script bytes", async () => {
+  const [manifestText, script] = await Promise.all([
+    source("../ops/routing/production-pilot-v1.json"),
+    source("../scripts/extract-osm-pedestrian-pilot-snapshot.mjs"),
+  ]);
+  const canonicalBytes = Buffer.from(script.replaceAll("\r\n", "\n"), "utf8");
+  const canonicalSha256 = createHash("sha256").update(canonicalBytes).digest("hex");
+  const manifest = JSON.parse(manifestText);
+  assert.equal(manifest.graph.extraction_script_sha256, canonicalSha256);
 });
 
 test("the connected production slice is a mandatory PostGIS CI gate", async () => {
