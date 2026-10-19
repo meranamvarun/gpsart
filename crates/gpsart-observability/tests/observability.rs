@@ -60,6 +60,22 @@ fn one_opaque_correlation_connects_every_stage_with_only_coarse_dimensions() {
 }
 
 #[test]
+fn production_profile_names_every_required_route_generation_phase() {
+    assert_eq!(
+        MetricName::GraphLoadingLatency.as_str(),
+        "graph_loading_latency_ms"
+    );
+    assert_eq!(
+        MetricName::ValidationLatency.as_str(),
+        "validation_latency_ms"
+    );
+    assert_eq!(
+        MetricName::SnapshotPersistenceLatency.as_str(),
+        "snapshot_persistence_latency_ms"
+    );
+}
+
+#[test]
 fn versions_are_bounded_machine_identifiers_not_custom_text() {
     assert!(
         RouteDimensions::new(

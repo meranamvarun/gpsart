@@ -586,6 +586,7 @@ dependencies = [
  "gpsart-routing",
  "gpx",
  "http-body-util",
+ "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.21",

@@ -8,8 +8,9 @@ test("dashboard covers the release metrics with coarse dimensions", async () => 
   const dashboard = await readJson("../ops/observability/dashboard.json");
   const metrics = new Set(dashboard.panels.flatMap((panel) => panel.metrics));
   for (const required of [
-    "acknowledgement_latency_ms", "queue_delay_ms", "search_latency_ms",
-    "provider_latency_ms", "total_latency_ms", "terminal_outcome_total",
+    "acknowledgement_latency_ms", "queue_delay_ms", "graph_loading_latency_ms",
+    "search_latency_ms", "provider_latency_ms", "validation_latency_ms",
+    "snapshot_persistence_latency_ms", "total_latency_ms", "terminal_outcome_total",
     "cancellation_total", "timeout_total", "provider_calls_total",
     "candidates_returned_total",
   ]) assert.ok(metrics.has(required), `missing dashboard metric ${required}`);
@@ -36,8 +37,11 @@ test("API, queue, fitting, provider and terminal paths emit the shared contract"
   const checks = [
     ["../crates/gpsart-api/src/lib.rs", "AcknowledgementLatency"],
     ["../crates/gpsart-persistence/src/jobs.rs", "QueueDelay"],
+    ["../crates/gpsart-worker/src/production.rs", "GraphLoadingLatency"],
     ["../crates/gpsart-routing/src/heart.rs", "SearchLatency"],
     ["../crates/gpsart-worker/src/lib.rs", "ProviderCalls"],
+    ["../crates/gpsart-worker/src/production.rs", "ValidationLatency"],
+    ["../crates/gpsart-worker/src/production.rs", "SnapshotPersistenceLatency"],
     ["../crates/gpsart-persistence/src/jobs.rs", "TerminalOutcome"],
   ];
   for (const [path, marker] of checks) {

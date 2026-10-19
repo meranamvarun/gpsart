@@ -1,0 +1,30 @@
+{
+  "schema_version": "gpsart-production-load-v1",
+  "concurrent_jobs": 20,
+  "production_worker_replicas": 2,
+  "map_data_version": "osm-bengaluru-central-pedestrian-pilot-v3:sha256:df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
+  "algorithm_version": "algorithm-v1",
+  "maximum_job_seconds": 60,
+  "cases": [
+    { "id": "shape-walk-01", "category": "shape", "template_id": "heart", "activity": "walking", "requested_distance_metres": 1000 },
+    { "id": "shape-walk-02", "category": "shape", "template_id": "heart", "activity": "walking", "requested_distance_metres": 1300 },
+    { "id": "shape-walk-03", "category": "shape", "template_id": "heart", "activity": "walking", "requested_distance_metres": 2000 },
+    { "id": "shape-walk-04", "category": "shape", "template_id": "heart", "activity": "walking", "requested_distance_metres": 1300 },
+    { "id": "shape-walk-05", "category": "shape", "template_id": "heart", "activity": "walking", "requested_distance_metres": 1000 },
+    { "id": "shape-run-01", "category": "shape", "template_id": "heart", "activity": "running", "requested_distance_metres": 1300 },
+    { "id": "shape-run-02", "category": "shape", "template_id": "heart", "activity": "running", "requested_distance_metres": 2000 },
+    { "id": "shape-run-03", "category": "shape", "template_id": "heart", "activity": "running", "requested_distance_metres": 1000 },
+    { "id": "shape-run-04", "category": "shape", "template_id": "heart", "activity": "running", "requested_distance_metres": 1300 },
+    { "id": "shape-run-05", "category": "shape", "template_id": "heart", "activity": "running", "requested_distance_metres": 2000 },
+    { "id": "text-walk-01", "category": "text", "template_id": "HI", "activity": "walking", "requested_distance_metres": 1000 },
+    { "id": "text-walk-02", "category": "text", "template_id": "HI", "activity": "walking", "requested_distance_metres": 1300 },
+    { "id": "text-walk-03", "category": "text", "template_id": "HI", "activity": "walking", "requested_distance_metres": 2000 },
+    { "id": "text-walk-04", "category": "text", "template_id": "HI", "activity": "walking", "requested_distance_metres": 1000 },
+    { "id": "text-walk-05", "category": "text", "template_id": "HI", "activity": "walking", "requested_distance_metres": 1300 },
+    { "id": "text-run-01", "category": "text", "template_id": "HI", "activity": "running", "requested_distance_metres": 1300 },
+    { "id": "text-run-02", "category": "text", "template_id": "HI", "activity": "running", "requested_distance_metres": 2000 },
+    { "id": "text-run-03", "category": "text", "template_id": "HI", "activity": "running", "requested_distance_metres": 1000 },
+    { "id": "text-run-04", "category": "text", "template_id": "HI", "activity": "running", "requested_distance_metres": 1300 },
+    { "id": "text-run-05", "category": "text", "template_id": "HI", "activity": "running", "requested_distance_metres": 2000 }
+  ]
+}

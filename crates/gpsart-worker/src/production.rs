@@ -21,7 +21,7 @@ use std::{
     path::Path,
     sync::{
         Arc,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicU8, AtomicU64, Ordering},
     },
     time::{Duration, Instant, SystemTime},
 };
@@ -35,6 +35,18 @@ pub struct ProductionWorker {
     jobs: PostgresJobCoordinator,
     graph: Arc<LocalOsmGraph>,
     coverage_policy_version: Arc<str>,
+    graph_loading_duration: Duration,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkerJobProfile {
+    pub job_id: Uuid,
+    pub graph_loading: Duration,
+    pub candidate_search: Duration,
+    pub provider: Duration,
+    pub validation: Duration,
+    pub snapshot_persistence: Duration,
+    pub lease_renewals: u32,
 }
 
 impl ProductionWorker {
@@ -45,6 +57,7 @@ impl ProductionWorker {
         coverage_policy_version: &str,
         limits: WorkloadLimits,
     ) -> Result<Self, WorkerError> {
+        let graph_loading_started = Instant::now();
         if coverage_policy_version.trim().is_empty() {
             return Err(WorkerError::InvalidConfiguration);
         }
@@ -53,6 +66,15 @@ impl ProductionWorker {
             fs::read_to_string(checksum_path).map_err(|_| WorkerError::InvalidConfiguration)?;
         let graph = LocalOsmGraph::from_json(&graph_bytes, checksum.trim())
             .map_err(|_| WorkerError::InvalidConfiguration)?;
+        let graph_loading_duration = graph_loading_started.elapsed();
+        MetricEvent::duration(
+            MetricName::GraphLoadingLatency,
+            Correlation::system(),
+            graph_loading_duration,
+            None,
+        )
+        .with_result_class("ok")
+        .emit();
         let jobs = PostgresJobCoordinator::connect_with_limits(database_url, limits)
             .await
             .map_err(|_| WorkerError::DependencyUnavailable)?;
@@ -61,10 +83,15 @@ impl ProductionWorker {
             jobs,
             graph: Arc::new(graph),
             coverage_policy_version: Arc::from(coverage_policy_version),
+            graph_loading_duration,
         })
     }
 
     pub async fn take_one(&self) -> Result<(), WorkerError> {
+        self.take_one_profiled().await.map(|_| ())
+    }
+
+    pub async fn take_one_profiled(&self) -> Result<Option<WorkerJobProfile>, WorkerError> {
         let now = SystemTime::now();
         let Some(lease) = self
             .jobs
@@ -72,12 +99,26 @@ impl ProductionWorker {
             .await
             .map_err(job_error)?
         else {
-            return Ok(());
+            return Ok(None);
         };
-        self.execute(lease).await
+        let mut profile = WorkerJobProfile {
+            job_id: lease.job_id,
+            graph_loading: self.graph_loading_duration,
+            candidate_search: Duration::ZERO,
+            provider: Duration::ZERO,
+            validation: Duration::ZERO,
+            snapshot_persistence: Duration::ZERO,
+            lease_renewals: 0,
+        };
+        self.execute(lease, &mut profile).await?;
+        Ok(Some(profile))
     }
 
-    async fn execute(&self, lease: JobLease) -> Result<(), WorkerError> {
+    async fn execute(
+        &self,
+        lease: JobLease,
+        profile: &mut WorkerJobProfile,
+    ) -> Result<(), WorkerError> {
         let started = SystemTime::now();
         let input = match self.jobs.load_claimed_input(&lease, started).await {
             Ok(input) => input,
@@ -122,11 +163,13 @@ impl ProductionWorker {
             Err(error) => return Err(job_error(error)),
         }
         let stop_reason = Arc::new(AtomicU8::new(SearchStop::None as u8));
+        let provider_elapsed_micros = Arc::new(AtomicU64::new(0));
         let provider = DurableGraph {
             graph: self.graph.clone(),
             jobs: self.jobs.clone(),
             lease: lease.clone(),
             stop_reason: stop_reason.clone(),
+            provider_elapsed_micros: provider_elapsed_micros.clone(),
         };
         let search = CandidateSearch::new(&provider, &provider);
         let control =
@@ -167,7 +210,10 @@ impl ProductionWorker {
                 result = &mut search_future => break result,
                 _ = renewal.tick() => {
                     match self.jobs.renew(&current_lease, SystemTime::now(), LEASE_FOR).await {
-                        Ok(renewed) => current_lease = renewed,
+                        Ok(renewed) => {
+                            current_lease = renewed;
+                            profile.lease_renewals = profile.lease_renewals.saturating_add(1);
+                        }
                         Err(JobError::LeaseLost | JobError::Terminal | JobError::NotFound) => {
                             monitor_control.cancel();
                             return Ok(());
@@ -181,6 +227,8 @@ impl ProductionWorker {
             }
         };
         let elapsed = search_started.elapsed();
+        profile.candidate_search = elapsed;
+        profile.provider = Duration::from_micros(provider_elapsed_micros.load(Ordering::Relaxed));
         let forced_completion = forced_completion(
             SearchStop::from_u8(stop_reason.load(Ordering::Acquire)),
             matches!(&outcome, Ok(MatchOutcome::NoMatch)) && elapsed >= prepared.config.wall_time,
@@ -245,6 +293,7 @@ impl ProductionWorker {
                     }
                     Err(error) => return Err(job_error(error)),
                 }
+                let validation_started = Instant::now();
                 let scored = score_candidate(
                     *candidate,
                     &prepared.template,
@@ -270,6 +319,16 @@ impl ProductionWorker {
                     },
                 )
                 .map_err(|_| WorkerError::InvalidJobInput)?;
+                MetricEvent::duration(
+                    MetricName::ValidationLatency,
+                    Correlation::for_job(lease.job_id).with_attempt(lease.attempt),
+                    validation_started.elapsed(),
+                    None,
+                )
+                .with_result_class("ok")
+                .emit();
+                profile.validation = validation_started.elapsed();
+                let persistence_started = Instant::now();
                 match self
                     .jobs
                     .publish_success(
@@ -282,7 +341,19 @@ impl ProductionWorker {
                     )
                     .await
                 {
-                    Ok(_) | Err(JobError::Terminal | JobError::LeaseLost) => return Ok(()),
+                    Ok(_) => {
+                        profile.snapshot_persistence = persistence_started.elapsed();
+                        MetricEvent::duration(
+                            MetricName::SnapshotPersistenceLatency,
+                            Correlation::for_job(lease.job_id).with_attempt(lease.attempt),
+                            persistence_started.elapsed(),
+                            None,
+                        )
+                        .with_result_class("ok")
+                        .emit();
+                        return Ok(());
+                    }
+                    Err(JobError::Terminal | JobError::LeaseLost) => return Ok(()),
                     Err(error) => return Err(job_error(error)),
                 }
             }
@@ -419,6 +490,7 @@ struct DurableGraph {
     jobs: PostgresJobCoordinator,
     lease: JobLease,
     stop_reason: Arc<AtomicU8>,
+    provider_elapsed_micros: Arc<AtomicU64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -479,11 +551,19 @@ impl RouteProvider for DurableGraph {
         let graph = self.graph.clone();
         let query = query.clone();
         let control = control.clone();
-        match run_provider_call(&self.jobs, &self.lease, Duration::from_millis(1), || {
+        let provider_started = Instant::now();
+        let result = run_provider_call(&self.jobs, &self.lease, Duration::from_millis(1), || {
             tokio::spawn(async move { graph.route(&query, &control).await })
         })
-        .await
-        {
+        .await;
+        self.provider_elapsed_micros.fetch_add(
+            provider_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX)) as u64,
+            Ordering::Relaxed,
+        );
+        match result {
             Ok(Some(Ok(path))) => Ok(path),
             Ok(Some(Err(error))) => {
                 let reason = match error {

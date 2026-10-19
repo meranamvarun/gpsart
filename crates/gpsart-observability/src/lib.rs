@@ -159,8 +159,11 @@ impl Correlation {
 pub enum MetricName {
     AcknowledgementLatency,
     QueueDelay,
+    GraphLoadingLatency,
     SearchLatency,
     ProviderLatency,
+    ValidationLatency,
+    SnapshotPersistenceLatency,
     TotalLatency,
     TerminalOutcome,
     Cancellation,
@@ -179,8 +182,11 @@ impl MetricName {
         match self {
             Self::AcknowledgementLatency => "acknowledgement_latency_ms",
             Self::QueueDelay => "queue_delay_ms",
+            Self::GraphLoadingLatency => "graph_loading_latency_ms",
             Self::SearchLatency => "search_latency_ms",
             Self::ProviderLatency => "provider_latency_ms",
+            Self::ValidationLatency => "validation_latency_ms",
+            Self::SnapshotPersistenceLatency => "snapshot_persistence_latency_ms",
             Self::TotalLatency => "total_latency_ms",
             Self::TerminalOutcome => "terminal_outcome_total",
             Self::Cancellation => "cancellation_total",
