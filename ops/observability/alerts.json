@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "rules": [
     {
       "id": "api_unavailable",
@@ -120,6 +120,26 @@
       "route": "gpsart-deadman",
       "runbook": "docs/runbooks/monitoring-incident-response.md#alert-delivery-failure",
       "condition": { "metric": "alert_delivery_failures", "operator": "gt", "threshold": 0 }
+    },
+    {
+      "id": "backup_stale",
+      "query": "time() - max(kube_cronjob_status_last_successful_time{cronjob=\"gpsart-backup\"}) > 25200",
+      "for_seconds": 300,
+      "severity": "page",
+      "owner": "platform-oncall",
+      "route": "gpsart-deadman",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#backup-stale",
+      "condition": { "metric": "backup_age_seconds", "operator": "gt", "threshold": 25200 }
+    },
+    {
+      "id": "backup_failed",
+      "query": "max_over_time(kube_job_status_failed{job_name=~\"gpsart-backup-.+\"}[15m]) > 0",
+      "for_seconds": 60,
+      "severity": "page",
+      "owner": "platform-oncall",
+      "route": "gpsart-deadman",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#backup-failed",
+      "condition": { "metric": "backup_failures", "operator": "gt", "threshold": 0 }
     }
   ]
 }

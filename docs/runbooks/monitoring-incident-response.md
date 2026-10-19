@@ -61,3 +61,11 @@ The `monitoring_watchdog` alert continuously reaches the independently operated 
 ## Alert delivery failure
 
 Confirm `alertmanager_notifications_failed_total`, test the independent deadman receiver, and contact `platform-oncall` out of band. After repair, inject the controlled delivery test and record both firing and resolved notifications without message payloads from users.
+
+## Backup stale
+
+Page `platform-oncall` when the production backup CronJob has no successful completion within seven hours. Before retrying, the database owner checks repository availability, encryption credentials, storage access-audit events, and whether another backup is running. Keep promotion stopped until a new encrypted snapshot completes and its age is visible.
+
+## Backup failed
+
+Page `platform-oncall` on any failed backup job. Inspect only Kubernetes reason/status fields and the privacy-safe backup exit status; never copy database output, repository credentials, or dump contents into the incident. The database owner decides whether to retry. Escalate to the engineering lead if the measured RPO can no longer be met.

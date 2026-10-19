@@ -1,0 +1,82 @@
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: gpsart-backup-database
+  namespace: __NAMESPACE__
+  labels: { gpsart.dev/release-phase: recovery }
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { kind: ClusterSecretStore, name: __SECRET_STORE__ }
+  target: { name: gpsart-backup-database, creationPolicy: Owner }
+  dataFrom: [{ extract: { key: __BACKUP_DATABASE_SECRET_REF__ } }]
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: gpsart-backup-repository
+  namespace: __NAMESPACE__
+  labels: { gpsart.dev/release-phase: recovery }
+  annotations:
+    gpsart.dev/access-audit-required: "true"
+    gpsart.dev/storage-encryption: "restic-aes256-poly1305"
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { kind: ClusterSecretStore, name: __SECRET_STORE__ }
+  target: { name: gpsart-backup-repository, creationPolicy: Owner }
+  dataFrom: [{ extract: { key: __BACKUP_REPOSITORY_SECRET_REF__ } }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gpsart-backup
+  namespace: __NAMESPACE__
+  labels: { app.kubernetes.io/name: gpsart-backup, gpsart.dev/release-phase: recovery }
+spec:
+  schedule: "__BACKUP_SCHEDULE__"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 4
+  failedJobsHistoryLimit: 4
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata: { labels: { app.kubernetes.io/name: gpsart-backup } }
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: backup
+              image: __RECOVERY_IMAGE__
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef: { name: gpsart-backup-database }
+                - secretRef: { name: gpsart-backup-repository }
+              env:
+                - { name: GPSART_BACKUP_RETENTION_DAYS, value: "__BACKUP_RETENTION_DAYS__" }
+                - { name: RESTIC_CACHE_DIR, value: /tmp/restic-cache }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+                readOnlyRootFilesystem: true
+                runAsUser: 999
+              volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gpsart-backup-required-egress
+  namespace: __NAMESPACE__
+  labels: { gpsart.dev/release-phase: recovery }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: gpsart-backup } }
+  policyTypes: ["Egress"]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: gpsart-postgres } } }]
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } } }]
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - ports: [{ protocol: TCP, port: 443 }]

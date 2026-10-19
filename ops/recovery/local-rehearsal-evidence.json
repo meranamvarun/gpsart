@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "scope": "isolated_recovery_rehearsal",
+  "environment": "development-postgresql-18.6",
+  "productionEvidence": false,
+  "measurements": {
+    "backupDurationMilliseconds": 633,
+    "rpoSeconds": 0,
+    "rtoSeconds": 8.182
+  },
+  "restore": {
+    "trafficAdmittedBeforeVerification": false,
+    "expiredDataRemaining": 0,
+    "snapshotCount": 0,
+    "checks": {
+      "migrationChecksums": "passed",
+      "snapshotReadability": "passed",
+      "authorizationIsolation": "passed",
+      "expiryCleanup": "passed"
+    }
+  },
+  "approvals": [],
+  "limitations": [
+    "No Kubernetes context was available, so this is not a protected-environment rehearsal.",
+    "The local dump was not uploaded to the encrypted access-audited production repository.",
+    "Accountable owner approvals remain required."
+  ]
+}

@@ -1021,6 +1021,88 @@ async fn candidate_snapshot_and_success_outcome_publish_atomically_under_the_lea
 }
 
 #[tokio::test]
+async fn interrupted_worker_is_fenced_after_expired_lease_recovery() {
+    let Some((admin, pool, database_name)) = isolated_database("worker_recovery").await else {
+        return;
+    };
+    seed_owned_request(&pool).await;
+    let coordinator = PostgresJobCoordinator::new(pool.clone());
+    let owner = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let started_at = SystemTime::now();
+    let interrupted = coordinator
+        .claim(Uuid::new_v4(), started_at, Duration::from_secs(1))
+        .await
+        .unwrap()
+        .unwrap();
+    let recovered_at = started_at + Duration::from_secs(2);
+    let recovered = coordinator
+        .claim(Uuid::new_v4(), recovered_at, Duration::from_secs(30))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(recovered.job_id, interrupted.job_id);
+    assert_eq!(recovered.attempt, interrupted.attempt + 1);
+
+    let source = support::scored_candidate("map-v1", 417).await;
+    let snapshot = CandidateSnapshot::from_scored(
+        &source,
+        SnapshotIdentity {
+            id: Uuid::new_v4(),
+            generation_job_id: recovered.job_id,
+            candidate_version: 1,
+            request_revision: 1,
+            generated_at_epoch_seconds: recovered_at
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        coordinator
+            .publish_success(
+                &interrupted,
+                owner,
+                &snapshot,
+                &source,
+                recovered_at + Duration::from_secs(86_400),
+                recovered_at,
+            )
+            .await,
+        Err(JobError::LeaseLost),
+    );
+    assert_eq!(
+        coordinator
+            .publish_success(
+                &recovered,
+                owner,
+                &snapshot,
+                &source,
+                recovered_at + Duration::from_secs(86_400),
+                recovered_at,
+            )
+            .await
+            .unwrap(),
+        gpsart_persistence::jobs::JobState::Succeeded,
+    );
+    let published: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM route_candidates rc
+         JOIN route_candidate_snapshots snapshot ON snapshot.candidate_id=rc.id
+         JOIN generation_job_outcomes outcome ON outcome.generation_job_id=rc.generation_job_id
+         WHERE rc.generation_job_id=$1 AND outcome.outcome='succeeded'",
+    )
+    .bind(recovered.job_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        published, 1,
+        "recovery publishes one complete immutable result"
+    );
+    drop_database(admin, pool, &database_name).await;
+}
+
+#[tokio::test]
 async fn job_status_is_owner_scoped_monotonic_and_atomically_classified() {
     let Some((admin, pool, database_name)) = isolated_database("job_status").await else {
         return;

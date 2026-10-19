@@ -1,0 +1,59 @@
+name: Rehearse isolated backup recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Successful delivery run containing the approved recovery image
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+jobs:
+  restore-and-audit:
+    environment: disaster-recovery
+    runs-on: [self-hosted, linux, x64, gpsart-deploy]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch approved immutable artifact manifest
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh run download "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --pattern 'gpsart-*' --dir release
+      - name: Render isolated recovery environment
+        run: |
+          set -euo pipefail
+          manifest="$(find release -name artifact-manifest.json -print -quit)"
+          namespace="gpsart-recovery-${GITHUB_RUN_ID}"
+          node scripts/verify-recovery.mjs
+          node scripts/render-recovery-rehearsal.mjs deploy/environments/production.json "${manifest}" ops/recovery/production.json "${namespace}" release/recovery.yaml
+          grep -q 'kind: NetworkPolicy' release/recovery.yaml
+          printf '%s' "${namespace}" > release/recovery-namespace
+      - name: Restore and verify before admitting traffic
+        run: |
+          set -euo pipefail
+          started="$(date -u +%s)"
+          kubectl apply --server-side --field-manager=gpsart-recovery -f release/recovery.yaml
+          namespace="$(cat release/recovery-namespace)"
+          kubectl -n "${namespace}" rollout status statefulset/recovery-postgres --timeout=5m
+          kubectl -n "${namespace}" wait --for=condition=complete job/recovery-audit --timeout=60m
+          kubectl -n "${namespace}" logs job/recovery-audit > release/recovery-audit.log
+          rpo_seconds="$(sed -n 's/^backup_age_seconds=//p' release/recovery-audit.log | tail -1)"
+          case "${rpo_seconds}" in ''|*[!0-9]*) echo 'missing sanitized RPO measurement' >&2; exit 1 ;; esac
+          completed="$(date -u +%s)"
+          jq -n --arg namespace "${namespace}" --argjson rpoSeconds "${rpo_seconds}" --argjson rtoSeconds "$((completed-started))" \
+            '{scope:"isolated_recovery_rehearsal",namespace:$namespace,trafficAdmitted:false,rpoSeconds:$rpoSeconds,rtoSeconds:$rtoSeconds}' > release/recovery-measurement.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: gpsart-recovery-${{ github.run_id }}
+          path: |
+            release/recovery-audit.log
+            release/recovery-measurement.json
+          retention-days: 30
+      - name: Remove isolated recovery environment
+        if: always()
+        run: |
+          namespace="$(cat release/recovery-namespace 2>/dev/null || true)"
+          case "${namespace}" in gpsart-recovery-${GITHUB_RUN_ID}) kubectl delete namespace "${namespace}" --wait=true --timeout=10m ;; *) exit 1 ;; esac

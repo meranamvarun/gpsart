@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "backup": {
+    "schedule": "17 */6 * * *",
+    "encryption": "restic-aes256-poly1305",
+    "accessAuditRequired": true,
+    "retentionDays": 7,
+    "repositorySecretRef": "gpsart/production/recovery/repository",
+    "databaseSecretRef": "gpsart/production/database/backup"
+  },
+  "objectives": {
+    "maximumRpoSeconds": 21600,
+    "maximumRtoSeconds": 3600
+  },
+  "owners": ["database_owner", "operations_owner", "privacy_owner"]
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "scenarios": [
+    { "id": "database_interruption", "command": "node scripts/cargo.mjs test -p gpsart-worker --test production_pipeline no_match_timeout_cancellation_and_persistence_failure_stay_truthful -- --exact --test-threads=1", "assertions": ["no_duplicate_publication", "no_corrupted_snapshot", "no_false_success"] },
+    { "id": "api_restart", "command": "node scripts/cargo.mjs test -p gpsart-persistence --test migrations job_status_is_owner_scoped_monotonic_and_atomically_classified -- --exact --test-threads=1", "assertions": ["no_duplicate_publication", "no_corrupted_snapshot", "no_false_success"] },
+    { "id": "worker_termination", "command": "node scripts/cargo.mjs test -p gpsart-persistence --test migrations interrupted_worker_is_fenced_after_expired_lease_recovery -- --exact --test-threads=1", "assertions": ["no_duplicate_publication", "no_corrupted_snapshot", "no_false_success"] },
+    { "id": "stale_lease", "command": "node scripts/cargo.mjs test -p gpsart-persistence --test migrations interrupted_worker_is_fenced_after_expired_lease_recovery -- --exact --test-threads=1", "assertions": ["no_duplicate_publication", "no_corrupted_snapshot", "no_false_success"] },
+    { "id": "partial_candidate_persistence", "command": "node scripts/cargo.mjs test -p gpsart-worker --test production_pipeline no_match_timeout_cancellation_and_persistence_failure_stay_truthful -- --exact --test-threads=1", "assertions": ["no_duplicate_publication", "no_corrupted_snapshot", "no_false_success"] },
+    { "id": "network_partition", "command": "node scripts/cargo.mjs test -p gpsart-worker --test production_pipeline no_match_timeout_cancellation_and_persistence_failure_stay_truthful -- --exact --test-threads=1", "assertions": ["no_duplicate_publication", "no_corrupted_snapshot", "no_false_success"] }
+  ]
+}

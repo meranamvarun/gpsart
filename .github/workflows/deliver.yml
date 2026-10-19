@@ -66,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release/sboms
-          for component in api worker migrate client-edge; do
+          for component in api worker migrate client-edge recovery; do
             metadata="release/${component}.json"
             docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true --push \
               --file "deploy/images/${component}.Containerfile" \
@@ -82,11 +82,13 @@ jobs:
             --arg worker "$(cat release/worker.image)" \
             --arg migrate "$(cat release/migrate.image)" \
             --arg edge "$(cat release/client-edge.image)" \
+            --arg recovery "$(cat release/recovery.image)" \
             --arg apiSbom "sha256:$(cat release/sboms/api.sha256)" \
             --arg workerSbom "sha256:$(cat release/sboms/worker.sha256)" \
             --arg migrateSbom "sha256:$(cat release/sboms/migrate.sha256)" \
             --arg edgeSbom "sha256:$(cat release/sboms/client-edge.sha256)" \
-            '{sourceRevision:$revision,platform:"linux/amd64",images:{api:$api,worker:$worker,migrate:$migrate,clientEdge:$edge},sboms:{api:$apiSbom,worker:$workerSbom,migrate:$migrateSbom,clientEdge:$edgeSbom}}' \
+            --arg recoverySbom "sha256:$(cat release/sboms/recovery.sha256)" \
+            '{sourceRevision:$revision,platform:"linux/amd64",images:{api:$api,worker:$worker,migrate:$migrate,clientEdge:$edge,recovery:$recovery},sboms:{api:$apiSbom,worker:$workerSbom,migrate:$migrateSbom,clientEdge:$edgeSbom,recovery:$recoverySbom}}' \
             > release/artifact-manifest.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -156,8 +158,11 @@ jobs:
           node scripts/verify-monitoring.mjs
           node scripts/render-monitoring.mjs deploy/environments/production.json release/artifact-manifest.json release/production-monitoring.yaml
           kubectl apply --server-side --field-manager=gpsart-delivery -f release/production-monitoring.yaml --selector='gpsart.dev/release-phase=monitoring'
+          node scripts/verify-recovery.mjs
+          node scripts/render-recovery.mjs deploy/environments/production.json release/artifact-manifest.json ops/recovery/production.json release/production-recovery.yaml
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/production-recovery.yaml --selector='gpsart.dev/release-phase=recovery'
           node scripts/smoke-deployment.mjs "https://${GPSART_PRODUCTION_HOSTNAME}"
-          kubectl -n gpsart-production get deployment,statefulset,job,prometheusrule,alertmanagerconfig -o json > release/production-deployment-record.json
+          kubectl -n gpsart-production get deployment,statefulset,job,cronjob,prometheusrule,alertmanagerconfig -o json > release/production-deployment-record.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gpsart-production-record-${{ inputs.source_revision }}

@@ -34,6 +34,11 @@ jobs:
           manifest="$(find release -name artifact-manifest.json -print -quit)"
           test -n "${manifest}"
           revision="$(jq -r .sourceRevision "${manifest}")"
+          current_schema="$(kubectl -n "gpsart-${{ inputs.environment }}" exec statefulset/gpsart-postgres -- psql -U gpsart -d gpsart -Atc 'SELECT max(version) FROM _sqlx_migrations WHERE success')"
+          node scripts/verify-recovery.mjs rollback --current-schema="${current_schema}" --target-revision=previous || {
+            echo "stop rollback and execute reviewed forward repair" >&2
+            exit 1
+          }
           git fetch --depth=1 origin "${revision}"
           git checkout --detach "${revision}"
           node scripts/render-deployment.mjs "deploy/environments/${{ inputs.environment }}.json" "${manifest}" release/rollback.yaml

@@ -29,7 +29,7 @@ sha2 = "0.10.9"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate", "macros", "time", "uuid"] }
 thiserror = "2.0.17"
 subtle = "2.6.1"
-time = "0.3.44"
+time = { version = "0.3.44", features = ["parsing"] }
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5.2", features = ["util"] }
 tracing = "0.1.41"
