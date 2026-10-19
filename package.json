@@ -16,9 +16,10 @@
     "rust:fmt": "node scripts/cargo.mjs fmt --all -- --check",
     "rust:clippy": "node scripts/cargo.mjs clippy --workspace --all-targets -- -D warnings",
     "typecheck": "tsc --noEmit",
-    "test:factory": "node --test tests/deployment-contract.test.mjs tests/factory.test.mjs tests/observability-contract.test.mjs tests/persistence-contract.test.mjs tests/pilot-hardening-contract.test.mjs tests/privacy-contract.test.mjs tests/production-bundle.test.mjs tests/production-worker-contract.test.mjs tests/release-evidence-contract.test.mjs tests/rust-workspace.test.mjs",
+    "test:factory": "node --test tests/deployment-contract.test.mjs tests/factory.test.mjs tests/observability-contract.test.mjs tests/persistence-contract.test.mjs tests/pilot-hardening-contract.test.mjs tests/privacy-contract.test.mjs tests/production-bundle.test.mjs tests/production-performance-contract.test.mjs tests/production-worker-contract.test.mjs tests/release-evidence-contract.test.mjs tests/rust-workspace.test.mjs",
     "test:connected": "node scripts/test-connected.mjs",
     "test:persistence": "node --test tests/persistence-contract.test.mjs && node scripts/cargo.mjs test -p gpsart-persistence --test migrations -- --test-threads=1",
+    "test:performance": "node scripts/cargo.mjs test --release -p gpsart-worker --test production_load -- --ignored --nocapture --test-threads=1",
     "factory:status": "node scripts/factory.mjs status",
     "factory:next": "node scripts/factory.mjs next",
     "factory:verify": "node scripts/factory.mjs verify"

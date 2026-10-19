@@ -15,7 +15,7 @@
   "panels": [
     {
       "title": "Accepted-job latency percentiles",
-      "metrics": ["acknowledgement_latency_ms", "queue_delay_ms", "search_latency_ms", "provider_latency_ms", "total_latency_ms"],
+      "metrics": ["acknowledgement_latency_ms", "queue_delay_ms", "graph_loading_latency_ms", "search_latency_ms", "provider_latency_ms", "validation_latency_ms", "snapshot_persistence_latency_ms", "total_latency_ms"],
       "query": "histogram_quantile([0.50,0.95,0.99], metric_duration_ms) by (metric,activity,distance_bucket,design_category)"
     },
     {

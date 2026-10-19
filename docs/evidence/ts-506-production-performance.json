@@ -1,0 +1,87 @@
+{
+  "schema_version": "gpsart-production-performance-v1",
+  "measured_at": "2026-10-19",
+  "configuration": "ops/performance/ts506-workload.json",
+  "command": "npm run test:performance",
+  "build_profile": "release",
+  "sample_count": 20,
+  "concurrent_jobs": 20,
+  "connected_components": {
+    "api": "production router",
+    "queue": "PostgreSQL/PostGIS",
+    "worker": "ProductionWorker",
+    "routing": "checksum-pinned LocalOsmGraph",
+    "snapshot_store": "PostgreSQL/PostGIS"
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 3 5300U with Radeon Graphics",
+    "physical_cores": 4,
+    "logical_processors": 8,
+    "memory_gib": 7.3,
+    "os": "Microsoft Windows 11 Home Single Language 10.0.26200 64-bit"
+  },
+  "latency_milliseconds": {
+    "acknowledgement": { "p50": 2.4045, "p95": 5.4212, "p99": 20.2548 },
+    "queue": { "p50": 3846.586, "p95": 6202.584, "p99": 6293.846 },
+    "graph_loading": { "p50": 13.5769, "p95": 13.5769, "p99": 13.5769 },
+    "candidate_search": { "p50": 254.9006, "p95": 2675.8042, "p99": 2675.8042 },
+    "provider": { "p50": 250.559, "p95": 2599.83, "p99": 2599.83 },
+    "validation": { "p50": 0.061, "p95": 0.2805, "p99": 0.2805 },
+    "snapshot_persistence": { "p50": 4.9994, "p95": 209.8229, "p99": 209.8229 },
+    "end_to_end": { "p50": 5205.482, "p95": 6462.426, "p99": 6545.399, "maximum": 6545.399 }
+  },
+  "terminal_outcomes": {
+    "cancelled": 1,
+    "no_match": 9,
+    "succeeded": 10
+  },
+  "overload": {
+    "http_status": 429,
+    "retry_after_seconds": 60,
+    "body_code": "rate_limited",
+    "latency_ms": 0.9308
+  },
+  "fairness": {
+    "cancellation_completed_while_saturated": true,
+    "cleanup_completed_while_saturated": true,
+    "cleanup_latency_ms": 14.9584,
+    "lease_renewal_stayed_live": true
+  },
+  "resource_saturation": {
+    "worker_slots": 2,
+    "peak_active_worker_slots": 2,
+    "peak_queue_depth": 20,
+    "worker_slot_utilization_percent": 100
+  },
+  "before_after": {
+    "before_report": "docs/evidence/ts-403-pilot-performance.json",
+    "before_build_profile": "unoptimized test profile",
+    "before_end_to_end_p95_ms": 68886.27,
+    "before_end_to_end_maximum_ms": 75507.12,
+    "after_build_profile": "release",
+    "after_end_to_end_p95_ms": 6462.426,
+    "after_end_to_end_maximum_ms": 6545.399,
+    "change": "The production-equivalent gate now compiles and runs the connected API/PostGIS/worker path with release optimizations and the deployed two-worker capacity. No route algorithm, legality check, threshold, or immutable input was changed."
+  },
+  "gates": [
+    {
+      "gate": "accepted_job_acknowledgement_p95",
+      "target": "at most 1000 ms",
+      "observed": "5.4212 ms",
+      "passed": true
+    },
+    {
+      "gate": "termination_p95",
+      "target": "at most 30000 ms",
+      "observed": "6462.426 ms",
+      "passed": true
+    },
+    {
+      "gate": "termination_hard_maximum",
+      "target": "at most 60000 ms",
+      "observed": "6545.399 ms",
+      "passed": true
+    }
+  ],
+  "privacy_note": "The workload, profiler, and report contain only reviewed synthetic case labels, coarse categories, aggregate timings, terminal classes, immutable version pins, and resource counts. No requested or confirmed coordinates, route geometry, cookies, credentials, or personal data are emitted."
+}
