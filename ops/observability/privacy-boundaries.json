@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "forbidden_fields": ["query_strings", "request_bodies", "cookies", "authorization_headers", "csrf_headers", "exact_coordinates", "full_traces", "custom_text", "credentials", "tokens"],
+  "boundaries": [
+    { "id": "edge", "reviewed": true, "controls": ["method/status/size/duration-only access format", "ingress access log disabled"], "evidence": ["deploy/edge/nginx.conf", "deploy/kubernetes/stack.yaml.tmpl"] },
+    { "id": "application", "reviewed": true, "controls": ["typed structured metrics", "closed result classes", "secret Debug redaction"], "evidence": ["crates/gpsart-observability/src/lib.rs", "crates/gpsart-config/src/lib.rs"] },
+    { "id": "database_audit", "reviewed": true, "controls": ["statement and parameter logging disabled by deployment contract", "opaque identifiers only in operator correlation"], "evidence": ["deploy/kubernetes/stack.yaml.tmpl"] },
+    { "id": "monitoring", "reviewed": true, "controls": ["closed low-cardinality dimensions", "correlation identifiers excluded from metric labels"], "evidence": ["ops/observability/dashboard.json", "ops/observability/collector-contract.json"] },
+    { "id": "error_reporting", "reviewed": true, "controls": ["no request capture", "no body or header attachment", "public error class only"], "evidence": ["ops/observability/collector-contract.json"] },
+    { "id": "support", "reviewed": true, "controls": ["opaque correlation UUID and public outcome only", "private payloads prohibited in tickets"], "evidence": ["docs/runbooks/monitoring-incident-response.md"] }
+  ]
+}

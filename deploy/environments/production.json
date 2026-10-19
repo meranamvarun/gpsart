@@ -10,5 +10,9 @@
   "storageClassName": "encrypted-rwo",
   "storageEncrypted": true,
   "certificateIssuer": "gpsart-production",
+  "monitoringOwner": "gpsart-oncall",
+  "alertReceiverSecretRef": "gpsart-alert-receiver",
+  "deadmanReceiverSecretRef": "gpsart-deadman-receiver",
+  "runbookBaseUrl": "https://github.com/meranamvarun/gpsart/blob/{source_revision}/docs/runbooks/monitoring-incident-response.md",
   "replicas": { "edge": 2, "api": 2, "worker": 2 }
 }

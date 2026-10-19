@@ -41,9 +41,14 @@ const resolution = {
 const jobId = "3f8b4f31-ee11-4f11-87aa-b4f15fc00cf1";
 
 function json(value: unknown, status = 200, headers?: HeadersInit): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("content-type", "application/json");
+  if (typeof value === "object" && value !== null && "job_id" in value && !responseHeaders.has("x-correlation-id")) {
+    responseHeaders.set("x-correlation-id", String(value.job_id));
+  }
   return new Response(JSON.stringify(value), {
     status,
-    headers: { "content-type": "application/json", ...headers },
+    headers: responseHeaders,
   });
 }
 
@@ -107,6 +112,36 @@ test("a job cannot start before explicit confirmation and duplicate submission s
   assert.equal(workflow.snapshot.phase, "polling");
   const stored = JSON.parse(storage.getItem(ACTIVE_JOB_STORAGE_KEY)!);
   assert.equal(stored.expiresAtEpochSeconds, null, "start-resolution expiry is not the job expiry");
+});
+
+test("a successful creation rejects a correlation header that does not bind to the accepted job", async () => {
+  const workflow = new PlannerWorkflow({
+    fetcher: async (url) => {
+      const target = String(url);
+      if (target.endsWith("/starts/resolve")) return json(resolution);
+      if (target.includes("/confirm")) return json({ confirmed_start: resolution.candidate_network_point });
+      if (target.endsWith("/route-jobs")) {
+        return json(
+          { job_id: jobId, request_revision: 1 },
+          202,
+          { "x-correlation-id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+        );
+      }
+      throw new Error("unexpected request");
+    },
+    storage: new MemoryStorage(),
+    csrfToken: () => "csrf",
+    currentRevision: () => request.revision,
+    schedule: () => 1,
+    cancelSchedule: () => undefined,
+    now: () => 1_800_000_000_000,
+  });
+
+  await workflow.submit(request, proposed);
+  await workflow.confirmAndStart();
+  assert.equal(workflow.snapshot.phase, "error");
+  assert.equal(workflow.snapshot.issue, "invalid_response");
+  assert.equal(workflow.snapshot.jobId, null);
 });
 
 test("an uncertain creation retry recovers the exact confirmed request before newer work", async () => {

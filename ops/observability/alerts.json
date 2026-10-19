@@ -1,41 +1,115 @@
 {
-  "version": 1,
+  "version": 2,
   "rules": [
+    {
+      "id": "api_unavailable",
+      "query": "min(up{service=\"gpsart-api\"}) < 1",
+      "for_seconds": 120,
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#api-unavailable",
+      "condition": { "metric": "api_health", "operator": "lt", "threshold": 1 }
+    },
+    {
+      "id": "acknowledgement_latency",
+      "query": "histogram_quantile(0.95,sum(rate(acknowledgement_latency_ms_bucket[5m])) by (le)) > 1000",
+      "for_seconds": 300,
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#acknowledgement-latency",
+      "condition": { "metric": "acknowledgement_p95_ms", "operator": "gt", "threshold": 1000 }
+    },
     {
       "id": "queue_backlog",
       "query": "max_over_time(queue_backlog[5m]) > 20",
       "for_seconds": 300,
-      "runbook": "docs/runbooks/observability-alerts.md#queue-backlog"
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#queue-backlog",
+      "condition": { "metric": "queue_backlog", "operator": "gt", "threshold": 20 }
     },
     {
       "id": "stuck_leases",
       "query": "max_over_time(stuck_leases[5m]) > 0",
       "for_seconds": 120,
-      "runbook": "docs/runbooks/observability-alerts.md#stuck-leases"
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#stale-worker-or-stuck-lease",
+      "condition": { "metric": "stuck_leases", "operator": "gt", "threshold": 0 }
+    },
+    {
+      "id": "worker_stalled",
+      "query": "sum(rate(terminal_outcome_total[10m])) == 0 and max(queue_backlog) > 0",
+      "for_seconds": 300,
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#stale-worker-or-stuck-lease",
+      "condition": { "metric": "worker_throughput", "operator": "lte", "threshold": 0, "when_metric": "queue_backlog", "when_operator": "gt", "when_threshold": 0 }
     },
     {
       "id": "provider_failure_rate",
-      "query": "sum(rate(provider_failures_total[5m])) / clamp_min(sum(rate(provider_calls_total[5m])), 1) > 0.10",
+      "query": "sum(rate(provider_failures_total[5m])) / clamp_min(sum(rate(provider_calls_total[5m])),1) > 0.10",
       "for_seconds": 300,
-      "runbook": "docs/runbooks/observability-alerts.md#provider-failures"
+      "severity": "ticket",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#provider-failures",
+      "condition": { "metric": "provider_failures", "denominator": "provider_calls", "operator": "gt", "threshold": 0.1 }
     },
     {
       "id": "error_rate",
-      "query": "sum(rate(errors_total[5m])) / clamp_min(sum(rate(terminal_outcome_total[5m])), 1) > 0.05",
+      "query": "sum(rate(errors_total[5m])) / clamp_min(sum(rate(terminal_outcome_total[5m])),1) > 0.05",
       "for_seconds": 300,
-      "runbook": "docs/runbooks/observability-alerts.md#error-rate"
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#error-rate",
+      "condition": { "metric": "errors", "denominator": "terminal_outcomes", "operator": "gt", "threshold": 0.05 }
     },
     {
       "id": "timeout_rate",
-      "query": "sum(rate(timeout_total[5m])) / clamp_min(sum(rate(terminal_outcome_total[5m])), 1) > 0.05",
+      "query": "sum(rate(timeout_total[5m])) / clamp_min(sum(rate(terminal_outcome_total[5m])),1) > 0.05",
       "for_seconds": 300,
-      "runbook": "docs/runbooks/observability-alerts.md#timeout-rate"
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#timeout-rate",
+      "condition": { "metric": "timeouts", "denominator": "terminal_outcomes", "operator": "gt", "threshold": 0.05 }
     },
     {
       "id": "cleanup_failure",
       "query": "increase(cleanup_failures_total[10m]) > 0",
       "for_seconds": 60,
-      "runbook": "docs/runbooks/observability-alerts.md#cleanup-failure"
+      "severity": "page",
+      "owner": "gpsart-oncall",
+      "route": "gpsart-primary",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#cleanup-failure",
+      "condition": { "metric": "cleanup_failures", "operator": "gt", "threshold": 0 }
+    },
+    {
+      "id": "monitoring_pipeline_absent",
+      "query": "absent_over_time(gpsart_operational_metric_seen[5m])",
+      "for_seconds": 300,
+      "severity": "page",
+      "owner": "platform-oncall",
+      "route": "gpsart-deadman",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#monitoring-system-outage",
+      "condition": { "metric": "monitoring_pipeline_up", "operator": "lt", "threshold": 1 }
+    },
+    {
+      "id": "alert_delivery_failure",
+      "query": "increase(alertmanager_notifications_failed_total{receiver=\"gpsart-primary\"}[5m]) > 0",
+      "for_seconds": 60,
+      "severity": "page",
+      "owner": "platform-oncall",
+      "route": "gpsart-deadman",
+      "runbook": "docs/runbooks/monitoring-incident-response.md#alert-delivery-failure",
+      "condition": { "metric": "alert_delivery_failures", "operator": "gt", "threshold": 0 }
     }
   ]
 }

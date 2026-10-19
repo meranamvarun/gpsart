@@ -418,7 +418,8 @@ export class PlannerWorkflow {
       return;
     }
     const accepted = decodeAcceptedRouteJob(creationPayload);
-    if (!accepted || accepted.requestRevision !== pending.request.revision) {
+    const correlationId = creation.headers.get("x-correlation-id");
+    if (!accepted || correlationId !== accepted.jobId || accepted.requestRevision !== pending.request.revision) {
       if (token === this.generation) {
         this.update({ ...this.value, phase: "error", issue: "invalid_response" });
       }

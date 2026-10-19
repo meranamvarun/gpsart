@@ -22,10 +22,11 @@ test("dashboard covers the release metrics with coarse dimensions", async () => 
 
 test("alert rules cover every required operational failure", async () => {
   const alerts = await readJson("../ops/observability/alerts.json");
-  assert.deepEqual(alerts.rules.map((rule) => rule.id).sort(), [
+  const ids = new Set(alerts.rules.map((rule) => rule.id));
+  for (const id of [
     "cleanup_failure", "error_rate", "provider_failure_rate", "queue_backlog",
     "stuck_leases", "timeout_rate",
-  ]);
+  ]) assert.ok(ids.has(id), `missing alert ${id}`);
   for (const rule of alerts.rules) {
     assert.ok(rule.query.length > 10);
     assert.match(rule.runbook, /^docs\/runbooks\//);

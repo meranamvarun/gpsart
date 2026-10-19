@@ -124,6 +124,15 @@ spec:
           imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef: { name: gpsart-postgres-bootstrap }
+          args:
+            - -c
+            - log_statement=none
+            - -c
+            - log_min_duration_statement=-1
+            - -c
+            - log_connections=off
+            - -c
+            - log_disconnections=off
           ports: [{ name: postgres, containerPort: 5432 }]
           securityContext:
             allowPrivilegeEscalation: false
@@ -365,6 +374,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "2"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "70"
     nginx.ingress.kubernetes.io/enable-access-log: "false"
+    nginx.ingress.kubernetes.io/enable-rewrite-log: "false"
 spec:
   ingressClassName: nginx
   tls:

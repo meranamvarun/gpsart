@@ -118,8 +118,11 @@ jobs:
           kubectl -n gpsart-staging rollout status deployment/gpsart-api --timeout=5m
           kubectl -n gpsart-staging rollout status deployment/gpsart-worker --timeout=5m
           kubectl -n gpsart-staging rollout status deployment/gpsart-client-edge --timeout=5m
+          node scripts/verify-monitoring.mjs
+          node scripts/render-monitoring.mjs deploy/environments/staging.json release/artifact-manifest.json release/staging-monitoring.yaml
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/staging-monitoring.yaml --selector='gpsart.dev/release-phase=monitoring'
           node scripts/smoke-deployment.mjs "https://${GPSART_STAGING_HOSTNAME}"
-          kubectl -n gpsart-staging get deployment,statefulset,job -o json > release/staging-deployment-record.json
+          kubectl -n gpsart-staging get deployment,statefulset,job,prometheusrule,alertmanagerconfig -o json > release/staging-deployment-record.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gpsart-staging-record-${{ inputs.source_revision }}
@@ -150,8 +153,11 @@ jobs:
           kubectl -n gpsart-production rollout status deployment/gpsart-api --timeout=5m
           kubectl -n gpsart-production rollout status deployment/gpsart-worker --timeout=5m
           kubectl -n gpsart-production rollout status deployment/gpsart-client-edge --timeout=5m
+          node scripts/verify-monitoring.mjs
+          node scripts/render-monitoring.mjs deploy/environments/production.json release/artifact-manifest.json release/production-monitoring.yaml
+          kubectl apply --server-side --field-manager=gpsart-delivery -f release/production-monitoring.yaml --selector='gpsart.dev/release-phase=monitoring'
           node scripts/smoke-deployment.mjs "https://${GPSART_PRODUCTION_HOSTNAME}"
-          kubectl -n gpsart-production get deployment,statefulset,job -o json > release/production-deployment-record.json
+          kubectl -n gpsart-production get deployment,statefulset,job,prometheusrule,alertmanagerconfig -o json > release/production-deployment-record.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gpsart-production-record-${{ inputs.source_revision }}

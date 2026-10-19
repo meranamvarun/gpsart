@@ -1,7 +1,13 @@
 {
-  "version": 1,
-  "title": "GPSART pilot operations",
-  "source": "operational_metric structured events",
+  "version": 2,
+  "uid": "gpsart-production-operations",
+  "title": "GPSART production operations",
+  "source": "operational_metric structured events promoted by the platform collector",
+  "schemaVersion": 39,
+  "tags": ["gpsart", "production", "privacy-safe"],
+  "timezone": "utc",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
   "allowed_dimensions": [
     "activity",
     "distance_bucket",
@@ -14,19 +20,67 @@
   ],
   "panels": [
     {
-      "title": "Accepted-job latency percentiles",
-      "metrics": ["acknowledgement_latency_ms", "queue_delay_ms", "graph_loading_latency_ms", "search_latency_ms", "provider_latency_ms", "validation_latency_ms", "snapshot_persistence_latency_ms", "total_latency_ms"],
-      "query": "histogram_quantile([0.50,0.95,0.99], metric_duration_ms) by (metric,activity,distance_bucket,design_category)"
+      "title": "API health and accepted-job acknowledgement",
+      "id": 1,
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "metrics": ["api_health", "acknowledgement_latency_ms"],
+      "query": "min(up{service=\"gpsart-api\"}); histogram_quantile(0.95,sum(rate(acknowledgement_latency_ms_bucket[5m])) by (le))",
+      "targets": [
+        { "refId": "A", "expr": "min(up{service=\"gpsart-api\"})", "legendFormat": "API health" },
+        { "refId": "B", "expr": "histogram_quantile(0.95,sum(rate(acknowledgement_latency_ms_bucket[5m])) by (le))", "legendFormat": "ack p95" }
+      ]
     },
     {
-      "title": "Terminal result distribution",
-      "metrics": ["terminal_outcome_total", "cancellation_total", "timeout_total"],
-      "query": "sum(rate(metric_count[5m])) by (metric,result_class,activity,design_category)"
+      "title": "Queue delay and backlog",
+      "id": 2,
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "metrics": ["queue_delay_ms", "queue_backlog", "stuck_leases"],
+      "query": "histogram_quantile(0.95,sum(rate(queue_delay_ms_bucket[5m])) by (le)); max(queue_backlog); max(stuck_leases)",
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95,sum(rate(queue_delay_ms_bucket[5m])) by (le))", "legendFormat": "queue p95" },
+        { "refId": "B", "expr": "max(queue_backlog)", "legendFormat": "backlog" },
+        { "refId": "C", "expr": "max(stuck_leases)", "legendFormat": "stuck leases" }
+      ]
     },
     {
-      "title": "Provider use and candidates",
-      "metrics": ["provider_calls_total", "candidates_returned_total"],
-      "query": "sum(rate(metric_count[5m])) by (metric,result_class,activity,distance_bucket)"
+      "title": "Worker throughput and route search",
+      "id": 3,
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "metrics": ["worker_throughput", "graph_loading_latency_ms", "search_latency_ms", "provider_latency_ms", "validation_latency_ms", "snapshot_persistence_latency_ms", "total_latency_ms"],
+      "query": "sum(rate(terminal_outcome_total[5m])); histogram_quantile(0.95,sum(rate(search_latency_ms_bucket[5m])) by (le))",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(terminal_outcome_total[5m]))", "legendFormat": "terminal jobs/s" },
+        { "refId": "B", "expr": "histogram_quantile(0.95,sum(rate(search_latency_ms_bucket[5m])) by (le))", "legendFormat": "search p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.95,sum(rate(total_latency_ms_bucket[5m])) by (le))", "legendFormat": "end-to-end p95" }
+      ]
+    },
+    {
+      "title": "Truthful terminal outcomes",
+      "id": 4,
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "metrics": ["terminal_outcome_total", "candidates_returned_total", "timeout_total", "cancellation_total"],
+      "query": "sum(rate(terminal_outcome_total[5m])) by (result_class); sum(rate(candidates_returned_total[5m])) by (result_class); sum(rate(timeout_total[5m])); sum(rate(cancellation_total[5m]))",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(terminal_outcome_total[5m])) by (result_class)", "legendFormat": "{{result_class}}" },
+        { "refId": "B", "expr": "sum(rate(timeout_total[5m]))", "legendFormat": "timeouts/s" },
+        { "refId": "C", "expr": "sum(rate(cancellation_total[5m]))", "legendFormat": "cancellations/s" }
+      ]
+    },
+    {
+      "title": "Provider failures and cleanup",
+      "id": 5,
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "metrics": ["provider_calls_total", "provider_failures_total", "cleanup_failures_total"],
+      "query": "sum(rate(provider_failures_total[5m])) / clamp_min(sum(rate(provider_calls_total[5m])),1); increase(cleanup_failures_total[10m])",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(provider_failures_total[5m])) / clamp_min(sum(rate(provider_calls_total[5m])),1)", "legendFormat": "provider failure ratio" },
+        { "refId": "B", "expr": "increase(cleanup_failures_total[10m])", "legendFormat": "cleanup failures" }
+      ]
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "input": "kubernetes_container_stderr_json",
+  "selector": { "event": "operational_metric", "services": ["gpsart-api", "gpsart-worker"] },
+  "metric_name_field": "metric",
+  "value_fields": ["duration_ms", "count"],
+  "metric_labels": ["activity", "distance_bucket", "design_category", "profile_version", "template_version", "map_data_version", "algorithm_version", "result_class"],
+  "restricted_search_fields": ["correlation_id", "job_id", "attempt", "provider_call"],
+  "drop_unknown_fields": true,
+  "health_metric": "gpsart_operational_metric_seen",
+  "prohibited_capture": ["query_strings", "request_bodies", "cookies", "authorization_headers", "csrf_headers", "exact_coordinates", "full_traces", "custom_text", "credentials", "tokens"]
+}

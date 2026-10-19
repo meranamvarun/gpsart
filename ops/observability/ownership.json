@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "routes": {
+    "gpsart-primary": { "owner": "gpsart-oncall", "escalates_to": "platform-oncall", "receiver_secret_key": "url" },
+    "gpsart-deadman": { "owner": "platform-oncall", "escalates_to": "engineering-lead", "receiver_secret_key": "url" }
+  },
+  "owners": {
+    "gpsart-oncall": { "responsibility": "application triage and mitigation" },
+    "platform-oncall": { "responsibility": "monitoring, delivery, database, and cluster escalation" },
+    "engineering-lead": { "responsibility": "incident command and closure approval" }
+  }
+}
