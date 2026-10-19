@@ -1,8 +1,8 @@
 # TS-508 backup, recovery, and rollback handoff
 
-**Version:** 1  
-**Producer:** `codex/root`  
-**Consumers:** TS-603  
+**Version:** 1
+**Producer:** `codex/root`
+**Consumers:** TS-603
 **Compatibility:** additive fifth `recovery` image in the immutable artifact manifest; migrations remain forward-only and runtime rollback is allowed only inside the checked schema window.
 
 ## Published contract

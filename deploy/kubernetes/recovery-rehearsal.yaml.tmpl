@@ -43,7 +43,7 @@ spec:
     metadata: { labels: { app.kubernetes.io/name: recovery-postgres } }
     spec:
       automountServiceAccountToken: false
-      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      securityContext: { runAsNonRoot: true, fsGroup: 999, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: postgres
           image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5

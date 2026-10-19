@@ -13,6 +13,7 @@ test("production dashboard covers every operational signal with bounded labels",
     "api_health", "acknowledgement_latency_ms", "queue_delay_ms", "queue_backlog",
     "stuck_leases", "worker_throughput", "search_latency_ms", "terminal_outcome_total",
     "provider_failures_total", "timeout_total", "cancellation_total", "cleanup_failures_total",
+    "backup_last_success_timestamp", "backup_age_seconds", "backup_failures",
   ]);
   const actual = new Set(dashboard.panels.flatMap((panel) => panel.metrics));
   for (const metric of required) assert.ok(actual.has(metric), `missing dashboard metric ${metric}`);
@@ -52,6 +53,11 @@ test("every alert is owned, routed, runnable, and passes controlled signal tests
     byId.get("alert_delivery_failure")?.query ?? "",
     /receiver\s*=/,
     "notification-failure detection must not depend on Alertmanager's optional receiver-name metric label",
+  );
+  assert.match(
+    byId.get("backup_stale")?.query ?? "",
+    /absent\s*\(/,
+    "backup age monitoring must alert before the first successful backup metric exists",
   );
 });
 

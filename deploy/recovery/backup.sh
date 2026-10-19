@@ -20,5 +20,8 @@ fi
 if ! restic snapshots --tag gpsart-production >/dev/null 2>&1; then
   restic init >/dev/null
 fi
-pg_dump --format=custom --no-owner --no-acl | restic backup --stdin --stdin-filename gpsart.dump --tag gpsart-production --tag automated
+backup_dir="$(mktemp -d)"
+trap 'rm -rf -- "$backup_dir"' EXIT HUP INT TERM
+pg_dump --format=custom --no-owner --no-acl --file "$backup_dir/gpsart.dump"
+restic backup "$backup_dir/gpsart.dump" --tag gpsart-production --tag automated
 restic forget --keep-within "${GPSART_BACKUP_RETENTION_DAYS}d" --prune --tag gpsart-production

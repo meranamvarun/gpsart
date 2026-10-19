@@ -33,7 +33,7 @@ Run every command in `ops/recovery/failure-injection.json`. Together they exerci
 
 ## Rollback compatibility
 
-Migrations are forward-only. Before applying an older runtime, `.github/workflows/rollback.yml` reads the current successful schema version and passes it with the named target to `scripts/verify-recovery.mjs rollback`. The closed compatibility window in `ops/recovery/rollback-compatibility.json` is reviewed with each migration that changes a binary/database contract.
+Migrations are forward-only. Before applying an older runtime, `.github/workflows/rollback.yml` reads the current successful schema version and passes it with the selected manifest's exact source revision to `scripts/verify-recovery.mjs rollback`. Each exact revision in the closed compatibility window in `ops/recovery/rollback-compatibility.json` is reviewed with every migration that changes a binary/database contract; a generic alias such as `previous` is forbidden.
 
 If the schema is outside the target window, stop rollback, keep traffic stopped, and execute a reviewed forward repair. Never run an old migrator, reverse a migration, or guess compatibility. After an allowed rollback, repeat readiness, the connected smoke, snapshot reads, and owner-isolation checks before traffic is restored.
 

@@ -27,7 +27,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Fetch approved immutable artifact-manifest
-        run: gh run download "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --pattern 'gpsart-*' --dir release
+        run: |
+          set -euo pipefail
+          run_metadata="$(gh run view "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --json conclusion,workflowName)"
+          test "$(jq -r .conclusion <<<"${run_metadata}")" = success
+          test "$(jq -r .workflowName <<<"${run_metadata}")" = 'Build and deliver production stack'
+          gh run download "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --pattern 'gpsart-*' --dir release
       - name: Apply controlled binary rollback
         run: |
           set -euo pipefail
@@ -35,7 +40,7 @@ jobs:
           test -n "${manifest}"
           revision="$(jq -r .sourceRevision "${manifest}")"
           current_schema="$(kubectl -n "gpsart-${{ inputs.environment }}" exec statefulset/gpsart-postgres -- psql -U gpsart -d gpsart -Atc 'SELECT max(version) FROM _sqlx_migrations WHERE success')"
-          node scripts/verify-recovery.mjs rollback --current-schema="${current_schema}" --target-revision=previous || {
+          node scripts/verify-recovery.mjs rollback --current-schema="${current_schema}" --target-revision="${revision}" || {
             echo "stop rollback and execute reviewed forward repair" >&2
             exit 1
           }

@@ -20,11 +20,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Fetch approved immutable artifact manifest
         env: { GH_TOKEN: "${{ github.token }}" }
-        run: gh run download "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --pattern 'gpsart-*' --dir release
+        run: |
+          set -euo pipefail
+          run_metadata="$(gh run view "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --json conclusion,workflowName)"
+          test "$(jq -r .conclusion <<<"${run_metadata}")" = success
+          test "$(jq -r .workflowName <<<"${run_metadata}")" = 'Build and deliver production stack'
+          gh run download "${{ inputs.artifact_run_id }}" --repo "${{ github.repository }}" --pattern 'gpsart-*' --dir release
       - name: Render isolated recovery environment
         run: |
           set -euo pipefail
           manifest="$(find release -name artifact-manifest.json -print -quit)"
+          test -n "${manifest}"
+          revision="$(jq -er '.sourceRevision | select(test("^[a-f0-9]{40}$"))' "${manifest}")"
+          git fetch --depth=1 origin "${revision}"
+          git checkout --detach "${revision}"
           namespace="gpsart-recovery-${GITHUB_RUN_ID}"
           node scripts/verify-recovery.mjs
           node scripts/render-recovery-rehearsal.mjs deploy/environments/production.json "${manifest}" ops/recovery/production.json "${namespace}" release/recovery.yaml

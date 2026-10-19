@@ -1,5 +1,6 @@
 use gpsart_persistence::{
     GuestSessionStore, MigrationStatus, PostgresGuestSessionStore, migration_status,
+    routes::CandidateSnapshot,
 };
 use sqlx::{
     PgPool, Row,
@@ -107,24 +108,20 @@ async fn audit() -> Result<(), Box<dyn std::error::Error>> {
             .fetch_all(&pool)
             .await?;
     for row in &snapshot_rows {
-        let snapshot: serde_json::Value = row.try_get("snapshot_json")?;
-        if !snapshot.is_object()
-            || snapshot
-                .pointer("/geometry/type")
-                .and_then(|value| value.as_str())
-                != Some("LineString")
-        {
-            return Err("an immutable route snapshot is unreadable".into());
-        }
+        let snapshot: CandidateSnapshot = serde_json::from_value(row.try_get("snapshot_json")?)
+            .map_err(|_| "an immutable route snapshot is unreadable")?;
+        snapshot
+            .validate()
+            .map_err(|_| "an immutable route snapshot is invalid")?;
     }
 
     let false_successes: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM generation_jobs gj
-         JOIN generation_job_outcomes outcome ON outcome.generation_job_id=gj.id
+         LEFT JOIN generation_job_outcomes outcome ON outcome.generation_job_id=gj.id
          LEFT JOIN LATERAL unnest(outcome.result_ids) result(candidate_id) ON true
          LEFT JOIN route_candidate_snapshots snapshot ON snapshot.candidate_id=result.candidate_id
          WHERE gj.state='succeeded'
-           AND (outcome.outcome <> 'succeeded' OR result.candidate_id IS NULL OR snapshot.candidate_id IS NULL)",
+           AND (outcome.outcome IS DISTINCT FROM 'succeeded' OR result.candidate_id IS NULL OR snapshot.candidate_id IS NULL)",
     )
     .fetch_one(&pool)
     .await?;

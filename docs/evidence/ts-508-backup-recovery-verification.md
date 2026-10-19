@@ -25,3 +25,11 @@ Before TS-508 can truthfully become `done`, the protected disaster-recovery envi
 - explicit database-owner, operations-owner, privacy-owner, and independent QA decisions.
 
 The workflow uploads only sanitized audit and timing artifacts. Exact coordinates, geometry, request bodies, cookies, credentials, database URLs, object names, and dump contents are excluded.
+
+## Independent QA review
+
+Independent QA reviewed `9e30235..092c629` and the subsequent QA corrections on 2026-10-19. The review found and fixed INC-069 through INC-073: a pipeline that could hide `pg_dump` failure, a false-success audit that omitted missing outcome rows, rollback compatibility not bound to an exact reviewed revision, missing writable-volume group ownership in the recovery PostgreSQL pod, and incomplete backup success/age monitoring. The corrected audit validates complete `CandidateSnapshot` values rather than only checking the geometry type.
+
+Recovery and monitoring contracts passed 11/11; deployment contracts passed 8/8. The three distinct database-backed commands referenced by the six-scenario failure-injection matrix passed, including truthful persistence failure, owner-scoped durable status, and stale-lease fencing. The final database-backed `npm run factory:verify` passed in 98.3 seconds, including strict Clippy, 19 PostgreSQL migration tests, worker tests, client checks, production build, and factory contracts. PyYAML 6.0.3 parsed all three changed workflows plus the four-document production recovery render and eight-document isolated rehearsal render.
+
+QA does not approve TS-508 as complete. The local commands do not constitute a real database interruption, API restart, worker termination, or network partition in the protected environment. No successful encrypted production-repository backup/access-audit record, isolated Kubernetes restore transcript, compatible and unsafe live rollback transcripts, production RPO/RTO measurement, data-deletion approval, operations review, or accountable owner approvals were supplied. The story therefore remains `in_review` and must not be marked `done` or treated as completed release evidence.

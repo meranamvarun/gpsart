@@ -31,7 +31,9 @@ test("automated backups are encrypted, audited, retained at most seven days, and
   assert.match(image, /restic\/restic@sha256:[a-f0-9]{64}/);
   assert.match(image, /postgis\/postgis:16-3\.4@sha256:[a-f0-9]{64}/);
   assert.match(backup, /pg_dump/);
-  assert.match(backup, /restic backup --stdin/);
+  assert.doesNotMatch(backup, /pg_dump[^\n]*\|[^\n]*restic backup/);
+  assert.match(backup, /pg_dump[^\n]*--file/);
+  assert.match(backup, /restic backup[^\n]*gpsart\.dump/);
   assert.match(backup, /forget --keep-within "\$\{GPSART_BACKUP_RETENTION_DAYS\}d" --prune/);
   assert.doesNotMatch(backup, /set -x|echo .*DATABASE_URL|echo .*RESTIC_PASSWORD/);
 
@@ -66,6 +68,7 @@ test("restore rehearsal remains isolated and verifies checksums, readable snapsh
   assert.match(audit, /PostgresGuestSessionStore/);
   assert.match(audit, /route_candidate_snapshots/);
   assert.match(audit, /ownership_mismatches/);
+  assert.match(audit, /LEFT JOIN generation_job_outcomes/);
   assert.match(audit, /--repository-age/);
   assert.doesNotMatch(audit, /ST_AsText|canonical_route|requested_pin|token_hash/);
 
@@ -73,6 +76,7 @@ test("restore rehearsal remains isolated and verifies checksums, readable snapsh
   const artifacts = { images: { recovery: `registry.test/gpsart/recovery@${digest}` } };
   const rendered = renderRecoveryRehearsal(template, environment, artifacts, recoveryConfig, "gpsart-recovery-123");
   assert.match(rendered, /kind: NetworkPolicy/);
+  assert.match(rendered, /fsGroup: 999/);
   assert.doesNotMatch(rendered, /kind: (?:Ingress|LoadBalancer)/);
   assert.doesNotMatch(rendered, /__[A-Z_]+__/);
   const backupRendered = renderRecovery(backupTemplate, environment, artifacts, recoveryConfig);
@@ -101,11 +105,12 @@ test("failure injection and publication invariants are mandatory recovery eviden
 
 test("rollback is schema-aware, bounded, and fails closed outside its compatibility window", async () => {
   const policy = await json("ops/recovery/rollback-compatibility.json");
-  assert.deepEqual(assessRollback(policy, { currentSchema: 9, targetRevision: "previous" }), {
+  const reviewedRevision = "9e302359abf25b615215e9c21fb6362260d02223";
+  assert.deepEqual(assessRollback(policy, { currentSchema: 9, targetRevision: reviewedRevision }), {
     allowed: true,
     reason: "compatible",
   });
-  assert.deepEqual(assessRollback(policy, { currentSchema: 10, targetRevision: "previous" }), {
+  assert.deepEqual(assessRollback(policy, { currentSchema: 10, targetRevision: reviewedRevision }), {
     allowed: false,
     reason: "schema_outside_compatibility_window",
   });
@@ -114,7 +119,17 @@ test("rollback is schema-aware, bounded, and fails closed outside its compatibil
   const workflow = await read(".github/workflows/rollback.yml");
   assert.match(workflow, /verify-recovery\.mjs rollback/);
   assert.match(workflow, /current-schema/);
+  assert.match(workflow, /target-revision="\$\{revision\}"/);
+  assert.match(workflow, /gh run view/);
+  assert.match(workflow, /workflowName/);
   assert.match(workflow, /stop.*forward repair/i);
+});
+
+test("recovery rehearsal binds a successful delivery run to its exact source revision", async () => {
+  const workflow = await read(".github/workflows/recovery-rehearsal.yml");
+  assert.match(workflow, /gh run view/);
+  assert.match(workflow, /workflowName/);
+  assert.match(workflow, /git checkout --detach "\$\{revision\}"/);
 });
 
 test("local recovery evidence records measurements but cannot impersonate accountable approvals", async () => {

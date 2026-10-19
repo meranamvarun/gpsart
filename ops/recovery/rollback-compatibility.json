@@ -1,7 +1,7 @@
 {
   "version": 1,
   "targets": {
-    "previous": {
+    "9e302359abf25b615215e9c21fb6362260d02223": {
       "minimumSchema": 9,
       "maximumSchema": 9,
       "stopCondition": "If the live schema is outside this closed interval, keep traffic stopped and execute a reviewed forward repair. Never reverse a migration."
