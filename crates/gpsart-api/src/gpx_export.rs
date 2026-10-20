@@ -50,6 +50,14 @@ fn filename_part(value: &str) -> String {
     }
 }
 
+fn attribution_license_url(attribution: &str) -> Option<&'static str> {
+    matches!(
+        attribution,
+        "OpenStreetMap contributors" | "OpenStreetMap contributors (ODbL 1.0)"
+    )
+    .then_some("https://www.openstreetmap.org/copyright")
+}
+
 pub(crate) fn filename(snapshot: &CandidateSnapshot) -> String {
     format!(
         "gpsart-{}-{}-v{}.gpx",
@@ -66,10 +74,18 @@ pub(crate) fn serialize(snapshot: &CandidateSnapshot) -> String {
         .attribution
         .as_deref()
         .map(|attribution| {
-            format!(
-                "    <copyright author=\"{}\"></copyright>\n",
-                xml(attribution)
-            )
+            if let Some(license) = attribution_license_url(attribution) {
+                format!(
+                    "    <copyright author=\"{}\">\n      <license>{}</license>\n    </copyright>\n",
+                    xml(attribution),
+                    license
+                )
+            } else {
+                format!(
+                    "    <copyright author=\"{}\"></copyright>\n",
+                    xml(attribution)
+                )
+            }
         })
         .unwrap_or_default();
     let points = snapshot
@@ -97,7 +113,7 @@ pub(crate) fn serialize(snapshot: &CandidateSnapshot) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{coordinate, filename_part, xml};
+    use super::{attribution_license_url, coordinate, filename_part, xml};
 
     #[test]
     fn metadata_and_filename_components_are_safe() {
@@ -109,6 +125,15 @@ mod tests {
         assert_eq!(xml("<&\"'>\0\u{b}"), "&lt;&amp;&quot;&apos;&gt;��");
         assert_eq!(coordinate(0.000_000_1), "0.0000001");
         assert_eq!(coordinate(-0.000_000_1), "-0.0000001");
+        assert_eq!(
+            attribution_license_url("OpenStreetMap contributors"),
+            Some("https://www.openstreetmap.org/copyright")
+        );
+        assert_eq!(
+            attribution_license_url("OpenStreetMap contributors (ODbL 1.0)"),
+            Some("https://www.openstreetmap.org/copyright")
+        );
+        assert_eq!(attribution_license_url("Unreviewed provider"), None);
     }
 
     #[test]

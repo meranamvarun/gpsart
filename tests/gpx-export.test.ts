@@ -31,6 +31,7 @@ test("offline export serializes every exact point in order and matches the serve
   assert.doesNotMatch(exported, /<(time|speed|hr|extensions)>\b/i);
   assert.match(exported, /planned route/i);
   assert.match(exported, /connectors and retraced sections/i);
+  assert.match(exported, /<copyright author="OpenStreetMap contributors \(ODbL 1\.0\)">\s*<license>https:\/\/www\.openstreetmap\.org\/copyright<\/license>\s*<\/copyright>/);
 });
 
 test("offline export escapes metadata and creates a predictable sanitized filename", () => {
@@ -44,6 +45,16 @@ test("offline export escapes metadata and creates a predictable sanitized filena
   assert.doesNotMatch(exported, /<script>/);
   assert.doesNotMatch(exported, /[\u0000\u000b]/);
   assert.equal(routeExportFilename(hostile), `gpsart-hi-script-route-${snapshot.id}-v1.gpx`);
+});
+
+test("offline export never assigns the OSM licence to another attribution", () => {
+  const snapshot = routeSnapshot();
+  const exported = exportRouteSnapshotGpx({
+    ...snapshot,
+    provenance: { ...snapshot.provenance, attribution: "Reviewed provider & contributors" },
+  });
+  assert.match(exported, /<copyright author="Reviewed provider &amp; contributors"><\/copyright>/);
+  assert.doesNotMatch(exported, /<license>/);
 });
 
 test("offline export uses GPX decimal lexical form for sub-microdegree coordinates", () => {

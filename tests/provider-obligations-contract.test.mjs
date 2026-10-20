@@ -19,6 +19,9 @@ test("provider review binds source configuration and fails closed without a depl
   assert.equal(review.origin.capture_required, true);
   assert.equal(review.origin.capture_status, "pending_protected_deployment");
   assert.equal(review.origin.capture_artifact, "release/provider-production-capture.json");
+  assert.equal(review.origin.human_browser_capture.status, "pending_protected_human_journey");
+  assert.equal(review.origin.human_browser_capture.validator, "scripts/verify-provider-browser-capture.mjs");
+  assert.equal(review.origin.human_browser_capture.network_access_by_validator, false);
   assert.ok(review.release_blockers.includes("deployed_origin_capture"));
   assert.ok(review.release_blockers.includes("accountable_provider_approval"));
   assert.ok(review.release_blockers.includes("accountable_legal_approval"));
@@ -104,9 +107,9 @@ test("licensing record covers source, derived data, exports, notices, and public
   assert.equal(licensing.route_exports.attribution_required, true);
   assert.equal(licensing.route_exports.public_display_or_export, "blocked_pending_odbl_4_6_review_and_offer");
   assert.equal(licensing.notices.in_product, true);
-  assert.equal(licensing.notices.gpx.current, "attribution_text_only");
-  assert.equal(licensing.notices.gpx.odbl_link_present, false);
-  assert.equal(licensing.notices.gpx.adequacy, "pending_accountable_legal_review");
+  assert.equal(licensing.notices.gpx.current, "attribution_and_odbl_link");
+  assert.equal(licensing.notices.gpx.odbl_link_present, true);
+  assert.equal(licensing.notices.gpx.source_contract, "passed_pending_accountable_legal_review");
   assert.equal(licensing.publication_plan.current_status, "blocked");
   assert.equal(
     licensing.publication_plan.release_gate,
@@ -222,6 +225,135 @@ test("capture fails closed on an incompatible edge policy or non-origin URL", as
   );
 });
 
+test("human browser capture validation is offline, revision-bound, privacy-safe, and fail-closed", async () => {
+  const validatorSource = await source("../scripts/verify-provider-browser-capture.mjs");
+  const { verifyProviderBrowserCapture } = await import("../scripts/verify-provider-browser-capture.mjs");
+  const revision = "0123456789abcdef0123456789abcdef01234567";
+  const origin = "https://prod.gpsart.test";
+  const valid = {
+    schema_version: "gpsart-human-browser-provider-capture-v1",
+    source_revision: revision,
+    captured_at: "2026-10-20T09:00:00.000Z",
+    capture_method: "human_browser_developer_tools",
+    browser: { family: "Firefox", version: "142.0" },
+    origin,
+    provider: {
+      id: "osm-standard-raster",
+      endpoint_template: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      request: {
+        referrer_origin: origin,
+        user_agent_class: "browser_supplied",
+        cache_bypass_headers_sent: false,
+      },
+      response: {
+        status: 200,
+        content_type: "image/png",
+        cache_control: "public, max-age=604800",
+        expires: null,
+      },
+    },
+    privacy: {
+      response_body_recorded: false,
+      exact_tile_url_recorded: false,
+      precise_route_data_recorded: false,
+      session_data_recorded: false,
+      request_headers_recorded: ["referer"],
+    },
+  };
+
+  const result = verifyProviderBrowserCapture(valid, { expectedOrigin: origin, expectedSourceRevision: revision });
+  assert.equal(result.result, "schema_validated");
+  assert.equal(result.source_revision, revision);
+  assert.equal(result.origin, origin);
+  assert.equal(result.provider.cache_behavior_observed, true);
+  assert.doesNotMatch(JSON.stringify(result).toLowerCase(), /cookie|authorization|exact_tile_url|precise_route|session_data/);
+  assert.doesNotMatch(validatorSource, /\bfetch\s*\(/);
+
+  const expiresOnly = verifyProviderBrowserCapture({
+    ...valid,
+    provider: {
+      ...valid.provider,
+      response: {
+        ...valid.provider.response,
+        cache_control: null,
+        expires: "Tue, 20 Oct 2026 10:00:00 GMT",
+      },
+    },
+  }, { expectedOrigin: origin, expectedSourceRevision: revision });
+  assert.equal(expiresOnly.provider.expires_present, true);
+
+  assert.throws(
+    () => verifyProviderBrowserCapture({ ...valid, cookie: "forbidden" }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /unexpected field/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture(valid, { expectedOrigin: origin, expectedSourceRevision: "f".repeat(40) }),
+    /source revision/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture({ ...valid, browser: { family: "Operator Alice", version: "142.0" } }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /browser family/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture({ ...valid, browser: { family: "Firefox", version: "current" } }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /browser version/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture({
+      ...valid,
+      provider: {
+        ...valid.provider,
+        response: { ...valid.provider.response, status: 204 },
+      },
+    }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /response status/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture({
+      ...valid,
+      provider: {
+        ...valid.provider,
+        response: { ...valid.provider.response, content_type: "text/html" },
+      },
+    }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /content type/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture({
+      ...valid,
+      provider: {
+        ...valid.provider,
+        response: { ...valid.provider.response, cache_control: "no-cache" },
+      },
+    }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /cache behavior/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture({
+      ...valid,
+      provider: {
+        ...valid.provider,
+        response: { ...valid.provider.response, cache_control: "public" },
+      },
+    }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /cache behavior/i,
+  );
+  assert.throws(
+    () => verifyProviderBrowserCapture({
+      ...valid,
+      provider: {
+        ...valid.provider,
+        response: {
+          ...valid.provider.response,
+          cache_control: null,
+          expires: "2026-10-20T10:00:00.000Z",
+        },
+      },
+    }, { expectedOrigin: origin, expectedSourceRevision: revision }),
+    /HTTP date/i,
+  );
+});
+
 test("production workflow captures and retains evidence while checked-in review stays pending", async () => {
   const [delivery, packageJson] = await Promise.all([
     source("../.github/workflows/deliver.yml"),
@@ -233,5 +365,6 @@ test("production workflow captures and retains evidence while checked-in review 
   assert.match(delivery, /if: always\(\)/);
   assert.match(delivery, /actions\/upload-artifact@[a-f0-9]{40}/);
   assert.match(packageJson.scripts["test:provider"], /provider-obligations-contract\.test\.mjs/);
+  assert.match(packageJson.scripts["verify:provider-browser"], /verify-provider-browser-capture\.mjs/);
   await access(new URL("../docs/evidence/ts-509-provider-obligations-verification.md", import.meta.url));
 });

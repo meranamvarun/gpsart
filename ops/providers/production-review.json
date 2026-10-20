@@ -8,7 +8,14 @@
     "hostname_variable": "GPSART_PRODUCTION_HOSTNAME",
     "capture_required": true,
     "capture_status": "pending_protected_deployment",
-    "capture_artifact": "release/provider-production-capture.json"
+    "capture_artifact": "release/provider-production-capture.json",
+    "human_browser_capture": {
+      "status": "pending_protected_human_journey",
+      "raw_artifact": "release/provider-browser-capture.json",
+      "verified_artifact": "release/provider-browser-verification.json",
+      "validator": "scripts/verify-provider-browser-capture.mjs",
+      "network_access_by_validator": false
+    }
   },
   "release_blockers": [
     "deployed_origin_capture",
@@ -155,9 +162,9 @@
     "notices": {
       "in_product": true,
       "gpx": {
-        "current": "attribution_text_only",
-        "odbl_link_present": false,
-        "adequacy": "pending_accountable_legal_review"
+        "current": "attribution_and_odbl_link",
+        "odbl_link_present": true,
+        "source_contract": "passed_pending_accountable_legal_review"
       },
       "database_readme_required_before_distribution": true
     },

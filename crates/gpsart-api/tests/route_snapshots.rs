@@ -131,7 +131,7 @@ fn snapshot() -> CandidateSnapshot {
         generated_at_epoch_seconds: 1_800_000_000,
         provenance: CandidateProvenance {
             routing_provider: "controlled-local-osm".into(),
-            attribution: Some("OpenStreetMap contributors".into()),
+            attribution: Some("OpenStreetMap contributors (ODbL 1.0)".into()),
         },
     }
 }

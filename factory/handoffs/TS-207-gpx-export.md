@@ -3,11 +3,13 @@
 **Producer:** TS-207
 **Consumers:** TS-303
 **Status:** ready
-**Compatibility:** `route-gpx-v1`; changing point order, coordinate serialization, planned-route metadata, filename rules, or media/download headers requires a coordinated versioned handoff
+**Compatibility:** `route-gpx-v1`; the TS-509 additive copyright licence child is backwards-compatible GPX 1.1 metadata. Changing point order, coordinate serialization, planned-route metadata, filename rules, or media/download headers requires a coordinated versioned handoff.
 
 `GET /api/v1/routes/{id}/export.gpx` authenticates the private guest session and loads the same immutable TS-205 snapshot as the route-detail endpoint. Foreign and missing IDs are indistinguishable (`404`); unavailable or invalid stored snapshots return `503`. The response is GPX 1.1 (`application/gpx+xml; charset=utf-8`) with `Content-Disposition`, `X-Content-Type-Options: nosniff`, and `Cache-Control: private, no-store`.
 
 The export contains one track and one track segment whose points are the complete snapshot geometry in exact order. It does not reroute, simplify, split, or deduplicate the trace, so connectors, returns, repeated edges, and self-intersection traversal order remain represented. Metadata labels it as a planned route and identifies the immutable route/candidate/profile/routing-data versions. No activity time, speed, heart-rate, or completion data is emitted.
+
+When immutable provenance attribution is exactly `OpenStreetMap contributors` or the production local-graph form `OpenStreetMap contributors (ODbL 1.0)`, both serializers add `https://www.openstreetmap.org/copyright` as the GPX 1.1 copyright licence URI. Other attribution values retain author text without being assigned an inferred licence.
 
 `exportRouteSnapshotGpx`, `routeExportFilename`, and `downloadRouteSnapshotGpx` in `src/domain/gpx-export.ts` are the offline browser boundary for TS-303. The browser serializer and server response are locked to the same golden fixture. Filenames use `gpsart-{sanitized-template}-{route-id}-v{candidate-version}.gpx`; unsafe or empty template components are collapsed to an ASCII-safe value or `route`.
 
