@@ -81,11 +81,12 @@ async function main() {
   const rustTestCode = await run("npm", ["run", "rust:test"]);
   const rustBuildCode = await run("npm", ["run", "rust:build"]);
   const factoryTestCode = await run("npm", ["run", "test:factory"]);
+  const benchmarkContractCode = await run("npm", ["run", "test:benchmark-contract"]);
   const unitTestCode = await run("npm", ["run", "test:unit"]);
   const visualShellTestCode = await run("npm", ["run", "test:visual-shell"]);
   const buildCode = await run("npm", ["run", "build"]);
   const testCode = await run("npm", ["run", "test:sites"]);
-  if (rustFormatCode || rustClippyCode || rustTestCode || rustBuildCode || factoryTestCode || unitTestCode || visualShellTestCode || testCode || buildCode) process.exitCode = 1;
+  if (rustFormatCode || rustClippyCode || rustTestCode || rustBuildCode || factoryTestCode || benchmarkContractCode || unitTestCode || visualShellTestCode || testCode || buildCode) process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

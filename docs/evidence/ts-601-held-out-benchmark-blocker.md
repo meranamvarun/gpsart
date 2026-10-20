@@ -13,6 +13,12 @@ The available evidence cannot be substituted:
 
 Repeating the known pilot cases, selecting only successful TS-506 inputs after observing their outcomes, or inventing reviewer decisions would violate the anti-leakage criterion and the repository rules against fabricated routing truth and success metrics.
 
+## Implemented benchmark boundary
+
+The repository now includes `scripts/verify-held-out-benchmark.mjs`, the `gpsart-held-out-benchmark-v2` workflow in `docs/runbooks/held-out-route-benchmark.md`, and focused contract coverage in `tests/held-out-benchmark-contract.test.mjs`. This is deliberately a structural preflight: it rejects inconsistent declarations and recomputes category thresholds, but it never authenticates evidence or reports that the release gate passed. `npm run factory:verify` executes this contract suite.
+
+This tooling closes only the structural validation gap. It cannot create or authenticate the independently established routing truth, artifacts, reviewer identities, or decisions required to execute and pass the release gate.
+
 ## Required external inputs and follow-up work
 
 1. Before algorithm or threshold changes, preregister and freeze a privacy-safe set with at least 50 independently reviewed feasible cases (including at least 20 shape and 20 text cases) plus at least 20 restriction, difficult, or no-match cases. Retain provenance, selection rules, independently reviewed reference traversals, and immutable artifact pins.
@@ -24,4 +30,6 @@ Repeating the known pilot cases, selecting only successful TS-506 inputs after o
 
 `node --test tests/release-evidence-contract.test.mjs` passed 3/3 on 2026-10-20 and confirms that the missing benchmark remains an explicit fail-closed release blocker. With the repository's local PostGIS test service configured, `npm run factory:verify` also passed in 95.1 seconds, including the mandatory connected database cases.
 
-No new executable acceptance test was added because the first required input—the preregistered independently reviewed held-out set—does not exist. A synthetic fixture would encode fabricated routing truth and is prohibited by `factory/guardrails.md`. The independent QA readiness review reached the same blocked verdict on 2026-10-20.
+The contract suite uses explicitly labelled, in-memory synthetic values only to test the preflight's rejection and aggregation logic. Such values can exercise structural preflight, but can never produce an authenticated release-gate pass. The first real execution input—the preregistered independently reviewed held-out set—still does not exist. The independent QA readiness review reached the same blocked verdict on 2026-10-20.
+
+After INC-080, independent QA adversarially verified that embedded top-level or aggregate pass claims fail structural preflight, the public assessment always keeps `release_gate_passed` false, and the CLI explicitly reports `release gate NOT PASSED`. The final focused benchmark suite passed 7/7, and the final database-backed `npm run factory:verify` passed in 64.3 seconds on 2026-10-20.
