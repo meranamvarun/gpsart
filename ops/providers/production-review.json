@@ -1,0 +1,191 @@
+{
+  "schema_version": "gpsart-provider-review-v1",
+  "environment": "production",
+  "reviewed_at": "2026-10-20",
+  "review_scope": "checked_in_configuration_only",
+  "review_status": "blocked_pending_protected_evidence",
+  "origin": {
+    "hostname_variable": "GPSART_PRODUCTION_HOSTNAME",
+    "capture_required": true,
+    "capture_status": "pending_protected_deployment",
+    "capture_artifact": "release/provider-production-capture.json"
+  },
+  "release_blockers": [
+    "deployed_origin_capture",
+    "accountable_provider_approval",
+    "accountable_legal_approval",
+    "budget_approval"
+  ],
+  "providers": [
+    {
+      "id": "osm-standard-raster",
+      "purpose": "interactive_base_map",
+      "endpoint": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "attribution": {
+        "text": "OpenStreetMap contributors",
+        "html": "<a href=\"https://www.openstreetmap.org/copyright\">&copy; OpenStreetMap contributors</a>",
+        "placement": "visible_on_interactive_map"
+      },
+      "credentials": {
+        "classification": "none"
+      },
+      "origin_behavior": {
+        "request_path": "browser_direct",
+        "referrer_policy_configured": "strict-origin-when-cross-origin",
+        "referrer_policy_source": "deploy/edge/nginx.conf",
+        "deployed_observation": "pending"
+      },
+      "contact_channel": {
+        "status": "pending_production_origin",
+        "expected_form": "public_https_origin_or_contact_page"
+      },
+      "user_agent": "browser_supplied",
+      "cache": {
+        "configured_behavior": "browser_http_cache",
+        "custom_cache_or_prefetch": false,
+        "deployed_observation": "pending"
+      },
+      "availability": "best_effort_no_sla",
+      "policy": "https://operations.osmfoundation.org/policies/tiles/"
+    },
+    {
+      "id": "pinned-local-osm-routing",
+      "purpose": "route_generation",
+      "endpoint": "local_checksum_pinned_graph",
+      "credentials": {
+        "classification": "none"
+      },
+      "source": {
+        "version": "osm-bengaluru-central-pedestrian-pilot-v3:sha256:df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45",
+        "sha256": "df80123d5403045f30fdef0db9bf626fb05a4f175f58375ff1da852f6b9eab45"
+      },
+      "attribution": {
+        "text": "OpenStreetMap contributors",
+        "license": "ODbL-1.0"
+      },
+      "network_behavior": "no_remote_runtime_requests",
+      "cache": {
+        "behavior": "immutable_graph_bundled_with_worker"
+      }
+    }
+  ],
+  "capacity": {
+    "policy_decision": "pending_accountable_review",
+    "published_numeric_quota": null,
+    "remote_provider_load_test_performed": false,
+    "remote_provider_load_test_reason": "The public OSM service must not be load-tested; only normal human-driven interactive use is permitted.",
+    "pilot": {
+      "status": "unapproved_planning_assumption",
+      "monthly_active_users": 250,
+      "map_views_per_user": 4,
+      "tiles_per_view": 20,
+      "expected_monthly_tile_requests": 20000
+    },
+    "planning_growth": {
+      "status": "unapproved_planning_assumption",
+      "monthly_active_users": 2500,
+      "map_views_per_user": 8,
+      "tiles_per_view": 20,
+      "expected_monthly_tile_requests": 400000
+    },
+    "guardrail": {
+      "release_without_accountable_review": "blocked",
+      "action_if_unsuitable": "disable_public_tiles_until_paid_hosted_or_self_hosted_replacement_is_approved",
+      "automatic_provider_substitution": false,
+      "review_triggers": [
+        "commercial_or_donation_supported_release",
+        "traffic_above_approved_pilot_assumption",
+        "provider_policy_change",
+        "provider_warning_throttle_or_block"
+      ]
+    },
+    "local_concurrency_test": {
+      "jobs": 20,
+      "remote_tile_requests": 0,
+      "evidence": [
+        "docs/evidence/ts-506-production-performance-verification.md",
+        "tests/production-performance-contract.test.mjs"
+      ]
+    }
+  },
+  "failure_behavior": {
+    "outage": {
+      "preserves_form_state": true,
+      "preserves_generated_route_data": true,
+      "automatic_routing_mode_substitution": false,
+      "public_state": "base_map_unavailable"
+    },
+    "throttling": {
+      "preserves_form_state": true,
+      "preserves_generated_route_data": true,
+      "automatic_routing_mode_substitution": false,
+      "public_state": "base_map_unavailable"
+    },
+    "quota": {
+      "preserves_form_state": true,
+      "preserves_generated_route_data": true,
+      "automatic_routing_mode_substitution": false,
+      "public_state": "provider_unavailable"
+    },
+    "slow_response": {
+      "preserves_form_state": true,
+      "preserves_generated_route_data": true,
+      "automatic_routing_mode_substitution": false,
+      "public_state": "base_map_delayed"
+    }
+  },
+  "licensing": {
+    "review_status": "working_classification_pending_accountable_legal_review",
+    "source": {
+      "name": "OpenStreetMap",
+      "license": "ODbL-1.0",
+      "attribution": "OpenStreetMap contributors"
+    },
+    "derived_routing_database": {
+      "working_classification": "derivative_database",
+      "current_distribution": "embedded_in_unreleased_production_service",
+      "public_use_offer": "blocked_pending_legal_review"
+    },
+    "route_exports": {
+      "working_classification": "produced_work_pending_legal_review",
+      "attribution_required": true,
+      "database_reconstruction_prohibited_without_review": true,
+      "public_display_or_export": "blocked_pending_odbl_4_6_review_and_offer"
+    },
+    "notices": {
+      "in_product": true,
+      "gpx": {
+        "current": "attribution_text_only",
+        "odbl_link_present": false,
+        "adequacy": "pending_accountable_legal_review"
+      },
+      "database_readme_required_before_distribution": true
+    },
+    "publication_plan": {
+      "current_status": "blocked",
+      "release_gate": "accountable_legal_review_and_odbl_4_6_offer_required_before_public_route_display_or_export"
+    },
+    "sources": [
+      {
+        "title": "OpenStreetMap Tile Usage Policy",
+        "url": "https://operations.osmfoundation.org/policies/tiles/",
+        "reviewed_at": "2026-10-20"
+      },
+      {
+        "title": "OpenStreetMap Foundation Attribution Guidelines",
+        "url": "https://osmfoundation.org/wiki/Attribution_Guidelines",
+        "reviewed_at": "2026-10-20"
+      },
+      {
+        "title": "OpenStreetMap Foundation Produced Work Guideline",
+        "url": "https://osmfoundation.org/wiki/Licence/Community_Guidelines/Produced_Work_-_Guideline",
+        "reviewed_at": "2026-10-20"
+      },
+      {
+        "title": "Open Database License 1.0",
+        "url": "https://opendatacommons.org/licenses/odbl/1-0/",
+        "reviewed_at": "2026-10-20"
+      }
+    ]
+  }
+}
