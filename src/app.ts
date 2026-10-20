@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
 import "./styles.css";
 import { readCsrfCookie } from "./client/guest-session.ts";
+import { isPilotActivityAvailable } from "./client/activity-availability.ts";
 import { fetchDesignCatalogue, fetchRouteCandidates } from "./client/api.ts";
 import {
   PlannerWorkflow,
@@ -314,7 +315,7 @@ function handleWorkflowChange(snapshot: PlannerWorkflowSnapshot): void {
 }
 
 function submitPlan(): void {
-  if (!isDesignEnabled(state.request.design, state.catalogue)) return;
+  if (!isPilotActivityAvailable(state.request.activity) || !isDesignEnabled(state.request.design, state.catalogue)) return;
   const start = inputValue("start");
   const distanceKm = Number(inputValue("distance"));
   const selected = proposedStart?.label === start ? proposedStart : parseManualCoordinates(start);
@@ -339,6 +340,11 @@ function submitPlan(): void {
 function retryDependency(): void {
   const retried = retryCompletedAttempt(state);
   if (!retried) return;
+  if (!isPilotActivityAvailable(retried.request.activity)) {
+    state = retried;
+    showScreen("planner");
+    return;
+  }
   const selected = proposedStart?.label === retried.request.start
     ? proposedStart
     : parseManualCoordinates(retried.request.start);

@@ -31,7 +31,7 @@ export interface AppState {
 
 export function initialState(): AppState {
   return {
-    request: { start: "", activity: "Cycling", design: "Heart", distanceKm: 15, tolerancePercent: 10, returnsToStart: true, revision: 0 },
+    request: { start: "", activity: "Walking", design: "Heart", distanceKm: 15, tolerancePercent: 10, returnsToStart: true, revision: 0 },
     signedIn: false,
     category: "Shapes",
     catalogue: Object.freeze({ kind: "loading" }),

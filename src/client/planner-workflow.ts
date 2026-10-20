@@ -3,6 +3,7 @@ import { decodeApiError, type ApiErrorCode } from "../domain/api-error.ts";
 import type { RouteRequest } from "../domain/planner.ts";
 import { decodeAcceptedRouteJob, decodeRouteJobError, type RouteJobErrorCode } from "../domain/route-job.ts";
 import type { ProposedStart } from "../domain/start-selection.ts";
+import { isPilotActivityAvailable } from "./activity-availability.ts";
 import {
   decodeConfirmedStart,
   decodeStartOutcome,
@@ -36,6 +37,7 @@ export type WorkflowPhase =
 
 export type WorkflowIssue = StartOutcomeCode | RouteJobErrorCode | ApiErrorCode
   | "invalid_fields"
+  | "unsupported_activity"
   | "active_job"
   | "invalid_response"
   | "network_unavailable"
@@ -148,6 +150,10 @@ export class PlannerWorkflow {
       this.update({ ...this.value, issue: "active_job" });
       return Promise.resolve();
     }
+    if (!isPilotActivityAvailable(request.activity)) {
+      this.update({ ...emptySnapshot(), request, proposedStart, phase: "error", issue: "unsupported_activity" });
+      return Promise.resolve();
+    }
     if (!validRequest(request) || !validProposedStart(proposedStart) || request.start !== proposedStart.label) {
       this.update({ ...emptySnapshot(), request, proposedStart, phase: "error", issue: "invalid_fields" });
       return Promise.resolve();
@@ -222,6 +228,17 @@ export class PlannerWorkflow {
     const pending = loadPendingCreation(this.storage);
     if (!pending) {
       this.removePendingCreation();
+      return false;
+    }
+    if (!isPilotActivityAvailable(pending.request.activity)) {
+      this.removePendingCreation();
+      this.update({
+        ...emptySnapshot(),
+        request: pending.request,
+        proposedStart: pending.proposedStart,
+        phase: "error",
+        issue: "unsupported_activity",
+      });
       return false;
     }
     this.pendingCreation = pending;

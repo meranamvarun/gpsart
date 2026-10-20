@@ -259,6 +259,42 @@ test("refresh rejects a tampered uncertain creation instead of replaying it", as
   assert.equal(storage.getItem(PENDING_CREATION_STORAGE_KEY), null);
 });
 
+test("refresh clears a legacy pending Cycling creation without replaying it", async () => {
+  const storage = new MemoryStorage();
+  const first = new PlannerWorkflow({
+    fetcher: async (url) => {
+      const target = String(url);
+      if (target.endsWith("/starts/resolve")) return json(resolution);
+      if (target.includes("/confirm")) return json({ confirmed_start: resolution.candidate_network_point });
+      throw new TypeError("response lost after acceptance");
+    },
+    storage, csrfToken: () => "csrf", currentRevision: () => 1,
+    newIdempotencyKey: () => "legacy-cycling-key", schedule: () => 1,
+    cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  await first.submit(request, proposed);
+  await first.confirmAndStart();
+
+  const stored = JSON.parse(storage.getItem(PENDING_CREATION_STORAGE_KEY)!);
+  stored.request.activity = "Cycling";
+  stored.resolution.profile_version = "cycling-v1";
+  const body = JSON.parse(stored.body);
+  body.profile = { activity: "cycling", profile_version: "cycling-v1" };
+  stored.body = JSON.stringify(body);
+  storage.setItem(PENDING_CREATION_STORAGE_KEY, JSON.stringify(stored));
+
+  let fetched = false;
+  const refreshed = new PlannerWorkflow({
+    fetcher: async () => { fetched = true; throw new Error("unsupported activity must not replay"); },
+    storage, csrfToken: () => "csrf", currentRevision: () => 1,
+    schedule: () => 1, cancelSchedule: () => undefined, now: () => 1_800_000_000_000,
+  });
+  assert.equal(await refreshed.resume(), false);
+  assert.equal(fetched, false);
+  assert.equal(refreshed.snapshot.issue, "unsupported_activity");
+  assert.equal(storage.getItem(PENDING_CREATION_STORAGE_KEY), null);
+});
+
 test("invalid fields and unsupported coverage never create a job", async () => {
   const calls: string[] = [];
   const workflow = new PlannerWorkflow({
@@ -272,6 +308,9 @@ test("invalid fields and unsupported coverage never create a job", async () => {
   });
   await workflow.submit({ ...request, distanceKm: 0 }, proposed);
   assert.equal(workflow.snapshot.issue, "invalid_fields");
+  assert.equal(calls.length, 0);
+  await workflow.submit({ ...request, activity: "Cycling" }, proposed);
+  assert.equal(workflow.snapshot.issue, "unsupported_activity");
   assert.equal(calls.length, 0);
   await workflow.submit(request, proposed);
   assert.equal(workflow.snapshot.issue, "unsupported_coverage");

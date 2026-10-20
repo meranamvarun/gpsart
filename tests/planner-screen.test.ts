@@ -5,6 +5,23 @@ import { renderScreen } from "../src/app/screen-controller.ts";
 import { acceptCatalogueLoad, initialState, selectDesignCategory, updateRequest } from "../src/app/state.ts";
 import type { PlannerWorkflowSnapshot } from "../src/client/planner-workflow.ts";
 
+test("planner defaults to walking and disables unreviewed cycling", () => {
+  const state = initialState();
+  const markup = renderScreen("planner", state, { kind: "available", routes: [], errors: [] });
+
+  assert.equal(state.request.activity, "Walking");
+  assert.match(markup, /data-activity="Walking"[^>]*aria-pressed="true"/);
+  assert.doesNotMatch(markup, /data-activity="Walking"[^>]*disabled/);
+  assert.doesNotMatch(markup, /data-activity="Running"[^>]*disabled/);
+  assert.match(markup, /data-activity="Cycling"[^>]*aria-pressed="false"[^>]*disabled[^>]*aria-describedby="cycling-availability"/);
+  assert.match(markup, /id="cycling-availability"[^>]*>Cycling is not available in this pilot because its routing data has not been reviewed\.<\/p>/);
+
+  const previousCyclingRequest = { ...state, request: { ...state.request, activity: "Cycling" as const } };
+  const previousMarkup = renderScreen("planner", previousCyclingRequest, { kind: "available", routes: [], errors: [] });
+  assert.match(previousMarkup, /data-activity="Cycling"[^>]*aria-pressed="true"[^>]*disabled/);
+  assert.match(previousMarkup, /<button class="primary full" type="submit" disabled>.*Activity unavailable<\/button>/);
+});
+
 test("generation progress is labelled with the active job request, not a newer edit", () => {
   const state = initialState();
   const newer = {
