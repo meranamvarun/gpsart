@@ -163,8 +163,17 @@ jobs:
           kubectl apply --server-side --field-manager=gpsart-delivery -f release/production-recovery.yaml --selector='gpsart.dev/release-phase=recovery'
           node scripts/smoke-deployment.mjs "https://${GPSART_PRODUCTION_HOSTNAME}"
           kubectl -n gpsart-production get deployment,statefulset,job,cronjob,prometheusrule,alertmanagerconfig -o json > release/production-deployment-record.json
+      - name: Capture production provider policy evidence
+        run: >-
+          node scripts/capture-provider-review.mjs
+          "https://${GPSART_PRODUCTION_HOSTNAME}"
+          release/provider-production-capture.json
+          "${{ inputs.source_revision }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: gpsart-production-record-${{ inputs.source_revision }}
-          path: release/production-deployment-record.json
+          path: |
+            release/production-deployment-record.json
+            release/provider-production-capture.json
           retention-days: 30

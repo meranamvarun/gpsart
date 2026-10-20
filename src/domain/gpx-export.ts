@@ -29,15 +29,29 @@ function filenamePart(value: string): string {
   return sanitized || "route";
 }
 
+const OSM_ATTRIBUTIONS = new Set([
+  "OpenStreetMap contributors",
+  "OpenStreetMap contributors (ODbL 1.0)",
+]);
+
+function attributionLicenseUrl(attribution: string): string | undefined {
+  return OSM_ATTRIBUTIONS.has(attribution) ? "https://www.openstreetmap.org/copyright" : undefined;
+}
+
 export function routeExportFilename(snapshot: RouteSnapshot): string {
   return `gpsart-${filenamePart(snapshot.versions.templateId)}-${snapshot.id}-v${snapshot.version}.gpx`;
 }
 
 export function exportRouteSnapshotGpx(snapshot: RouteSnapshot): string {
   const routeId = xml(snapshot.id);
+  const licenseUrl = snapshot.provenance.attribution === undefined
+    ? undefined
+    : attributionLicenseUrl(snapshot.provenance.attribution);
   const copyright = snapshot.provenance.attribution === undefined
     ? ""
-    : `    <copyright author="${xml(snapshot.provenance.attribution)}"></copyright>\n`;
+    : licenseUrl === undefined
+      ? `    <copyright author="${xml(snapshot.provenance.attribution)}"></copyright>\n`
+      : `    <copyright author="${xml(snapshot.provenance.attribution)}">\n      <license>${licenseUrl}</license>\n    </copyright>\n`;
   const points = snapshot.trace.map(({ latitude, longitude }) => `      <trkpt lat="${coordinate(latitude)}" lon="${coordinate(longitude)}"></trkpt>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="GPSART" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 https://www.topografix.com/GPX/1/1/gpx.xsd">

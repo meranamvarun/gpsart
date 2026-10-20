@@ -1,0 +1,55 @@
+{
+  "schema_version": "gpsart-monthly-cost-model-v1",
+  "currency": "USD",
+  "as_of": "2026-10-20",
+  "estimate_status": "planning_estimate_pending_vendor_quotes_and_approval",
+  "method": "quantity multiplied by an explicitly unapproved planning unit rate; values are not invoices, quotes, commitments, or approved budget",
+  "tiers": {
+    "pilot": {
+      "status": "unapproved_planning_assumption",
+      "capacity": {
+        "monthly_active_users": 250,
+        "monthly_tile_requests": 20000
+      },
+      "categories": [
+        { "id": "compute", "quantity": 7, "unit": "small_runtime_replica_month", "unit_rate": 25, "monthly_estimate": 175, "basis": "two edge, two API, two worker, and one database runtime allocation" },
+        { "id": "storage", "quantity": 20, "unit": "GiB_month", "unit_rate": 0.15, "monthly_estimate": 3, "basis": "production persistent volume request" },
+        { "id": "backup", "quantity": 40, "unit": "GiB_month", "unit_rate": 0.05, "monthly_estimate": 2, "basis": "planning allowance of two retained database-volume equivalents" },
+        { "id": "bandwidth", "quantity": 100, "unit": "GB_egress", "unit_rate": 0.09, "monthly_estimate": 9, "basis": "unmeasured pilot egress allowance" },
+        { "id": "tile_provider", "quantity": 1, "unit": "pilot_service_month", "unit_rate": 0, "monthly_estimate": 0, "basis": "public OSM tiles have no fee but remain unapproved best-effort capacity" },
+        { "id": "monitoring", "quantity": 1, "unit": "pilot_stack_month", "unit_rate": 50, "monthly_estimate": 50, "basis": "unquoted monitoring allowance" },
+        { "id": "support", "quantity": 4, "unit": "operator_hour", "unit_rate": 50, "monthly_estimate": 200, "basis": "four operator hours per month at an internal planning rate" }
+      ],
+      "monthly_total": 439
+    },
+    "planning_growth": {
+      "status": "unapproved_planning_assumption",
+      "capacity": {
+        "monthly_active_users": 2500,
+        "monthly_tile_requests": 400000
+      },
+      "categories": [
+        { "id": "compute", "quantity": 14, "unit": "small_runtime_replica_month", "unit_rate": 25, "monthly_estimate": 350, "basis": "planning allowance at twice the pilot runtime footprint" },
+        { "id": "storage", "quantity": 100, "unit": "GiB_month", "unit_rate": 0.15, "monthly_estimate": 15, "basis": "unapproved growth storage allowance" },
+        { "id": "backup", "quantity": 200, "unit": "GiB_month", "unit_rate": 0.05, "monthly_estimate": 10, "basis": "planning allowance of two retained growth-volume equivalents" },
+        { "id": "bandwidth", "quantity": 1000, "unit": "GB_egress", "unit_rate": 0.09, "monthly_estimate": 90, "basis": "unmeasured growth egress allowance" },
+        { "id": "tile_provider", "quantity": 1, "unit": "hosted_or_self_hosted_service_month", "unit_rate": 400, "monthly_estimate": 400, "basis": "placeholder replacement allowance; no provider has been selected" },
+        { "id": "monitoring", "quantity": 1, "unit": "growth_stack_month", "unit_rate": 150, "monthly_estimate": 150, "basis": "unquoted monitoring allowance" },
+        { "id": "support", "quantity": 12, "unit": "operator_hour", "unit_rate": 50, "monthly_estimate": 600, "basis": "twelve operator hours per month at an internal planning rate" }
+      ],
+      "monthly_total": 1615
+    }
+  },
+  "assumptions": [
+    { "id": "hosting_vendor", "owner_role": "platform-owner", "status": "unapproved", "review_trigger": "select a Linux/Kubernetes hosting vendor and replace planning rates with a dated quote" },
+    { "id": "traffic", "owner_role": "product-owner", "status": "unapproved", "review_trigger": "capture production traffic and agree pilot and growth volumes" },
+    { "id": "tile_service", "owner_role": "engineering-lead", "status": "unapproved", "review_trigger": "complete accountable OSM suitability review or select a replacement" },
+    { "id": "support_rate", "owner_role": "finance-owner", "status": "unapproved", "review_trigger": "approve an internal or contracted support rate" }
+  ],
+  "approvals": [
+    { "role": "engineering-lead", "decision": "pending", "recorded_at": null, "blocker": "deployed provider capture and traffic record are absent" },
+    { "role": "finance-owner", "decision": "pending", "recorded_at": null, "blocker": "vendor quotes and budget ceiling are absent" },
+    { "role": "platform-owner", "decision": "pending", "recorded_at": null, "blocker": "hosting and tile-provider selections are not approved" }
+  ],
+  "release_gate": "blocked_pending_budget_approval"
+}
