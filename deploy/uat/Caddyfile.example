@@ -1,0 +1,3 @@
+{$UAT_HOST} {
+  reverse_proxy edge:8080
+}

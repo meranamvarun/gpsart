@@ -1,0 +1,66 @@
+version: "3.8"
+
+# Copy to docker-compose.yml locally. Keep concrete image digests and the .env file out of Git.
+services:
+  postgres:
+    image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gpsart
+      POSTGRES_USER: gpsart
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpsart -d gpsart"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: ${GPSART_MIGRATE_IMAGE}
+    environment:
+      DATABASE_URL: postgres://gpsart:${POSTGRES_PASSWORD}@postgres:5432/gpsart
+
+  api:
+    image: ${GPSART_API_IMAGE}
+    restart: unless-stopped
+    environment:
+      GPSART_DATABASE_URL: postgres://gpsart:${POSTGRES_PASSWORD}@postgres:5432/gpsart
+      GPSART_API_BIND: 0.0.0.0:8080
+      GPSART_PUBLIC_ORIGIN: https://${UAT_HOST}
+      GPSART_ROUTING_MANIFEST: /app/ops/routing/production-pilot-v1.json
+      RUST_LOG: info
+    networks:
+      default:
+        aliases: [gpsart-api]
+
+  worker:
+    image: ${GPSART_WORKER_IMAGE}
+    restart: unless-stopped
+    environment:
+      GPSART_DATABASE_URL: postgres://gpsart:${POSTGRES_PASSWORD}@postgres:5432/gpsart
+      GPSART_COVERAGE_VERSION: bengaluru-central-pilot-coverage-v1
+      GPSART_ROUTING_GRAPH_PATH: /app/data/bengaluru-central-osm-v3.json
+      GPSART_ROUTING_GRAPH_SHA256_PATH: /app/data/bengaluru-central-osm-v3.sha256
+      RUST_LOG: info
+
+  edge:
+    image: ${GPSART_EDGE_IMAGE}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    depends_on: [edge]
+    environment: { UAT_HOST: ${UAT_HOST} }
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

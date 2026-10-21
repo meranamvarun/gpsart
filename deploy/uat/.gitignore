@@ -1,0 +1,5 @@
+# Local runtime configuration and records can contain credentials or mutable infrastructure state.
+.env
+docker-compose.yml
+Caddyfile
+deployment-record.local.md
