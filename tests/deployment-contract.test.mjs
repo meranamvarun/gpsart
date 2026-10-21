@@ -28,6 +28,7 @@ test("linux images are immutable, locked, non-root, and never package secrets", 
   assert.match(client, /npm run build/);
   assert.ok(client.includes("COPY worker ./worker"));
   assert.ok(client.includes("COPY .openai ./.openai"));
+  assert.ok(api.includes("COPY --chown=65532:65532 scripts/extract-osm-pedestrian-pilot-snapshot.mjs /app/scripts/extract-osm-pedestrian-pilot-snapshot.mjs"));
   assert.match(client, /USER 101/);
   assert.match(worker, /gpsart-worker/);
   assert.doesNotMatch(worker, /sleep\s+infinity|tail\s+-f|placeholder|no-op/i);

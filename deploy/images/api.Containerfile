@@ -11,6 +11,7 @@ WORKDIR /app
 COPY --from=build --chown=65532:65532 /src/target/release/gpsart-api /app/gpsart-api
 COPY --chown=65532:65532 ops/routing /app/ops/routing
 COPY --chown=65532:65532 crates/gpsart-routing/data /app/crates/gpsart-routing/data
+COPY --chown=65532:65532 scripts/extract-osm-pedestrian-pilot-snapshot.mjs /app/scripts/extract-osm-pedestrian-pilot-snapshot.mjs
 USER 65532:65532
 EXPOSE 8080
 STOPSIGNAL SIGTERM
