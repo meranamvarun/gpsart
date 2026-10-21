@@ -7,6 +7,8 @@ COPY index.html login.html routes.html saved.html screens.html tsconfig.json vit
 COPY public ./public
 COPY scripts ./scripts
 COPY src ./src
+COPY worker ./worker
+COPY .openai ./.openai
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.29.5-alpine@sha256:42a7d7f2ee23e9f5a1dcdf3647ba5c585bbd18f79e79cd817e70e8cd61c55779
