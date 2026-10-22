@@ -164,7 +164,12 @@ function failure(screen: "no-match" | "coverage" | "error", state: AppState, wor
   } else {
     request = workflow?.request ?? attempt?.request ?? state.request;
   }
-  const fallback: OutcomePresentation = screen === "coverage" ? {
+  const sessionUnavailable = workflow?.phase === "error" && workflow.issue === "csrf_unavailable";
+  const fallback: OutcomePresentation = sessionUnavailable ? {
+    title: "Your private guest session is not ready.",
+    explanation: "No authorized request was sent. Reload the page to create a new private guest session, then try again.",
+    suggestions: ["Reload the page before resubmitting the unchanged request."], feasibility: "not_evaluated", retryable: false,
+  } : screen === "coverage" ? {
     title: "Coverage or road access was not verified.",
     explanation: "The service did not accept this exact start for route generation.",
     suggestions: ["Review the exact start and activity profile."], feasibility: "not_evaluated", retryable: false,

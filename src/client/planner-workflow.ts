@@ -121,7 +121,7 @@ export class PlannerWorkflow {
   private pendingCreation: PendingCreation | null = null;
 
   constructor(dependencies: Dependencies) {
-    this.fetcher = dependencies.fetcher ?? globalThis.fetch;
+    this.fetcher = dependencies.fetcher ?? globalThis.fetch.bind(globalThis);
     this.storage = dependencies.storage ?? globalThis.sessionStorage;
     this.csrfToken = dependencies.csrfToken;
     this.currentRevision = dependencies.currentRevision;
@@ -272,7 +272,7 @@ export class PlannerWorkflow {
     const payload = await responseJson(response);
     const terminalState = decodeCancellation(payload);
     if (!response.ok || !terminalState) {
-      this.update({ ...this.value, phase: "error", issue: decodeApiError(payload) ?? decodeRouteJobError(payload) ?? "invalid_response" });
+      this.update({ ...this.value, phase: "error", issue: decodeWorkflowApiIssue(payload) ?? decodeRouteJobError(payload) ?? "invalid_response" });
       return;
     }
     if (terminalState !== "cancelled") {
@@ -318,7 +318,7 @@ export class PlannerWorkflow {
     const payload = await responseJson(response);
     if (!this.fenceAsyncStep(token, request.revision)) return;
     if (!response.ok) {
-      this.update({ ...this.value, phase: "error", issue: decodeStartOutcome(payload) ?? "invalid_response" });
+      this.update({ ...this.value, phase: "error", issue: decodeWorkflowApiIssue(payload) ?? decodeStartOutcome(payload) ?? "invalid_response" });
       return;
     }
     const resolution = decodeStartResolution(payload);
@@ -348,7 +348,7 @@ export class PlannerWorkflow {
       const confirmationPayload = await responseJson(confirmation);
       if (!this.fenceAsyncStep(token, request.revision)) return;
       if (!confirmation.ok) {
-        this.update({ ...this.value, phase: "error", issue: decodeApiError(confirmationPayload) ?? decodeStartOutcome(confirmationPayload) ?? "invalid_response" });
+        this.update({ ...this.value, phase: "error", issue: decodeWorkflowApiIssue(confirmationPayload) ?? decodeStartOutcome(confirmationPayload) ?? "invalid_response" });
         return;
       }
       const confirmed = decodeConfirmedStart(confirmationPayload);
@@ -430,7 +430,7 @@ export class PlannerWorkflow {
     if (!creation.ok) {
       if (creation.status < 500) this.removePendingCreation();
       if (token === this.generation) {
-        this.update({ ...this.value, phase: "error", issue: decodeRouteJobError(creationPayload) ?? "invalid_response" });
+        this.update({ ...this.value, phase: "error", issue: decodeWorkflowApiIssue(creationPayload) ?? decodeRouteJobError(creationPayload) ?? "invalid_response" });
       }
       return;
     }
@@ -508,7 +508,7 @@ export class PlannerWorkflow {
         this.pollDelay = Math.min(MAX_POLL_MILLISECONDS, this.pollDelay * 2);
         this.schedulePoll(token, this.pollDelay);
       } else {
-        this.update({ ...this.value, phase: "error", issue: decodeApiError(payload) ?? decodeRouteJobError(payload) ?? "invalid_response" });
+        this.update({ ...this.value, phase: "error", issue: decodeWorkflowApiIssue(payload) ?? decodeRouteJobError(payload) ?? "invalid_response" });
       }
       return;
     }
@@ -584,6 +584,11 @@ function emptySnapshot(): PlannerWorkflowSnapshot {
     phase: "idle", request: null, proposedStart: null, resolution: null,
     jobId: null, status: null, previousStatus: null, issue: null,
   });
+}
+
+function decodeWorkflowApiIssue(value: unknown): ApiErrorCode | "csrf_unavailable" | undefined {
+  const code = decodeApiError(value);
+  return code === "authentication_required" || code === "request_forbidden" ? "csrf_unavailable" : code;
 }
 
 function profile(activity: RouteRequest["activity"]): { activity: string; profile_version: ProfileVersion } {

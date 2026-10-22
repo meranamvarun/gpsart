@@ -11,6 +11,7 @@
     "test:visual-shell": "node --test tests/visual-shell-regression.test.mjs",
     "test:a11y": "npm run build && node scripts/accessibility-audit.mjs",
     "test:unit": "tsx --test tests/**/*.test.ts",
+    "test:planner-browser": "npm run build && node --test tests/planner-browser-regression.test.mjs",
     "rust:build": "node scripts/cargo.mjs build --workspace",
     "rust:test": "node scripts/cargo.mjs test --workspace -- --test-threads=1",
     "rust:fmt": "node scripts/cargo.mjs fmt --all -- --check",

@@ -7,7 +7,7 @@ import {
   PlannerWorkflow,
   type StoragePort,
 } from "../src/client/planner-workflow.ts";
-import { parseManualCoordinates } from "../src/domain/start-selection.ts";
+import { fromMapSelection, parseManualCoordinates } from "../src/domain/start-selection.ts";
 import type { RouteRequest } from "../src/domain/planner.ts";
 
 class MemoryStorage implements StoragePort {
@@ -69,6 +69,82 @@ function activeStatus(revision = 1) {
     poll_after_seconds: 1,
   };
 }
+
+test("the default browser fetch receiver submits manual and map starts", async () => {
+  const originalFetch = globalThis.fetch;
+  const starts = [
+    parseManualCoordinates(request.start)!,
+    fromMapSelection({ latitude: 0.6, longitude: -150.35 })!,
+  ];
+
+  try {
+    for (const start of starts) {
+      let calls = 0;
+      globalThis.fetch = function receiverSensitiveFetch(this: unknown, url): Promise<Response> {
+        assert.equal(this, globalThis, "browser fetch must be called with the global receiver");
+        calls += 1;
+        assert.equal(String(url), "/api/v1/starts/resolve");
+        return Promise.resolve(json({ ...resolution, requested_point: start.point }));
+      } as typeof fetch;
+      const workflow = new PlannerWorkflow({
+        storage: new MemoryStorage(),
+        csrfToken: () => "csrf",
+        currentRevision: () => request.revision,
+      });
+
+      await workflow.submit({ ...request, start: start.label }, start);
+
+      assert.equal(calls, 1);
+      assert.equal(workflow.snapshot.phase, "awaiting_confirmation");
+      assert.deepEqual(workflow.snapshot.resolution?.requested_point, start.point);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an unavailable CSRF token sends no start-resolution request", async () => {
+  let fetched = false;
+  const workflow = new PlannerWorkflow({
+    fetcher: async () => {
+      fetched = true;
+      throw new Error("an unauthorized request must not be attempted");
+    },
+    storage: new MemoryStorage(),
+    csrfToken: () => null,
+    currentRevision: () => request.revision,
+  });
+
+  await workflow.submit(request, proposed);
+
+  assert.equal(fetched, false);
+  assert.equal(workflow.snapshot.phase, "error");
+  assert.equal(workflow.snapshot.issue, "csrf_unavailable");
+});
+
+test("rejected session credentials produce the actionable session issue", async () => {
+  for (const [status, code] of [
+    [401, "authentication_required"],
+    [403, "request_forbidden"],
+  ] as const) {
+    let calls = 0;
+    const workflow = new PlannerWorkflow({
+      fetcher: async () => {
+        calls += 1;
+        return json({ code }, status);
+      },
+      storage: new MemoryStorage(),
+      csrfToken: () => "stale-csrf",
+      currentRevision: () => request.revision,
+    });
+
+    await workflow.submit(request, proposed);
+
+    assert.equal(calls, 1);
+    assert.equal(workflow.snapshot.phase, "error");
+    assert.equal(workflow.snapshot.issue, "csrf_unavailable");
+  }
+});
 
 test("a job cannot start before explicit confirmation and duplicate submission shares one logical request", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];

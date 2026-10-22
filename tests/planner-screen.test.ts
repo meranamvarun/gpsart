@@ -49,6 +49,29 @@ test("generation progress is labelled with the active job request, not a newer e
   assert.match(markup, /earlier request is still active/i);
 });
 
+test("an unavailable guest session gives an actionable error", () => {
+  const state = initialState();
+  const workflow: PlannerWorkflowSnapshot = {
+    phase: "error",
+    request: { ...state.request, start: "0.50000, -150.25000", revision: 1 },
+    proposedStart: {
+      point: { latitude: 0.5, longitude: -150.25 },
+      source: "manual",
+      label: "0.50000, -150.25000",
+    },
+    resolution: null,
+    jobId: null,
+    status: null,
+    previousStatus: null,
+    issue: "csrf_unavailable",
+  };
+
+  const markup = renderScreen("error", state, { kind: "available", routes: [], errors: [] }, workflow);
+
+  assert.match(markup, /private guest session is not ready/i);
+  assert.match(markup, /reload/i);
+});
+
 test("catalogue exposes selected state and explains disabled designs without changing the form", () => {
   const original = { ...initialState(), request: { ...initialState().request, start: "12.97, 77.59", activity: "Walking" as const, distanceKm: 8 } };
   const state = acceptCatalogueLoad(original, { kind: "available", designs: [{
